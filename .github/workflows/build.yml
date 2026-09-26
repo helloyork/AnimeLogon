@@ -1,0 +1,30 @@
+name: Build
+
+on:
+  push:
+    branches: [master, develop]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.arch }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x64, arm64]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Configure
+        run: cmake --preset ${{ matrix.arch }} -DANIMELOGON_BUILD=${{ github.run_number }}
+
+      - name: Build
+        run: cmake --build --preset ${{ matrix.arch }}-release

@@ -1,0 +1,5 @@
+# LF in the repository, CRLF in working trees.
+* text=auto eol=crlf
+
+*.ico binary
+*.png binary

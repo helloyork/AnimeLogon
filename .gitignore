@@ -1,0 +1,27 @@
+# Build output
+/build/
+/out/
+.vs/
+CMakeUserPresets.json
+
+# Media never enters this repository.
+*.mp4
+*.mkv
+*.mov
+*.webm
+*.avi
+*.m4v
+*.wav
+*.flac
+*.mp3
+*.png
+*.jpg
+*.jpeg
+*.bmp
+*.gif
+*.webp
+
+# Editors and OS
+.vscode/
+Thumbs.db
+desktop.ini
