@@ -23,6 +23,19 @@ TEST(ClockWeekdayPicture) {
     CHECK(WeekdayDatePicture(L"en-GB", L"'dddd' d MMMM yyyy") == L"dddd, 'dddd' d MMMM yyyy");
 }
 
+TEST(ClockWithoutYear) {
+    CHECK(WithoutYearPicture(L"dddd, MMMM d, yyyy") == L"dddd, MMMM d");
+    CHECK(WithoutYearPicture(L"yyyy'年'M'月'd'日'") == L"M'月'd'日'");
+    CHECK(WithoutYearPicture(L"yyyy'年'M'月'd'日' dddd") == L"M'月'd'日' dddd");
+    CHECK(WithoutYearPicture(L"yyyy'년' M'월' d'일' dddd") == L"M'월' d'일' dddd");
+    CHECK(WithoutYearPicture(L"dddd, d. MMMM yyyy") == L"dddd, d. MMMM");
+    CHECK(WithoutYearPicture(L"dddd d MMMM yyyy") == L"dddd d MMMM");
+    CHECK(WithoutYearPicture(L"dddd, d' de 'MMMM' de 'yyyy") == L"dddd, d' de 'MMMM");
+    CHECK(WithoutYearPicture(L"d MMMM yyyy 'г.'") == L"d MMMM");
+    CHECK(WithoutYearPicture(L"dddd, MMMM d") == L"dddd, MMMM d");
+    CHECK(WithoutYearPicture(L"'yyyy' d MMMM") == L"'yyyy' d MMMM");
+}
+
 TEST(ClockRegionalFormatRoundTrip) {
     RegionalFormat f{L"zh-CN", L"H:mm", L"yyyy'年'M'月'd'日'"}, g;
     CHECK(ParseRegionalFormat(SerializeRegionalFormat(f), &g));
@@ -36,30 +49,59 @@ TEST(ClockSettingsRoundTrip) {
     Settings s;
     s.clock.enabled = false;
     s.clock.displays = ClockDisplays::Primary;
-    s.clock.anchor = ClockAnchor::BottomRight;
-    s.clock.size = ClockSize::Huge;
-    s.clock.font = L"Microsoft YaHei UI";
-    s.clock.color = 0x12ABEF;
-    s.clock.date = DateStyle::Weekday;
-    s.clock.hour24 = true;
-    s.clock.language = L"ja-JP";
+    s.clock.skin = L"0123456789abcdef";
+    s.clock.values[L"default"][L"color"] = L"#12ABEF";
+    s.clock.values[L"0123456789abcdef"][L"font"] = L"Microsoft YaHei UI";
     std::vector<std::wstring> problems;
     const Settings t = ParseSettings(SerializeSettings(s), &problems);
     CHECK(problems.empty());
-    CHECK(!t.clock.enabled && t.clock.displays == ClockDisplays::Primary);
-    CHECK(t.clock.anchor == ClockAnchor::BottomRight && t.clock.size == ClockSize::Huge);
-    CHECK(t.clock.font == L"Microsoft YaHei UI" && t.clock.color == 0x12ABEF);
-    CHECK(t.clock.date == DateStyle::Weekday && t.clock.hour24 && t.clock.language == L"ja-JP");
+    CHECK(!t.clock.enabled && t.clock.displays == ClockDisplays::Primary && t.clock.skin == L"0123456789abcdef");
+    CHECK(t.clock.ValuesFor(L"default").at(L"color") == L"#12ABEF");
+    CHECK(t.clock.ValuesFor(L"0123456789abcdef").at(L"font") == L"Microsoft YaHei UI");
+    CHECK(t.clock.ValuesFor(L"fedcba9876543210").empty());
 }
 
 TEST(ClockSettingsDefaultsAndBadValues) {
     const Settings d;
-    CHECK(d.clock.enabled && d.clock.displays == ClockDisplays::Auto && d.clock.font.empty());
+    CHECK(d.clock.enabled && d.clock.displays == ClockDisplays::Auto && d.clock.skin == L"default");
     std::vector<std::wstring> problems;
-    const Settings t = ParseSettings(L"clock_color = red\r\nclock_language = fr-FR\r\nclock_font = a\\b\r\n"
-                                     L"clock_position = middle\r\n",
+    const Settings t = ParseSettings(L"skin = ../x\r\nskin.default = 1\r\nskin.default.Color = #FFFFFF\r\n"
+                                     L"skin.nothex.color = #FFFFFF\r\nskin.default.color = a\x01\r\n",
                                      &problems);
-    CHECK(problems.size() == 4);
-    CHECK(t.clock.color == 0xFFFFFF && t.clock.language.empty() && t.clock.font.empty());
-    CHECK(t.clock.anchor == ClockAnchor::Top);
+    CHECK(problems.size() == 5);
+    CHECK(t.clock.skin == L"default" && t.clock.values.empty());
+}
+
+TEST(ClockTimePictures) {
+    CHECK(WithoutMarkerPicture(L"h:mm tt") == L"h:mm");
+    CHECK(WithoutMarkerPicture(L"tt h:mm") == L"h:mm");
+    CHECK(WithoutMarkerPicture(L"H:mm") == L"H:mm");
+    CHECK(To12HourPicture(L"HH:mm") == L"h:mm");
+    CHECK(To12HourPicture(L"H.mm") == L"h.mm");
+    CHECK(To12HourPicture(L"'H' H:mm") == L"'H' h:mm");
+    CHECK(HasMarker(L"h:mm tt") && !HasMarker(L"H:mm") && !HasMarker(L"'t' H:mm"));
+}
+
+TEST(ClockFillsText) {
+    SYSTEMTIME t{};
+    t.wYear = 2026;
+    t.wMonth = 10;
+    t.wDay = 2;
+    t.wDayOfWeek = 5;
+    t.wHour = 22;
+    t.wMinute = 8;
+    const RegionalFormat us{L"en-US", L"h:mm tt", L"dddd, MMMM d, yyyy"};
+    CHECK(FillText(L"{time}", us, skin::Hours::Auto, t) == L"10:08");
+    CHECK(FillText(L"{ampm}", us, skin::Hours::Auto, t) == L"PM");
+    CHECK(FillText(L"{time}", us, skin::Hours::H24, t) == L"22:08");
+    CHECK(FillText(L"{ampm}", us, skin::Hours::H24, t).empty());
+    CHECK(FillText(L"{date}", us, skin::Hours::Auto, t) == L"Friday, October 2");
+    CHECK(FillText(L"{date.long}", us, skin::Hours::Auto, t) == L"Friday, October 2, 2026");
+    CHECK(FillText(L"{day} {month} {year} ({weekday})", us, skin::Hours::Auto, t) == L"2 October 2026 (Friday)");
+    const RegionalFormat cn{L"zh-CN", L"H:mm", L"yyyy'\x5E74'M'\x6708'd'\x65E5'"};
+    CHECK(FillText(L"{time}", cn, skin::Hours::Auto, t) == L"22:08");
+    CHECK(FillText(L"{ampm}", cn, skin::Hours::Auto, t).empty());
+    CHECK(FillText(L"{time}", cn, skin::Hours::H12, t) == L"10:08");
+    CHECK(FillText(L"{date}", cn, skin::Hours::Auto, t) == L"10\x6708" L"2\x65E5 \x661F\x671F\x4E94");
+    CHECK(FormatFor(cn, L"zh-CN").shortTime == L"H:mm" && FormatFor(cn, L"en-US").locale == L"en-US");
 }

@@ -1,6 +1,9 @@
 #include "animelogon/clock.h"
 
+#include <algorithm>
 #include <cwchar>
+#include <cwctype>
+#include <vector>
 
 #include "animelogon/text.h"
 
@@ -16,11 +19,7 @@ bool ParseName(const std::wstring &text, const wchar_t *const (&names)[N], E *ou
     return false;
 }
 
-const wchar_t *const kAnchors[] = {L"top-left", L"top", L"top-right", L"left", L"center",
-                                   L"right", L"bottom-left", L"bottom", L"bottom-right"};
-const wchar_t *const kSizes[] = {L"small", L"medium", L"large", L"huge"};
 const wchar_t *const kDisplays[] = {L"auto", L"primary", L"all"};
-const wchar_t *const kDates[] = {L"none", L"long", L"weekday"};
 
 // Calls `visit(i)` for each character of `picture` outside a quoted literal.
 template <typename F>
@@ -44,6 +43,41 @@ bool IsPictureText(const std::wstring &s) {
 
 std::wstring Language(const std::wstring &locale) { return locale.substr(0, locale.find(L'-')); }
 
+// zh-CN and zh-TW are different languages here; en-US and en-GB are not.
+bool SameLanguage(const std::wstring &a, const std::wstring &b) {
+    const std::wstring la = Language(a), lb = Language(b);
+    if (la != lb) return false;
+    if (la != L"zh") return true;
+    auto traditional = [](const std::wstring &l) {
+        return l == L"zh-TW" || l == L"zh-HK" || l == L"zh-MO" || l.find(L"Hant") != std::wstring::npos;
+    };
+    return traditional(a) == traditional(b);
+}
+
+// Drops the AM/PM marker and the spaces that set it apart.
+std::wstring DropMarker(const std::wstring &picture) {
+    std::wstring marked(picture.size(), L' ');
+    ForEachUnquoted(picture, [&](size_t i) {
+        if (picture[i] == L't') marked[i] = L't';
+    });
+    std::wstring result;
+    for (size_t i = 0; i < picture.size(); ++i)
+        if (marked[i] != L't') result += picture[i];
+    size_t a = 0, b = result.size();
+    while (a < b && result[a] == L' ') ++a;
+    while (b > a && result[b - 1] == L' ') --b;
+    result = result.substr(a, b - a);
+    for (size_t i = result.find(L"  "); i != std::wstring::npos; i = result.find(L"  ")) result.erase(i, 1);
+    return result;
+}
+
+std::wstring Formatted(const std::wstring &locale, const SYSTEMTIME &t, const std::wstring &picture, bool date) {
+    wchar_t buf[160] = L"";
+    const int n = date ? GetDateFormatEx(locale.c_str(), 0, &t, picture.c_str(), buf, ARRAYSIZE(buf), nullptr)
+                       : GetTimeFormatEx(locale.c_str(), 0, &t, picture.c_str(), buf, ARRAYSIZE(buf));
+    return n > 0 ? buf : L"";
+}
+
 }  // namespace
 
 bool IsClockLanguage(const std::wstring &locale) {
@@ -60,23 +94,40 @@ bool IsFontFamilyName(const std::wstring &name) {
     return Trim(name).size() == name.size();
 }
 
+bool HasMarker(const std::wstring &picture) {
+    bool marked = false;
+    ForEachUnquoted(picture, [&](size_t i) { marked = marked || picture[i] == L't'; });
+    return marked;
+}
+
+std::wstring WithoutMarkerPicture(const std::wstring &picture) {
+    const std::wstring result = DropMarker(picture);
+    return result.empty() ? L"h:mm" : result;
+}
+
 std::wstring To24HourPicture(const std::wstring &picture) {
     std::wstring out = picture;
-    std::wstring marked(out.size(), L' ');
     ForEachUnquoted(out, [&](size_t i) {
         if (out[i] == L'h') out[i] = L'H';
-        else if (out[i] == L't') marked[i] = L't';
     });
-    // Drop the AM/PM marker and the spaces that set it apart.
-    std::wstring result;
-    for (size_t i = 0; i < out.size(); ++i)
-        if (marked[i] != L't') result += out[i];
-    size_t a = 0, b = result.size();
-    while (a < b && result[a] == L' ') ++a;
-    while (b > a && result[b - 1] == L' ') --b;
-    result = result.substr(a, b - a);
-    for (size_t i = result.find(L"  "); i != std::wstring::npos; i = result.find(L"  ")) result.erase(i, 1);
+    const std::wstring result = DropMarker(out);
     return result.empty() ? L"HH:mm" : result;
+}
+
+std::wstring To12HourPicture(const std::wstring &picture) {
+    std::wstring out;
+    bool quoted = false;
+    for (size_t i = 0; i < picture.size(); ++i) {
+        const wchar_t c = picture[i];
+        if (c == L'\'') quoted = !quoted;
+        if (quoted || c != L'H') {
+            out += c;
+        } else {
+            out += L'h';  // HH becomes h too: 12-hour times are not zero-padded
+            if (i + 1 < picture.size() && picture[i + 1] == L'H') ++i;
+        }
+    }
+    return out;
 }
 
 std::wstring WeekdayDatePicture(const std::wstring &locale, const std::wstring &longDate) {
@@ -89,6 +140,52 @@ std::wstring WeekdayDatePicture(const std::wstring &locale, const std::wstring &
     // Chinese, Japanese and Korean put the weekday after the date.
     if (lang == L"zh" || lang == L"ja" || lang == L"ko") return longDate + L" dddd";
     return L"dddd, " + longDate;
+}
+
+std::wstring WithoutYearPicture(const std::wstring &picture) {
+    // Splits the picture into quoted literals, runs of one format letter, and everything else.
+    enum Kind { Literal, Field, Separator };
+    struct Piece {
+        std::wstring text;
+        Kind kind;
+    };
+    std::vector<Piece> pieces;
+    for (size_t i = 0; i < picture.size();) {
+        size_t j = i + 1;
+        Kind kind = Separator;
+        if (picture[i] == L'\'') {
+            while (j < picture.size() && picture[j] != L'\'') ++j;
+            j = std::min(j + 1, picture.size());
+            kind = Literal;
+        } else if (std::iswalpha(picture[i])) {
+            while (j < picture.size() && picture[j] == picture[i]) ++j;
+            kind = Field;
+        } else {
+            while (j < picture.size() && picture[j] != L'\'' && !std::iswalpha(picture[j])) ++j;
+        }
+        pieces.push_back({picture.substr(i, j - i), kind});
+        i = j;
+    }
+    size_t year = pieces.size();
+    for (size_t i = 0; i < pieces.size(); ++i)
+        if (pieces[i].kind == Field && pieces[i].text[0] == L'y') year = i;
+    if (year == pieces.size()) return picture;
+
+    // The year's own word sits next to it: 2026年 and 2026년 after it, "de 2026" before it.
+    size_t from = year, to = year + 1;
+    if (to < pieces.size() && pieces[to].kind == Literal) ++to;
+    const bool last = std::all_of(pieces.begin() + (ptrdiff_t)to, pieces.end(),
+                                  [](const Piece &p) { return p.kind != Field; });
+    if (last) {
+        to = pieces.size();  // trailing words such as "г." go with it
+        while (from > 0 && pieces[from - 1].kind != Field) --from;
+    } else {
+        while (to < pieces.size() && pieces[to].kind == Separator) ++to;
+    }
+    std::wstring out;
+    for (size_t i = 0; i < pieces.size(); ++i)
+        if (i < from || i >= to) out += pieces[i].text;
+    return std::wstring(Trim(out));
 }
 
 std::string SerializeRegionalFormat(const RegionalFormat &f) {
@@ -117,14 +214,59 @@ bool ParseRegionalFormat(const std::string &text, RegionalFormat *f) {
     return true;
 }
 
-const wchar_t *ToString(ClockAnchor anchor) { return kAnchors[(int)anchor]; }
-const wchar_t *ToString(ClockSize size) { return kSizes[(int)size]; }
+RegionalFormat StandardFormat(const std::wstring &locale) {
+    auto info = [&](LCTYPE type) {
+        wchar_t buf[128] = L"";
+        return GetLocaleInfoEx(locale.c_str(), type | LOCALE_NOUSEROVERRIDE, buf, ARRAYSIZE(buf)) ? std::wstring(buf)
+                                                                                               : std::wstring();
+    };
+    return {locale, info(LOCALE_SSHORTTIME), info(LOCALE_SLONGDATE)};
+}
+
+RegionalFormat FormatFor(const RegionalFormat &user, const std::wstring &locale) {
+    if (locale.empty() || SameLanguage(locale, user.locale) || !IsValidLocaleName(locale.c_str())) return user;
+    return StandardFormat(locale);
+}
+
+std::wstring FillText(const std::wstring &text, const RegionalFormat &format, skin::Hours hours, const SYSTEMTIME &t) {
+    const std::wstring &time = format.shortTime;
+    const bool marker = hours == skin::Hours::H12 || (hours == skin::Hours::Auto && HasMarker(time));
+    std::wstring out;
+    for (size_t i = 0; i < text.size(); ++i) {
+        const size_t end = text[i] == L'{' ? text.find(L'}', i) : std::wstring::npos;
+        if (end == std::wstring::npos) {
+            out += text[i];
+            continue;
+        }
+        const std::wstring name = text.substr(i + 1, end - i - 1);
+        i = end;
+        if (name == L"time")
+            out += Formatted(format.locale, t,
+                             hours == skin::Hours::H24   ? To24HourPicture(time)
+                             : hours == skin::Hours::H12 ? WithoutMarkerPicture(To12HourPicture(time))
+                                                         : WithoutMarkerPicture(time),
+                             false);
+        else if (name == L"ampm" && marker) out += Formatted(format.locale, t, L"tt", false);
+        else if (name == L"date")
+            out += Formatted(format.locale, t, WithoutYearPicture(WeekdayDatePicture(format.locale, format.longDate)),
+                             true);
+        else if (name == L"date.long") out += Formatted(format.locale, t, format.longDate, true);
+        else if (name == L"weekday") out += Formatted(format.locale, t, L"dddd", true);
+        else if (name == L"month") out += Formatted(format.locale, t, L"MMMM", true);
+        else if (name == L"day") out += Formatted(format.locale, t, L"d", true);
+        else if (name == L"year") out += Formatted(format.locale, t, L"yyyy", true);
+    }
+    return out;
+}
+
+const skin::Values &ClockSettings::ValuesFor(const std::wstring &skinId) const {
+    static const skin::Values none;
+    const auto it = values.find(skinId);
+    return it == values.end() ? none : it->second;
+}
+
 const wchar_t *ToString(ClockDisplays displays) { return kDisplays[(int)displays]; }
-const wchar_t *ToString(DateStyle style) { return kDates[(int)style]; }
-bool Parse(const std::wstring &text, ClockAnchor *out) { return ParseName(text, kAnchors, out); }
-bool Parse(const std::wstring &text, ClockSize *out) { return ParseName(text, kSizes, out); }
 bool Parse(const std::wstring &text, ClockDisplays *out) { return ParseName(text, kDisplays, out); }
-bool Parse(const std::wstring &text, DateStyle *out) { return ParseName(text, kDates, out); }
 
 bool ParseColor(const std::wstring &text, uint32_t *rgb) {
     if (text.size() != 7 || text[0] != L'#') return false;

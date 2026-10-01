@@ -26,6 +26,7 @@
 #include "animelogon/paths.h"
 #include "animelogon/secure.h"
 #include "animelogon/settings.h"
+#include "animelogon/skins.h"
 
 #include "audio.h"
 #include "bake.h"
@@ -343,7 +344,16 @@ LiveEnd GoLiveOnce(Presenter &presenter, const Options &opt, HINSTANCE instance)
     ClockFace clock;
     bool anyClock = false;
     for (const Presenter::Target &t : targets) anyClock = anyClock || t.clock;
-    const bool withClock = anyClock && clock.Init(presenter.device(), settings.clock, clocktext::Resolve(settings.clock));
+    bool withClock = false;
+    if (anyClock) {
+        std::wstring refused;
+        const animelogon::skin::Skin skin = animelogon::LoadSkin(settings.clock.skin, &refused);
+        if (!refused.empty())
+            ALOG(L"clock: skin %s refused (%s) -- using the default", settings.clock.skin.c_str(), refused.c_str());
+        const std::wstring &id = refused.empty() ? settings.clock.skin : std::wstring(L"default");
+        withClock = clock.Init(presenter.device(), animelogon::skin::Resolve(skin, settings.clock.ValuesFor(id)),
+                               clocktext::UserFormat());
+    }
 
     if (!presenter.CreateWindows(targets, kWindowClass, instance)) {
         ALOG(L"overlay: could not create the windows");

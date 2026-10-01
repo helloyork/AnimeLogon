@@ -17,6 +17,11 @@ enum Code { kOk = 0, kFailed = 1, kDeclined = 2, kBadArgs = 3, kNotElevated = 4 
 int ImportInto(const std::wstring &id, const std::wstring &tempDir);
 // Elevated. Removes videos/<id>.
 int Remove(const std::wstring &id);
+// Elevated. Parses `tempDir`\skin.xml again (the window has already checked it) and writes it,
+// normalised, to skins/<id>/skin.xml.
+int ImportSkin(const std::wstring &id, const std::wstring &tempDir);
+// Elevated. Removes skins/<id>.
+int RemoveSkin(const std::wstring &id);
 // Elevated. Turns the logon screen video on (installs and starts the service) or off.
 int SwitchOn();
 int SwitchOff();

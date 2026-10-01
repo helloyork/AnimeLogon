@@ -11,6 +11,8 @@
 #include "animelogon/machine.h"
 #include "animelogon/paths.h"
 #include "animelogon/secure.h"
+#include "animelogon/skin.h"
+#include "animelogon/skins.h"
 #include "animelogon/text.h"
 
 using namespace animelogon;
@@ -128,6 +130,40 @@ int ImportInto(const std::wstring &id, const std::wstring &tempDir) {
 int Remove(const std::wstring &id) {
     if (!IsVideoId(id)) return kBadArgs;
     return secure::RemoveTree(VideoDir(id)) == ERROR_SUCCESS ? kOk : kFailed;
+}
+
+int ImportSkin(const std::wstring &id, const std::wstring &tempDir) {
+    if (!skin::IsSkinId(id) || id == L"default" || !IsImportDir(tempDir)) return kBadArgs;
+    std::wstring why;
+    if (!secure::IsTrustedDirectory(paths::DataDir(), &why)) {
+        ALOG(L"skin: data directory %s", why.c_str());
+        return kFailed;
+    }
+    const Handle file(OpenSource(tempDir + L"\\skin.xml"));
+    std::vector<uint8_t> bytes;
+    skin::Skin parsed;
+    if (!file || !secure::ReadHandleBytes(file.get(), &bytes, kMaxInfoBytes) ||
+        !skin::Parse(std::string_view((const char *)bytes.data(), bytes.size()), &parsed, &why)) {
+        ALOG(L"skin: skin.xml refused: %s", why.c_str());
+        return kFailed;
+    }
+    const std::string text = skin::Normalize(parsed);
+    const std::wstring dir = SkinDir(id);
+    if (secure::SecureDirectory(SkinsDir()) != ERROR_SUCCESS) return kFailed;
+    if (GetFileAttributesW(dir.c_str()) != INVALID_FILE_ATTRIBUTES) return kFailed;  // ids are never reused
+    if (secure::SecureDirectory(dir) != ERROR_SUCCESS) return kFailed;
+    const DWORD e = secure::WriteBytes(SkinFilePath(id), text.data(), text.size());
+    if (e != ERROR_SUCCESS) {
+        ALOG(L"skin: writing %s failed (%lu)", dir.c_str(), e);
+        secure::RemoveTree(dir);
+        return kFailed;
+    }
+    return kOk;
+}
+
+int RemoveSkin(const std::wstring &id) {
+    if (!skin::IsSkinId(id) || id == L"default") return kBadArgs;
+    return secure::RemoveTree(SkinDir(id)) == ERROR_SUCCESS ? kOk : kFailed;
 }
 
 int SwitchOn() {

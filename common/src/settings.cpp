@@ -18,6 +18,7 @@ constexpr size_t kMaxSettingsBytes = 256 * 1024;
 constexpr int kReadAttempts = 5;
 constexpr DWORD kRetryMs = 50;
 constexpr const wchar_t *kScreenPrefix = L"screen.";
+constexpr const wchar_t *kSkinPrefix = L"skin.";
 
 bool ParseBool(std::wstring_view v, bool *out) {
     if (EqualsNoCase(v, L"true") || v == L"1") return *out = true, true;
@@ -29,6 +30,13 @@ bool ParseVolume(std::wstring_view v, int *out) {
     long long n = 0;
     if (!ParseInt(v, &n) || n < 0 || n > 100) return false;
     *out = (int)n;
+    return true;
+}
+
+bool IsValueText(std::wstring_view value) {
+    if (value.size() > 128) return false;
+    for (wchar_t c : value)
+        if (c < 0x20 || c == 0x7F) return false;
     return true;
 }
 
@@ -116,24 +124,16 @@ Settings ParseSettings(const std::wstring &text, std::vector<std::wstring> *prob
             ok = ParseBool(value, &s.clock.enabled);
         } else if (key == L"clock_displays") {
             ok = Parse(std::wstring(value), &s.clock.displays);
-        } else if (key == L"clock_position") {
-            ok = Parse(std::wstring(value), &s.clock.anchor);
-        } else if (key == L"clock_size") {
-            ok = Parse(std::wstring(value), &s.clock.size);
-        } else if (key == L"clock_font") {
-            const bool automatic = value.empty() || EqualsNoCase(value, L"auto");
-            ok = automatic || IsFontFamilyName(std::wstring(value));
-            if (ok) s.clock.font = automatic ? std::wstring() : std::wstring(value);
-        } else if (key == L"clock_color") {
-            ok = ParseColor(std::wstring(value), &s.clock.color);
-        } else if (key == L"clock_date") {
-            ok = Parse(std::wstring(value), &s.clock.date);
-        } else if (key == L"clock_24_hour") {
-            ok = ParseBool(value, &s.clock.hour24);
-        } else if (key == L"clock_language") {
-            const bool automatic = EqualsNoCase(value, L"auto");
-            ok = automatic || IsClockLanguage(std::wstring(value));
-            if (ok) s.clock.language = automatic ? std::wstring() : std::wstring(value);
+        } else if (key == L"skin") {
+            ok = skin::IsSkinId(std::wstring(value));
+            if (ok) s.clock.skin = value;
+        } else if (key.substr(0, wcslen(kSkinPrefix)) == kSkinPrefix) {
+            // skin.<skin id>.<setting id>: checked against the skin's own settings when it is drawn.
+            const std::wstring_view rest = key.substr(wcslen(kSkinPrefix));
+            const size_t dot = rest.find(L'.');
+            ok = dot != std::wstring_view::npos && skin::IsSkinId(std::wstring(rest.substr(0, dot))) &&
+                 skin::IsSettingId(std::wstring(rest.substr(dot + 1))) && IsValueText(value);
+            if (ok) s.clock.values[std::wstring(rest.substr(0, dot))][std::wstring(rest.substr(dot + 1))] = value;
         } else {
             if (problems) problems->push_back(Format(L"line %zu: unknown key '%.*s'", lineNo, (int)key.size(), key.data()));
             continue;
@@ -158,13 +158,9 @@ std::wstring SerializeSettings(const Settings &s) {
     const ClockSettings &c = s.clock;
     out += L"clock = " + std::wstring(c.enabled ? L"true" : L"false") + L"\r\n";
     out += L"clock_displays = " + std::wstring(ToString(c.displays)) + L"\r\n";
-    out += L"clock_position = " + std::wstring(ToString(c.anchor)) + L"\r\n";
-    out += L"clock_size = " + std::wstring(ToString(c.size)) + L"\r\n";
-    out += L"clock_font = " + (c.font.empty() ? std::wstring(L"auto") : c.font) + L"\r\n";
-    out += L"clock_color = " + FormatColor(c.color) + L"\r\n";
-    out += L"clock_date = " + std::wstring(ToString(c.date)) + L"\r\n";
-    out += L"clock_24_hour = " + std::wstring(c.hour24 ? L"true" : L"false") + L"\r\n";
-    out += L"clock_language = " + (c.language.empty() ? std::wstring(L"auto") : c.language) + L"\r\n";
+    out += L"skin = " + c.skin + L"\r\n";
+    for (const auto &[id, values] : c.values)
+        for (const auto &[setting, value] : values) out += kSkinPrefix + id + L"." + setting + L" = " + value + L"\r\n";
     return out;
 }
 

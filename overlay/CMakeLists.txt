@@ -14,7 +14,7 @@ animelogon_add_executable(overlay
         src/clockface.cpp
         src/clocktext.cpp
     DESCRIPTION "AnimeLogon 登录界面视频"
-    LIBS d3d11 dxgi dcomp dwmapi d2d1 dwrite dxguid mf mfplat mfreadwrite mfuuid windowscodecs xaudio2 mmdevapi
+    LIBS animelogon_render d3d11 dxgi dcomp dwmapi d2d1 dwrite dxguid mf mfplat mfreadwrite mfuuid windowscodecs xaudio2 mmdevapi
          wtsapi32 shcore runtimeobject)
 
 animelogon_compile_shader(overlay ${CMAKE_CURRENT_SOURCE_DIR}/shaders/video.hlsl

@@ -10,6 +10,9 @@ add_library(animelogon_common STATIC
     src/paths.cpp
     src/secure.cpp
     src/settings.cpp
-    src/text.cpp)
+    src/skin.cpp
+    src/skins.cpp
+    src/text.cpp
+    src/xml.cpp)
 target_include_directories(animelogon_common PUBLIC include ${PROJECT_BINARY_DIR}/include)
 target_link_libraries(animelogon_common PUBLIC advapi32 bcrypt ole32 shell32 user32)

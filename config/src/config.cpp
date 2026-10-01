@@ -12,8 +12,12 @@
 #include <atomic>
 #include <memory>
 #include <string>
+#include <fstream>
+#include <iterator>
 #include <thread>
 #include <vector>
+
+#include <wrl/client.h>
 
 #include "animelogon/instance.h"
 #include "animelogon/library.h"
@@ -23,6 +27,9 @@
 #include "animelogon/paths.h"
 #include "animelogon/secure.h"
 #include "animelogon/settings.h"
+#include "animelogon/skin.h"
+#include "animelogon/skinpreview.h"
+#include "animelogon/skins.h"
 #include "animelogon/text.h"
 
 #include "commit.h"
@@ -84,13 +91,51 @@ const ColorChoice kColors[] = {
     {L"天蓝", 0x9AD0FF}, {L"樱粉", 0xFFC2D4}, {L"金色", 0xFFD27A},
 };
 
-struct LanguageChoice {
-    const wchar_t *name, *locale;
-};
-const LanguageChoice kLanguages[] = {
-    {L"跟随区域格式", L""}, {L"简体中文", L"zh-CN"}, {L"繁體中文", L"zh-TW"},
-    {L"日本語", L"ja-JP"},   {L"한국어", L"ko-KR"},   {L"English", L"en-US"},
-};
+constexpr float kPreviewMaxH = 360.0f;
+constexpr size_t kMaxSkinFile = 64 * 1024;
+
+std::wstring PickSkinFile(HWND owner, bool save, const std::wstring &suggested) {
+    wchar_t buf[MAX_PATH * 4] = L"";
+    wcsncpy_s(buf, suggested.c_str(), _TRUNCATE);
+    OPENFILENAMEW ofn{};
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = owner;
+    ofn.lpstrFilter = L"皮肤文件 (*.xml)\0*.xml\0所有文件\0*.*\0";
+    ofn.lpstrFile = buf;
+    ofn.nMaxFile = ARRAYSIZE(buf);
+    ofn.lpstrDefExt = L"xml";
+    ofn.Flags = OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR | (save ? OFN_OVERWRITEPROMPT : OFN_FILEMUSTEXIST);
+    return (save ? GetSaveFileNameW(&ofn) : GetOpenFileNameW(&ofn)) ? std::wstring(buf) : std::wstring();
+}
+
+// The signed-in person's regional format, as the logon screen will read it from their profile.
+RegionalFormat UserFormat() {
+    auto info = [](LCTYPE type) {
+        wchar_t buf[128] = L"";
+        return GetLocaleInfoEx(LOCALE_NAME_USER_DEFAULT, type, buf, ARRAYSIZE(buf)) ? std::wstring(buf) : std::wstring();
+    };
+    wchar_t name[LOCALE_NAME_MAX_LENGTH] = L"en-US";
+    GetUserDefaultLocaleName(name, ARRAYSIZE(name));
+    return {name, info(LOCALE_SSHORTTIME), info(LOCALE_SLONGDATE)};
+}
+
+// A dark gradient, for a preview before any background has been made.
+Picture PlainBackground(UINT w, UINT h) {
+    Picture p;
+    p.width = w;
+    p.height = h;
+    p.bgra.resize((size_t)w * h * 4);
+    for (UINT y = 0; y < h; ++y)
+        for (UINT x = 0; x < w; ++x) {
+            uint8_t *px = &p.bgra[((size_t)y * w + x) * 4];
+            const float t = (float)(x + y) / (float)(w + h);
+            px[0] = (uint8_t)(90 + 60 * t);
+            px[1] = (uint8_t)(50 + 30 * t);
+            px[2] = (uint8_t)(40 + 50 * (1 - t));
+            px[3] = 255;
+        }
+    return p;
+}
 
 std::wstring MegaBytes(uint64_t bytes) {
     wchar_t b[32];
@@ -145,6 +190,19 @@ struct Config : Window {
         std::wstring aside;
     };
     std::vector<Card> cards;
+
+    // The clock page: the chosen skin, and a preview of it over the sign-in background.
+    std::vector<SkinEntry> skins;
+    skin::Skin clockSkin;
+    std::wstring clockSkinId;
+    SkinPreview previewer;
+    Picture previewBackground, preview;
+    unsigned previewVersion = 0;
+    D2D1_RECT_F previewRect{};
+    bool previewShown = false;
+    Microsoft::WRL::ComPtr<ID2D1Bitmap> previewBitmap;
+    Microsoft::WRL::ComPtr<ID2D1DeviceContext> previewOwner;
+    unsigned previewBitmapVersion = 0;
 
     Config() {
         Reload();
@@ -311,6 +369,94 @@ struct Config : Window {
         GoTo(page);
     }
 
+    // --- skins -------------------------------------------------------------------------
+    void LoadClockSkin() {
+        skins = ListSkins();
+        std::wstring why;
+        clockSkin = LoadSkin(set.clock.skin, &why);
+        clockSkinId = why.empty() ? set.clock.skin : L"default";
+    }
+
+    skin::Values &ClockValues() { return set.clock.values[clockSkinId]; }
+
+    void SetClockValue(const std::wstring &id, const std::wstring &value, bool save = true) {
+        ClockValues()[id] = value;
+        if (save) Save();
+        RenderPreview();
+    }
+
+    // Draws the preview at the size it is shown, in pixels.
+    void RenderPreview() {
+        if (!previewShown) return;
+        const float scale = (float)GetDpiForWindow(hwnd) / 96.0f;
+        const UINT w = (UINT)std::lround((previewRect.right - previewRect.left) * scale);
+        const UINT h = (UINT)std::lround((previewRect.bottom - previewRect.top) * scale);
+        if (!w || !h) return;
+        if (previewBackground.width != w &&
+            (!LoadPicture(paths::BackgroundPath(), w, &previewBackground) || previewBackground.width != w))
+            previewBackground = PlainBackground(w, h);
+        SYSTEMTIME now{};
+        GetLocalTime(&now);
+        if (previewer.Render(previewBackground, skin::Resolve(clockSkin, set.clock.ValuesFor(clockSkinId)),
+                             UserFormat(), now, &preview))
+            ++previewVersion;
+        Invalidate();
+    }
+
+    void ImportSkin() {
+        const std::wstring path = PickSkinFile(hwnd, false, L"");
+        if (path.empty()) return;
+        std::ifstream in(path, std::ios::binary);
+        std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        skin::Skin parsed;
+        std::wstring error = text.size() > kMaxSkinFile ? L"文件太大" : L"";
+        if (!error.empty() || !skin::Parse(text, &parsed, &error)) {
+            Note(L"无法导入皮肤：" + error);
+            return;
+        }
+        const std::wstring id = RandomHex(8), dir = paths::UserDataDir() + L"\\import\\" + RandomHex(6);
+        const std::string normal = skin::Normalize(parsed);
+        std::ofstream out;
+        if (paths::CreateDirectories(dir)) out.open(dir + L"\\skin.xml", std::ios::binary);
+        if (!out || !out.write(normal.data(), (std::streamsize)normal.size())) {
+            Note(L"无法导入皮肤：临时文件写入失败。");
+            return;
+        }
+        out.close();
+        const int code = commit::RunElevated(hwnd, L"--commit-skin " + id + L" \"" + dir + L"\"");
+        secure::RemoveTree(dir);
+        if (code == commit::kOk) {
+            set.clock.skin = id;
+            Save();
+            Note(L"已导入皮肤「" + parsed.name + L"」。");
+        } else {
+            Note(code == commit::kDeclined ? L"已取消，未导入。" : L"导入失败，无法将皮肤写入受保护目录。");
+        }
+        GoTo(page);
+    }
+
+    void ExportSkin() {
+        const std::wstring path = PickSkinFile(hwnd, true, clockSkin.name + L".xml");
+        if (path.empty()) return;
+        const std::string text = clockSkinId == L"default" ? skin::DefaultText() : skin::Normalize(clockSkin);
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        if (out && out.write(text.data(), (std::streamsize)text.size())) Note(L"已导出到 " + path);
+        else Note(L"无法写入 " + path);
+    }
+
+    void RemoveSkin(const std::wstring &id, const std::wstring &name) {
+        const int code = commit::RunElevated(hwnd, L"--remove-skin " + id);
+        if (code == commit::kOk) {
+            if (set.clock.skin == id) set.clock.skin = L"default";
+            set.clock.values.erase(id);
+            Save();
+            Note(L"已移除皮肤「" + name + L"」。");
+        } else {
+            Note(code == commit::kDeclined ? L"已取消。" : L"无法移除该皮肤。");
+        }
+        GoTo(page);
+    }
+
     bool OnAppMessage(UINT msg, WPARAM wp, LPARAM) override {
         if (msg == WM_MOUSEWHEEL) {
             ScrollTo(scroll - (float)GET_WHEEL_DELTA_WPARAM(wp) / WHEEL_DELTA * kWheelStep);
@@ -339,6 +485,7 @@ struct Config : Window {
     void PushHeading(const wchar_t *text);
     void AddVolumeSlider(int *volume, const wchar_t *icon, const wchar_t *title, const wchar_t *detail);
     void LayoutClock();
+    void AddSkinSetting(const skin::Setting &s);
 };
 
 D2D1_RECT_F Config::PushCard(const wchar_t *icon, std::wstring title, std::wstring detail, float controlW,
@@ -367,6 +514,7 @@ void Config::AddVolumeSlider(int *volume, const wchar_t *icon, const wchar_t *ti
 
 void Config::LayoutClock() {
     ClockSettings &c = set.clock;
+    previewShown = false;
     Add(new ToggleSwitch(L"", c.enabled, [this](bool on) {
             set.clock.enabled = on;
             Save();
@@ -375,104 +523,168 @@ void Config::LayoutClock() {
         ->rect = PushCard(glyph::kRecent, L"显示时钟", L"在视频上显示时间和日期，随视频一起淡出。", 40);
     cards.back().aside = c.enabled ? L"开" : L"关";
     if (!c.enabled) return;
+    LoadClockSkin();
+
+    // The preview keeps the background's shape, as the sign-in screen shows it.
+    if (!previewBackground.width && !LoadPicture(paths::BackgroundPath(), 1280, &previewBackground))
+        previewBackground = PlainBackground(1280, 720);
+    const float aspect = previewBackground.width ? (float)previewBackground.height / previewBackground.width : 9.0f / 16.0f;
+    const float pw = layoutRight - layoutLeft, ph = std::min(pw * aspect, kPreviewMaxH);
+    const float left = layoutLeft + (pw - ph / aspect) / 2.0f;
+    previewRect = {std::round(left), layoutY, std::round(left + ph / aspect), layoutY + std::round(ph)};
+    previewShown = true;
+    layoutY += std::round(ph) + kCardGap * 3;
+    RenderPreview();
 
     Add(new DropDown({L"密码界面所在的显示器", L"主显示器", L"所有显示器"}, (int)c.displays, [this](int i) {
             set.clock.displays = (ClockDisplays)i;
             Save();
         }))
         ->rect = PushCard(glyph::kFullScreen, L"显示在", L"视频在每个屏幕上播放，时钟只在这里。", 220);
-    Add(new DropDown({L"左上", L"上方居中", L"右上", L"左侧居中", L"居中", L"右侧居中", L"左下", L"下方居中", L"右下"},
-                     (int)c.anchor, [this](int i) {
-                         set.clock.anchor = (ClockAnchor)i;
-                         Save();
-                     }))
-        ->rect = PushCard(glyph::kView, L"位置", L"边距随分辨率自动调整。", 160);
-    Add(new Segmented({L"小", L"中", L"大", L"特大"}, (int)c.size, [this](int i) {
-            set.clock.size = (ClockSize)i;
-            Save();
-        }))
-        ->rect = PushCard(glyph::kZoomIn, L"大小", L"相对屏幕高度缩放。", 200);
 
-    PushHeading(L"样式");
-    if (!familiesRead) {
-        families = fonts::MachineFamilies();
-        familiesRead = true;
+    PushHeading(L"皮肤");
+    std::vector<std::wstring> names;
+    int selected = 0;
+    for (size_t i = 0; i < skins.size(); ++i) {
+        names.push_back(skins[i].name);
+        if (skins[i].id == clockSkinId) selected = (int)i;
     }
-    std::vector<std::wstring> fontNames = {L"默认（Segoe UI）"};
-    int fontSel = 0;
-    for (size_t i = 0; i < families.size(); ++i) {
-        fontNames.push_back(families[i].name);
-        if (!c.font.empty() && EqualsNoCase(c.font, families[i].stored)) fontSel = (int)i + 1;
+    DropDown *pick = Add(new DropDown(names, selected, [this](int i) {
+        set.clock.skin = skins[(size_t)i].id;
+        Save();
+        GoTo(page);
+    }));
+    const std::wstring by = clockSkin.author.empty() ? L"作为时钟显示的皮肤。" : L"作者：" + clockSkin.author;
+    if (clockSkinId == L"default") {
+        pick->rect = PushCard(glyph::kColor, L"皮肤", by, 200);
+    } else {
+        Button *del = Add(new Button(L"移除", ButtonStyle::Subtle,
+                                     [this, id = clockSkinId, name = clockSkin.name] { RemoveSkin(id, name); }));
+        const float delW = del->PreferredWidth(measure);
+        const D2D1_RECT_F slot = PushCard(glyph::kColor, L"皮肤", by, 200 + 8 + delW);
+        pick->rect = {slot.left, slot.top, slot.left + 200, slot.bottom};
+        del->rect = {slot.right - delW, slot.top, slot.right, slot.bottom};
     }
-    if (!c.font.empty() && fontSel == 0) {  // no longer installed for all users
-        fontNames.push_back(c.font + L"（未安装）");
-        fontSel = (int)fontNames.size() - 1;
-    }
-    Add(new DropDown(fontNames, fontSel, [this](int i) {
-            if (i == 0) set.clock.font.clear();
-            else if (i - 1 < (int)families.size()) set.clock.font = families[i - 1].stored;
-            Save();
-        }))
-        ->rect = PushCard(glyph::kEdit, L"字体", L"仅列出为所有用户安装的字体。", 220);
+    Button *import = Add(new Button(L"导入…", ButtonStyle::Standard, [this] { ImportSkin(); }));
+    Button *exportButton = Add(new Button(L"导出…", ButtonStyle::Standard, [this] { ExportSkin(); }));
+    const float iw = import->PreferredWidth(measure), ew = exportButton->PreferredWidth(measure);
+    const D2D1_RECT_F files = PushCard(glyph::kDocument, L"皮肤文件",
+                                       L"导出为 XML 文件，修改后再导入。", iw + 8 + ew);
+    import->rect = {files.left, files.top, files.left + iw, files.bottom};
+    exportButton->rect = {files.right - ew, files.top, files.right, files.bottom};
 
-    std::vector<std::wstring> colorNames;
-    int colorSel = -1;
-    for (size_t i = 0; i < ARRAYSIZE(kColors); ++i) {
-        colorNames.push_back(kColors[i].name);
-        if (kColors[i].rgb == c.color) colorSel = (int)i;
-    }
-    if (colorSel < 0) {
-        colorNames.push_back(L"自定义");
-        colorSel = (int)colorNames.size() - 1;
-    }
-    Add(new DropDown(colorNames, colorSel, [this](int i) {
-            if (i < (int)ARRAYSIZE(kColors)) set.clock.color = kColors[i].rgb;
-            Save();
-            GoTo(page);
-        }))
-        ->rect = PushCard(glyph::kColor, L"颜色", L"文字带有阴影，在明亮的画面上也能看清。", 140);
-    TextBox *hex = Add(new TextBox());
-    hex->SetText(FormatColor(c.color));
-    hex->placeholder = L"#RRGGBB";
-    hex->onCommit = [this](const std::wstring &text) {
-        uint32_t rgb = 0;
-        if (ParseColor(std::wstring(Trim(text)), &rgb)) {
-            if (rgb != set.clock.color) {
-                set.clock.color = rgb;
-                Save();
-                GoTo(page);
-            }
-        } else {
-            Note(L"颜色格式应为 #RRGGBB。");
+    if (clockSkin.settings.empty()) return;
+    PushHeading(L"自定义");
+    for (const skin::Setting &s : clockSkin.settings) AddSkinSetting(s);
+    Button *reset = Add(new Button(L"恢复默认", ButtonStyle::Standard, [this] {
+        set.clock.values.erase(clockSkinId);
+        Save();
+        GoTo(page);
+    }));
+    reset->rect = PushCard(glyph::kUndo, L"恢复默认", L"把以上选项恢复为这个皮肤的默认值。", reset->PreferredWidth(measure));
+}
+
+void Config::AddSkinSetting(const skin::Setting &s) {
+    const std::wstring value = skin::ValueOf(s, set.clock.ValuesFor(clockSkinId));
+    const std::wstring detail = s.detail;
+    switch (s.kind) {
+    case skin::SettingKind::Choice: {
+        std::vector<std::wstring> labels;
+        int sel = 0;
+        float width = 0.0f;
+        for (size_t i = 0; i < s.options.size(); ++i) {
+            labels.push_back(s.options[i].label);
+            if (s.options[i].value == value) sel = (int)i;
+            width += measure.MeasureWidth(s.options[i].label, fonts.body) + 28.0f;
         }
-    };
-    hex->rect = PushCard(glyph::kColor, L"颜色代码", L"输入十六进制颜色，例如 #FFD27A。", 120);
-
-    PushHeading(L"格式");
-    Add(new Segmented({L"不显示", L"长日期", L"带星期"}, (int)c.date, [this](int i) {
-            set.clock.date = (DateStyle)i;
-            Save();
-        }))
-        ->rect = PushCard(glyph::kCalendar, L"日期", L"长日期与 Windows 一致。", 240);
-    Add(new ToggleSwitch(L"", c.hour24, [this](bool on) {
-            set.clock.hour24 = on;
-            Save();
-            GoTo(page);
-        }))
-        ->rect = PushCard(glyph::kRecent, L"24 小时制", L"关闭时跟随区域格式。", 40);
-    cards.back().aside = c.hour24 ? L"开" : L"关";
-    int langSel = 0;
-    std::vector<std::wstring> langNames;
-    for (size_t i = 0; i < ARRAYSIZE(kLanguages); ++i) {
-        langNames.push_back(kLanguages[i].name);
-        if (c.language == kLanguages[i].locale) langSel = (int)i;
+        auto pick = [this, id = s.id, options = s.options](int i) { SetClockValue(id, options[(size_t)i].value); };
+        if (s.options.size() <= 4 && width <= 320.0f)
+            Add(new Segmented(labels, sel, pick))->rect = PushCard(glyph::kMenu, s.label, detail, std::max(width, 120.0f));
+        else
+            Add(new DropDown(labels, sel, pick))->rect = PushCard(glyph::kMenu, s.label, detail, 200);
+        break;
     }
-    Add(new DropDown(langNames, langSel, [this](int i) {
-            set.clock.language = kLanguages[i].locale;
-            Save();
-        }))
-        ->rect = PushCard(glyph::kGlobe, L"语言",
-                          L"默认与任务栏时钟一致。", 160);
+    case skin::SettingKind::Toggle: {
+        const bool on = value == L"on";
+        Add(new ToggleSwitch(L"", on, [this, id = s.id](bool v) {
+                SetClockValue(id, v ? L"on" : L"off");
+                GoTo(page);
+            }))
+            ->rect = PushCard(glyph::kCheck, s.label, detail, 40);
+        cards.back().aside = on ? L"开" : L"关";
+        break;
+    }
+    case skin::SettingKind::Number: {
+        const float v = (float)_wtof(value.c_str());
+        Slider *slider = Add(new Slider(v, (float)s.min, (float)s.max, (float)s.step, nullptr));
+        slider->rect = PushCard(glyph::kZoomIn, s.label, detail, 160);
+        const size_t card = cards.size() - 1;
+        auto shown = [](float x) { return Format(x == std::floor(x) ? L"%.0f" : L"%.1f", x); };
+        cards[card].aside = shown(v);
+        slider->onChange = [this, id = s.id, card, shown](float x) {
+            cards[card].aside = shown(x);
+            SetClockValue(id, shown(x), false);
+        };
+        slider->onCommit = [this](float) { Save(); };
+        break;
+    }
+    case skin::SettingKind::Color: {
+        uint32_t argb = 0xFFFFFFFF, rgb = 0;
+        if (ParseColor(value.substr(0, 7), &rgb)) argb = rgb;
+        std::vector<std::wstring> names;
+        int sel = -1;
+        for (size_t i = 0; i < ARRAYSIZE(kColors); ++i) {
+            names.push_back(kColors[i].name);
+            if (value.size() == 7 && kColors[i].rgb == (argb & 0xFFFFFF)) sel = (int)i;
+        }
+        if (sel < 0) {
+            names.push_back(L"自定义");
+            sel = (int)names.size() - 1;
+        }
+        DropDown *presets = Add(new DropDown(names, sel, [this, id = s.id](int i) {
+            if (i < (int)ARRAYSIZE(kColors)) SetClockValue(id, FormatColor(kColors[i].rgb));
+            GoTo(page);
+        }));
+        TextBox *hex = Add(new TextBox());
+        hex->SetText(value);
+        hex->placeholder = L"#RRGGBB";
+        hex->onCommit = [this, setting = s](const std::wstring &text) {
+            const std::wstring v(Trim(text));
+            if (skin::IsValue(setting, v)) {
+                SetClockValue(setting.id, v);
+                GoTo(page);
+            } else {
+                Note(L"颜色格式应为 #RRGGBB 或 #RRGGBBAA。");
+            }
+        };
+        const D2D1_RECT_F slot = PushCard(glyph::kColor, s.label, detail, 120 + 8 + 110);
+        presets->rect = {slot.left, slot.top, slot.left + 120, slot.bottom};
+        hex->rect = {slot.right - 110, slot.top, slot.right, slot.bottom};
+        break;
+    }
+    case skin::SettingKind::Font: {
+        if (!familiesRead) {
+            families = fonts::MachineFamilies();
+            familiesRead = true;
+        }
+        std::vector<std::wstring> fontNames = {L"默认（Segoe UI）"};
+        int sel = 0;
+        for (size_t i = 0; i < families.size(); ++i) {
+            fontNames.push_back(families[i].name);
+            if (!value.empty() && EqualsNoCase(value, families[i].stored)) sel = (int)i + 1;
+        }
+        if (!value.empty() && sel == 0) {  // no longer installed for all users
+            fontNames.push_back(value + L"（未安装）");
+            sel = (int)fontNames.size() - 1;
+        }
+        Add(new DropDown(fontNames, sel, [this, id = s.id](int i) {
+                if (i == 0) SetClockValue(id, L"");
+                else if (i - 1 < (int)families.size()) SetClockValue(id, families[(size_t)i - 1].stored);
+            }))
+            ->rect = PushCard(glyph::kEdit, s.label, detail, 220);
+        break;
+    }
+    }
 }
 
 void Config::PushHeading(const wchar_t *text) {
@@ -689,6 +901,29 @@ void Config::PaintPage(const Painter &p) {
         p.Text(cd.title, {r.left + 50, r.top + 13, textRight, r.top + 33}, p.font->body, c.textPrimary);
         p.Text(cd.detail, {r.left + 50, r.top + 33, textRight, r.top + 53}, p.font->caption, c.textSecondary);
     }
+    if (page == 2 && previewShown && preview.width) {
+        // Uploaded again only when the picture or the device changes.
+        if (!previewBitmap || previewOwner.Get() != p.rt || previewBitmapVersion != previewVersion) {
+            previewBitmap.Reset();
+            const D2D1_BITMAP_PROPERTIES props =
+                D2D1::BitmapProperties(D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
+            p.rt->CreateBitmap(D2D1::SizeU(preview.width, preview.height), preview.bgra.data(), preview.width * 4,
+                               props, &previewBitmap);
+            previewOwner = p.rt;
+            previewBitmapVersion = previewVersion;
+        }
+        if (previewBitmap) {
+            Microsoft::WRL::ComPtr<ID2D1Factory> factory;
+            Microsoft::WRL::ComPtr<ID2D1RoundedRectangleGeometry> shape;
+            p.rt->GetFactory(&factory);
+            const D2D1_ROUNDED_RECT round = D2D1::RoundedRect(previewRect, metric::kRadiusControl, metric::kRadiusControl);
+            if (factory && SUCCEEDED(factory->CreateRoundedRectangleGeometry(round, &shape)))
+                p.rt->PushLayer(D2D1::LayerParameters(D2D1::InfiniteRect(), shape.Get()), nullptr);
+            p.rt->DrawBitmap(previewBitmap.Get(), previewRect, 1.0f, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+            if (shape) p.rt->PopLayer();
+            p.StrokeRound(previewRect, metric::kRadiusControl, c.cardStroke);
+        }
+    }
     p.rt->SetTransform(D2D1::Matrix3x2F::Identity());
     p.rt->PopAxisAlignedClip();
 
@@ -703,6 +938,8 @@ int RunCommand(int argc, wchar_t **argv) {
     const std::wstring cmd = argv[1];
     if (cmd == L"--commit-import" && argc >= 4) return commit::ImportInto(argv[2], argv[3]);
     if (cmd == L"--commit-remove" && argc >= 3) return commit::Remove(argv[2]);
+    if (cmd == L"--commit-skin" && argc >= 4) return commit::ImportSkin(argv[2], argv[3]);
+    if (cmd == L"--remove-skin" && argc >= 3) return commit::RemoveSkin(argv[2]);
     if (cmd == L"--switch-on") return commit::SwitchOn();
     if (cmd == L"--switch-off") return commit::SwitchOff();
     return commit::kBadArgs;

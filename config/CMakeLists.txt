@@ -6,7 +6,7 @@ animelogon_add_executable(config WIN32
         src/devices.cpp
         src/fonts.cpp
     DESCRIPTION "AnimeLogon 设置"
-    LIBS micula::micula mfplat mfreadwrite mfuuid mmdevapi ole32 shell32 delayimp)
+    LIBS animelogon_render micula::micula mfplat mfreadwrite mfuuid mmdevapi ole32 shell32 delayimp)
 
 # Windows N has no Media Foundation without the Media Feature Pack. Delay-loaded, so the
 # settings app still starts there and the transcoder can say what is missing.
