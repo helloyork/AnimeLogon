@@ -101,13 +101,14 @@ void Beat() { g_heartbeat.store(GetTickCount64()); }
 
 bool g_still = false;
 
-void Wake() {
+// `how` says what woke it, for the log; which key is never recorded.
+void Wake(const wchar_t *how) {
     if (g_overlay.woke || g_still) return;
     g_overlay.woke = true;
     g_overlay.fadeStart = GetTickCount64();
     // A click wakes too; after any wake no further key is withheld.
     keyhook::State().armed.store(false);
-    ALOG(L"wake: a key or click -- fading out");
+    ALOG(L"wake: %s -- fading out", how);
 }
 
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
@@ -120,11 +121,11 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_INPUT:
         if (hwnd == g_overlay.inputWindow) {
             if (inputsink::ReadMessage(reinterpret_cast<HRAWINPUT>(lp), g_overlay.intent, (DWORD)GetMessageTime()))
-                Wake();
+                Wake(L"a press seen by raw input");
         }
         return DefWindowProcW(hwnd, msg, wp, lp);
     case keyhook::kWakeMessage:  // a withheld wake key, from the hook thread
-        Wake();
+        Wake(L"the wake key, withheld");
         return 0;
     case WM_HOTKEY:
         if (wp == kRescueHotkeyId) {
@@ -452,7 +453,7 @@ LiveEnd GoLiveOnce(Presenter &presenter, const Options &opt, HINSTANCE instance)
 
         const ULONGLONG now = GetTickCount64();
 
-        if (inputsink::Drain(g_overlay.inputWindow, g_overlay.intent) || g_overlay.intent.requested()) Wake();
+        if (inputsink::Drain(g_overlay.inputWindow, g_overlay.intent) || g_overlay.intent.requested()) Wake(L"a press seen by raw input");
 
         if (g_overlay.displayOn == false) {
             LASTINPUTINFO li{sizeof(li), 0};
@@ -582,7 +583,10 @@ LiveEnd GoLiveOnce(Presenter &presenter, const Options &opt, HINSTANCE instance)
     presenter.Hide();
     g_live.store(false);
     if (power) UnregisterPowerSettingNotification(power);
-    if (g_overlay.keyhookOn) keyhook::Uninstall();
+    if (g_overlay.keyhookOn) {
+        keyhook::Uninstall();
+        ALOG(L"keyhook: %ld key event(s) withheld this time", keyhook::State().withheld.exchange(0));
+    }
     UnregisterHotKey(g_overlay.inputWindow, kRescueHotkeyId);
     inputsink::Unregister();
     audio.FadeOut(0.2f);
