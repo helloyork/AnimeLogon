@@ -236,6 +236,18 @@ void Presenter::KeepOnTop() {
     }
 }
 
+bool Presenter::SecondsToNextComposition(double *seconds) const {
+    DCOMPOSITION_FRAME_STATISTICS st{};
+    if (!dcomp_ || FAILED(dcomp_->GetFrameStatistics(&st)) || !st.timeFrequency.QuadPart ||
+        !st.currentCompositionRate.Numerator)
+        return false;
+    const double s = (double)(st.nextEstimatedFrameTime.QuadPart - st.currentTime.QuadPart) /
+                     (double)st.timeFrequency.QuadPart;
+    if (s <= 0.0 || s > 0.1) return false;
+    *seconds = s;
+    return true;
+}
+
 bool Presenter::Render(const std::vector<Picture> &pictures, animelogon::Scaling scaling, float dim, float opacity) {
     if (!device_ || lost_) return false;
     for (size_t i = 0; i < windows_.size(); ++i) {

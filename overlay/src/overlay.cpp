@@ -45,6 +45,8 @@ namespace {
 constexpr wchar_t kWindowClass[] = L"AnimeLogonOverlay";
 constexpr int kRescueHotkeyId = 0xA10E;  // Ctrl+Alt+F11
 constexpr float kFadeSeconds = 0.5f;
+// How long before the compositor's frame the next picture is drawn.
+constexpr double kComposeLeadSeconds = 0.002;
 // A live screen whose loop has not turned for this long is ended, so it can never hold the
 // password box hostage.
 constexpr ULONGLONG kHangMs = 5000;
@@ -440,8 +442,12 @@ LiveEnd GoLiveOnce(Presenter &presenter, const Options &opt, HINSTANCE instance)
         for (auto &[id, player] : players) period = std::min(period, player->frameSeconds());
         period = std::max(period, 1.0 / 120.0);
         if (g_overlay.woke) period = std::min(period, refresh);
+        // Wake just before the compositor's next frame, so each one it shows is a fresh one;
+        // a fixed period drifts against the display and drops frames.
+        double wait = period;
+        if (presenter.SecondsToNextComposition(&wait)) wait = std::max(0.0, wait - kComposeLeadSeconds);
         LARGE_INTEGER due;
-        due.QuadPart = -(LONGLONG)(period * 1e7);
+        due.QuadPart = -(LONGLONG)(wait * 1e7);
         SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE);
         MsgWaitForMultipleObjectsEx(1, &timer, INFINITE, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
 
@@ -463,8 +469,10 @@ LiveEnd GoLiveOnce(Presenter &presenter, const Options &opt, HINSTANCE instance)
             }
         }
         const bool draw = g_overlay.displayOn || g_overlay.woke;
+        bool lit = false;
         if (draw != wasOn) {
             wasOn = draw;
+            lit = draw;
             if (draw) {
                 darkMs += screen::AwakeMs() - darkSince;
                 audio.Resume();
@@ -475,7 +483,7 @@ LiveEnd GoLiveOnce(Presenter &presenter, const Options &opt, HINSTANCE instance)
         }
 
         audio.Tick();
-        if (withClock) clock.Tick();
+        const bool clockChanged = withClock && clock.Tick();
 
         double t = 0.0;
         if (!audio.TrackClock(&t)) {
@@ -496,11 +504,15 @@ LiveEnd GoLiveOnce(Presenter &presenter, const Options &opt, HINSTANCE instance)
         if (draw) {
             std::vector<Presenter::Picture> pictures(targets.size());
             std::vector<VideoPlayer::Frame> held(targets.size());
+            // Drawn only when something on it changed: a high refresh rate need not cost a
+            // full-screen draw per tick.
+            bool fresh = lit || clockChanged || g_overlay.woke;
             for (size_t i = 0; i < targets.size(); ++i) {
                 auto it = players.find(targets[i].videoId);
                 if (it == players.end()) continue;
                 bool changed = false;
                 if (it->second->FrameAt(t, &held[i], &changed)) {
+                    fresh = fresh || changed;
                     if (i == 0 && changed) {
                         ++shownFrames;
                         if (firstT < 0) firstT = t;
@@ -511,7 +523,7 @@ LiveEnd GoLiveOnce(Presenter &presenter, const Options &opt, HINSTANCE instance)
                     pictures[i].videoH = it->second->height();
                 }
             }
-            if (!presenter.Render(pictures, settings.scaling, 0.0f, opacity)) {
+            if (fresh && !presenter.Render(pictures, settings.scaling, 0.0f, opacity)) {
                 if (presenter.DeviceLost()) {
                     ALOG(L"overlay: the graphics device was lost -- exiting so a fresh one starts");
                     end = LiveEnd::Leave;

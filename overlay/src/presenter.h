@@ -57,6 +57,9 @@ public:
     // Puts the windows back at the top of the topmost band if something is above them.
     void KeepOnTop();
 
+    // Seconds until the compositor's next frame, when it can say.
+    bool SecondsToNextComposition(double *seconds) const;
+
     struct Picture {
         const VideoPlayer::Frame *frame = nullptr;  // null draws black
         int videoW = 0, videoH = 0;
