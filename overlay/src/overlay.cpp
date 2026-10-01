@@ -71,6 +71,7 @@ enum class LiveEnd {
     Leave,      // the service is stopping, shutting down, paused, or the device was lost: exit
     Dismissed,  // somebody arrived (or there was nothing to show): park until the screen is used
     LogonGone,  // the logon screen went away on its own: park for the next lock
+    Rebuild,    // the displays changed under it: go live again on the new layout
 };
 
 struct Overlay {
@@ -83,6 +84,7 @@ struct Overlay {
     ULONGLONG displayOffAt = 0;
     DWORD displayOffInput = 0;
     bool leaving = false;        // WM_ENDSESSION / shutdown / rescue asked us to go
+    bool displaysChanged = false; // a resolution, scale or monitor change while live
     DWORD session = 0xFFFFFFFF;
     bool lockNotified = false;   // WTS_SESSION_LOCK seen, and no unlock or logon since
     bool hadUser = false;        // somebody has been signed in to this session
@@ -154,6 +156,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             }
         }
         return TRUE;
+    case WM_DISPLAYCHANGE:
+    case WM_DPICHANGED:
+        g_overlay.displaysChanged = true;
+        return msg == WM_DPICHANGED ? 0 : DefWindowProcW(hwnd, msg, wp, lp);
     case WM_ENDSESSION:
         if (wp && !(lp & ENDSESSION_LOGOFF)) {
             ALOG(L"shutdown: WM_ENDSESSION -- off the screen");
@@ -263,6 +269,7 @@ LiveEnd GoLiveOnce(Presenter &presenter, const Options &opt, HINSTANCE instance)
     g_overlay.displayOffAt = 0;
     g_overlay.displayOffInput = 0;
     g_overlay.leaving = false;
+    g_overlay.displaysChanged = false;
 
     // A device lost while parked is replaced by starting a fresh process.
     if (presenter.DeviceLost()) {
@@ -551,6 +558,13 @@ LiveEnd GoLiveOnce(Presenter &presenter, const Options &opt, HINSTANCE instance)
             }
         }
 
+        // The windows were laid out for displays that are no longer there.
+        if (g_overlay.displaysChanged && !g_overlay.woke && !opt.windowed) {
+            ALOG(L"overlay: the displays changed -- laying the screen out again");
+            end = LiveEnd::Rebuild;
+            break;
+        }
+
         if (opt.seconds && now - start > (ULONGLONG)opt.seconds * 1000) {
             end = LiveEnd::Leave;
             break;
@@ -644,7 +658,11 @@ int wmain(int argc, wchar_t **argv) {
     for (;;) {
         if (!opt.windowed && !opt.now && !WaitForLogonScreen(&dismissed)) break;
 
-        const LiveEnd end = GoLiveOnce(presenter, opt, wc.hInstance);
+        LiveEnd end = GoLiveOnce(presenter, opt, wc.hInstance);
+        while (end == LiveEnd::Rebuild) {
+            Sleep(300);  // let the mode change settle
+            end = GoLiveOnce(presenter, opt, wc.hInstance);
+        }
 
         if (opt.windowed || opt.now) break;  // development runs are one-shot
         if (end == LiveEnd::Dismissed) {
