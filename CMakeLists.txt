@@ -36,6 +36,12 @@ add_subdirectory(vendor/micula EXCLUDE_FROM_ALL)
 
 include(cmake/AnimeLogon.cmake)
 
+add_subdirectory(common)
 add_subdirectory(overlay)
 add_subdirectory(config)
 add_subdirectory(installer)
+
+include(CTest)
+if(BUILD_TESTING)
+    add_subdirectory(tests)
+endif()

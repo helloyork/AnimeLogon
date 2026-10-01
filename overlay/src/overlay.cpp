@@ -1,5 +1,582 @@
-// overlay.exe: plays the video on the Winlogon desktop until someone presses a key or clicks.
+// overlay.exe: plays the imported video on the Winlogon desktop until a key or click, then
+// fades out and hands the screen back to Windows. Started as SYSTEM by the service, one per
+// logon screen. It parks between appearances: once dismissed it stays out of the way until the
+// session is used and locked again, so it never fights somebody signing in. `--windowed` runs
+// it on the ordinary desktop, for looking at a change without a lock screen.
 
-int wmain() {
-    return 0;
+#include <windows.h>
+#include <dwmapi.h>
+#include <mfapi.h>
+#include <shellscalingapi.h>
+
+#include <wtsapi32.h>
+
+#include <atomic>
+#include <map>
+#include <memory>
+#include <string>
+#include <thread>
+#include <vector>
+
+#include "animelogon/instance.h"
+#include "animelogon/library.h"
+#include "animelogon/log.h"
+#include "animelogon/machine.h"
+#include "animelogon/monitors.h"
+#include "animelogon/paths.h"
+#include "animelogon/secure.h"
+#include "animelogon/settings.h"
+
+#include "audio.h"
+#include "events.h"
+#include "inputsink.h"
+#include "keyhook.h"
+#include "plan.h"
+#include "player.h"
+#include "presenter.h"
+#include "screen.h"
+#include "wake.h"
+
+namespace {
+
+constexpr wchar_t kWindowClass[] = L"AnimeLogonOverlay";
+constexpr int kRescueHotkeyId = 0xA10E;  // Ctrl+Alt+F11
+constexpr float kFadeSeconds = 0.5f;
+// A live screen whose loop has not turned for this long is ended, so it can never hold the
+// password box hostage.
+constexpr ULONGLONG kHangMs = 5000;
+// Exit code telling the launcher to start the next overlay parked (see kDismissedFlag).
+constexpr int kExitDismissed = 3;
+constexpr wchar_t kDismissedFlag[] = L"--dismissed";
+
+struct Options {
+    bool windowed = false;   // run on the ordinary desktop, for development
+    bool now = false;        // skip the parked wait for a logon screen
+    bool dismissed = false;  // the previous overlay was waved away: wait for the screen to be used
+    int seconds = 0;         // exit after this many seconds, for testing; 0 is forever
+};
+
+// Why a live appearance ended, and so what to do next.
+enum class LiveEnd {
+    Leave,      // the service is stopping, shutting down, paused, or the device was lost: exit
+    Dismissed,  // somebody arrived (or there was nothing to show): park until the screen is used
+    LogonGone,  // the logon screen went away on its own: park for the next lock
+};
+
+struct Overlay {
+    HWND inputWindow = nullptr;  // the primary window, which owns raw input and the hotkey
+    wake::Intent intent;
+    bool woke = false;
+    bool keyhookOn = false;
+    ULONGLONG fadeStart = 0;
+    bool displayOn = true;
+    ULONGLONG displayOffAt = 0;
+    DWORD displayOffInput = 0;
+    bool leaving = false;        // WM_ENDSESSION / shutdown / rescue asked us to go
+    DWORD session = 0xFFFFFFFF;
+    bool lockNotified = false;   // WTS_SESSION_LOCK seen, and no unlock or logon since
+    bool hadUser = false;        // somebody has been signed in to this session
+};
+
+Overlay g_overlay;
+const GUID kConsoleDisplayState = {0x6fe69556, 0x704a, 0x47a0, {0x8f, 0x24, 0xc2, 0x8d, 0x93, 0x6f, 0xda, 0x47}};
+
+// The watchdog's view of the main thread.
+std::atomic<bool> g_live{false};
+std::atomic<ULONGLONG> g_heartbeat{0};
+
+void Beat() { g_heartbeat.store(GetTickCount64()); }
+
+void Wake() {
+    if (g_overlay.woke) return;
+    g_overlay.woke = true;
+    g_overlay.fadeStart = GetTickCount64();
+    // A click wakes too; after any wake no further key is withheld.
+    keyhook::State().armed.store(false);
+    ALOG(L"wake: a key or click -- fading out");
+}
+
+LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    switch (msg) {
+    case WM_WTSSESSION_CHANGE:
+        if (wp == WTS_SESSION_LOCK) g_overlay.lockNotified = true;
+        else if (wp == WTS_SESSION_UNLOCK || wp == WTS_SESSION_LOGON || wp == WTS_SESSION_LOGOFF)
+            g_overlay.lockNotified = false;
+        return 0;
+    case WM_INPUT:
+        if (hwnd == g_overlay.inputWindow) {
+            if (inputsink::ReadMessage(reinterpret_cast<HRAWINPUT>(lp), g_overlay.intent, (DWORD)GetMessageTime()))
+                Wake();
+        }
+        return DefWindowProcW(hwnd, msg, wp, lp);
+    case keyhook::kWakeMessage:  // a withheld wake key, from the hook thread
+        Wake();
+        return 0;
+    case WM_HOTKEY:
+        if (wp == kRescueHotkeyId) {
+            ALOG(L"rescue: Ctrl+Alt+F11 -- taking the video off and pausing it");
+            g_overlay.leaving = true;
+            animelogon::machine::WritePausedMarker(L"Ctrl+Alt+F11 on the logon screen");
+            PostQuitMessage(0);
+        }
+        return 0;
+    case WM_POWERBROADCAST:
+        if (wp == PBT_POWERSETTINGCHANGE && lp) {
+            const auto *s = reinterpret_cast<const POWERBROADCAST_SETTING *>(lp);
+            if (IsEqualGUID(s->PowerSetting, kConsoleDisplayState) && s->DataLength >= sizeof(DWORD)) {
+                const DWORD state = *reinterpret_cast<const DWORD *>(s->Data);
+                const bool on = state != 0;  // 0 off, 1 on, 2 dimmed (on)
+                if (on != g_overlay.displayOn) {
+                    g_overlay.displayOn = on;
+                    keyhook::State().displayOff.store(!on);
+                    if (!on) {
+                        LASTINPUTINFO li{sizeof(li), 0};
+                        g_overlay.displayOffInput = GetLastInputInfo(&li) ? li.dwTime : 0;
+                        g_overlay.displayOffAt = GetTickCount64();
+                        keyhook::DarkenLatch();
+                    } else {
+                        ALOG(L"power: the display is on again after %llu ms",
+                             g_overlay.displayOffAt ? GetTickCount64() - g_overlay.displayOffAt : 0ull);
+                    }
+                }
+            }
+        }
+        return TRUE;
+    case WM_ENDSESSION:
+        if (wp && !(lp & ENDSESSION_LOGOFF)) {
+            ALOG(L"shutdown: WM_ENDSESSION -- off the screen");
+            g_overlay.leaving = true;
+            PostQuitMessage(0);
+        }
+        return 0;
+    default:
+        return DefWindowProcW(hwnd, msg, wp, lp);
+    }
+}
+
+Options ParseOptions(int argc, wchar_t **argv) {
+    Options o;
+    for (int i = 1; i < argc; ++i) {
+        const std::wstring a = argv[i];
+        if (a == L"--windowed") o.windowed = true;
+        else if (a == L"--now") o.now = true;
+        else if (a == kDismissedFlag) o.dismissed = true;
+        else if (a == L"--seconds" && i + 1 < argc) o.seconds = _wtoi(argv[++i]);
+    }
+    return o;
+}
+
+void DeclareDpi() {
+    if (HMODULE user32 = GetModuleHandleW(L"user32.dll")) {
+        using Fn = BOOL(WINAPI *)(DPI_AWARENESS_CONTEXT);
+        if (auto set = reinterpret_cast<Fn>(GetProcAddress(user32, "SetProcessDpiAwarenessContext")))
+            if (set(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)) return;
+    }
+    SetProcessDPIAware();
+}
+
+// Pumps the thread's messages. Returns false if a WM_QUIT was seen.
+bool PumpMessages() {
+    MSG msg;
+    while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+        if (msg.message == WM_QUIT) return false;
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
+    }
+    return true;
+}
+
+// The parked wait: return when a logon screen is the desktop on the glass, or the service is
+// stopping. `dismissed` is true after somebody has waved the video away; while it is, the wait
+// holds -- without re-covering the screen -- until the session is actually used (signed in and
+// unlocked, or the secure desktop is gone), so the video never fights somebody signing in. It is
+// cleared there, and the next genuine lock brings the video back. Returns false to exit.
+bool WaitForLogonScreen(bool *dismissed) {
+    for (;;) {
+        Beat();
+        if (events::IsSet(events::kStop) || animelogon::machine::Paused()) return false;
+        if (!PumpMessages()) return false;
+        const bool secure = screen::InputDesktopIsSecure();
+        const screen::Session s = screen::ReadSession(g_overlay.session);
+        if (s.signedIn) g_overlay.hadUser = true;
+
+        // A dismissed appearance stays dismissed until the screen is used again.
+        if (*dismissed) {
+            if (!secure || (s.signedIn && !s.locked && !g_overlay.lockNotified)) {
+                *dismissed = false;
+            } else {
+                Sleep(200);
+                continue;
+            }
+        }
+
+        screen::GateInput in;
+        in.secure = secure;
+        in.session = s;
+        in.hadUser = g_overlay.hadUser;
+        in.shutdown = screen::ShutdownUnderway();
+        in.lockNotified = g_overlay.lockNotified;
+        if (screen::Decide(in) == screen::Gate::GoLive) return true;
+        Sleep(32);
+    }
+}
+
+double RefreshSeconds() {
+    DEVMODEW dm{};
+    dm.dmSize = sizeof(dm);
+    if (EnumDisplaySettingsW(nullptr, ENUM_CURRENT_SETTINGS, &dm) && dm.dmDisplayFrequency > 1)
+        return 1.0 / dm.dmDisplayFrequency;
+    return 1.0 / 60.0;
+}
+
+// One appearance: resolve the settings, open the videos, cover the screen and play until
+// somebody arrives or the screen is handed back. Returns why it ended.
+LiveEnd GoLiveOnce(Presenter &presenter, const Options &opt, HINSTANCE instance) {
+    // Fresh state for this appearance.
+    g_overlay.inputWindow = nullptr;
+    g_overlay.woke = false;
+    g_overlay.keyhookOn = false;
+    g_overlay.fadeStart = 0;
+    g_overlay.displayOn = true;
+    g_overlay.displayOffAt = 0;
+    g_overlay.displayOffInput = 0;
+    g_overlay.leaving = false;
+
+    // A device lost while parked is replaced by starting a fresh process.
+    if (presenter.DeviceLost()) {
+        ALOG(L"overlay: the graphics device was lost while parked -- exiting so a fresh one starts");
+        return LiveEnd::Leave;
+    }
+
+    // settings.ini holds only ids and enums, never a path, so it is loaded without a trust
+    // check; every video file it names is trust-checked below before the SYSTEM decoder
+    // touches it.
+    std::wstring why;
+    animelogon::Settings settings = animelogon::LoadSettings(false, &why);
+    if (!why.empty()) ALOG(L"settings: %s -- using defaults", why.c_str());
+
+    std::vector<animelogon::MonitorInfo> monitors = animelogon::EnumerateMonitors();
+    std::vector<Presenter::Target> targets;
+    if (opt.windowed) {
+        Presenter::Target t;
+        const animelogon::MonitorInfo &m = monitors.front();
+        t.rect = {m.rect.left + 80, m.rect.top + 80, m.rect.left + 80 + 960, m.rect.top + 80 + 540};
+        t.canvas = t.rect;
+        t.videoId = settings.video.empty() ? (animelogon::ListVideos().empty() ? std::wstring()
+                                                                               : animelogon::ListVideos().front().id)
+                                           : settings.video;
+        targets.push_back(t);
+    } else {
+        targets = plan::Build(settings, monitors);
+    }
+
+    // Open one decoder per distinct video, before any window is shown, so that if there is
+    // nothing to play the screen is left to Windows rather than covered with black.
+    std::map<std::wstring, std::shared_ptr<VideoPlayer>> players;
+    for (const Presenter::Target &t : targets) {
+        if (t.videoId.empty() || players.count(t.videoId)) continue;
+        const std::wstring file = animelogon::VideoFilePath(t.videoId);
+        std::wstring trust;
+        // The SYSTEM decoder only touches administrators-only content.
+        if (!opt.windowed && !animelogon::secure::IsTrusted(file, &trust)) {
+            ALOG(L"overlay: %s is not trusted (%s) -- skipping it", t.videoId.c_str(), trust.c_str());
+            continue;
+        }
+        auto player = std::make_shared<VideoPlayer>();
+        if (player->Open(file, presenter.device(), presenter.videoManager()))
+            players[t.videoId] = player;
+        else
+            ALOG(L"overlay: %s could not be opened", t.videoId.c_str());
+    }
+
+    if (presenter.DeviceLost()) {
+        ALOG(L"overlay: the graphics device was lost -- exiting so a fresh one starts");
+        return LiveEnd::Leave;
+    }
+    // A display whose video cannot play is left to Windows, never covered with black.
+    if (!opt.windowed) {
+        std::vector<Presenter::Target> playable;
+        for (const Presenter::Target &t : targets)
+            if (players.count(t.videoId)) playable.push_back(t);
+        targets.swap(playable);
+    }
+    if (targets.empty() || (!opt.windowed && players.empty())) {
+        ALOG(L"overlay: no video to show -- leaving the screen to Windows");
+        return LiveEnd::Dismissed;  // park until the screen is used
+    }
+
+    if (!presenter.CreateWindows(targets, kWindowClass, instance)) {
+        ALOG(L"overlay: could not create the windows");
+        return LiveEnd::Leave;
+    }
+    g_overlay.inputWindow = presenter.primary();
+
+    // Without raw input nothing could wake the screen, so it is never covered.
+    if (!inputsink::Register(g_overlay.inputWindow)) {
+        ALOG(L"overlay: raw input could not be registered (%lu) -- leaving the screen to Windows", GetLastError());
+        presenter.DestroyWindows();
+        g_overlay.inputWindow = nullptr;
+        return LiveEnd::Dismissed;
+    }
+
+    AudioSystem audio;
+    audio.Open(settings.audio);
+    const double refresh = RefreshSeconds();
+    if (!opt.windowed) {
+        AudioSystem::RememberConsoleDefault();
+        const std::wstring &primaryVideo = targets.front().videoId;
+        if (!primaryVideo.empty()) {
+            animelogon::VideoInfo info;
+            if (animelogon::LoadVideo(primaryVideo, &info) && info.hasAudio)
+                audio.PlayVideoTrack(animelogon::AudioFilePath(primaryVideo), 0.0, kFadeSeconds);
+        }
+    }
+
+    g_overlay.intent.Prime(wake::CaptureKeys(), GetTickCount());
+    if (!RegisterHotKey(g_overlay.inputWindow, kRescueHotkeyId, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, VK_F11))
+        ALOG(L"overlay: the rescue hotkey could not be registered (%lu)", GetLastError());
+    if (!opt.windowed) {
+        keyhook::ResetLatch();
+        keyhook::State().notify.store(g_overlay.inputWindow);
+        keyhook::State().displayOff.store(false);
+        keyhook::State().armed.store(true);
+        g_overlay.keyhookOn = keyhook::Install();
+    }
+    HPOWERNOTIFY power =
+        RegisterPowerSettingNotification(g_overlay.inputWindow, &kConsoleDisplayState, DEVICE_NOTIFY_WINDOW_HANDLE);
+    Beat();
+    presenter.Show();
+    g_live.store(true);
+    ALOG(L"overlay: live on %zu display(s)", targets.size());
+
+    // --- frame loop --------------------------------------------------------------------
+    HANDLE timer = CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
+    const ULONGLONG start = GetTickCount64();
+    // The video's clock stands still while the panel is dark or the machine sleeps.
+    const ULONGLONG clockStart = screen::AwakeMs();
+    ULONGLONG darkMs = 0, darkSince = 0;
+    bool wasOn = true;
+    int awayTicks = 0;
+    ULONGLONG lastExitCheck = 0;
+    ULONGLONG lastKeepTop = 0;
+    bool done = false;
+    LiveEnd end = LiveEnd::Leave;
+
+    while (!done) {
+        double period = 1.0 / 30.0;
+        for (auto &[id, player] : players) period = std::min(period, player->frameSeconds());
+        period = std::max(period, 1.0 / 120.0);
+        if (g_overlay.woke) period = std::min(period, refresh);
+        LARGE_INTEGER due;
+        due.QuadPart = -(LONGLONG)(period * 1e7);
+        SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE);
+        MsgWaitForMultipleObjectsEx(1, &timer, INFINITE, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+
+        Beat();
+        if (!PumpMessages()) {  // WM_QUIT: rescue hotkey or shutdown
+            end = LiveEnd::Leave;
+            break;
+        }
+
+        const ULONGLONG now = GetTickCount64();
+
+        if (inputsink::Drain(g_overlay.inputWindow, g_overlay.intent) || g_overlay.intent.requested()) Wake();
+
+        if (g_overlay.displayOn == false) {
+            LASTINPUTINFO li{sizeof(li), 0};
+            if (GetLastInputInfo(&li) && (LONG)(li.dwTime - g_overlay.displayOffInput) > 0) {
+                g_overlay.displayOn = true;
+                keyhook::State().displayOff.store(false);
+            }
+        }
+        const bool draw = g_overlay.displayOn || g_overlay.woke;
+        if (draw != wasOn) {
+            wasOn = draw;
+            if (draw) {
+                darkMs += screen::AwakeMs() - darkSince;
+                audio.Resume();
+            } else {
+                darkSince = screen::AwakeMs();
+                audio.Pause();
+            }
+        }
+
+        audio.Tick();
+
+        double t = 0.0;
+        if (!audio.TrackClock(&t)) {
+            const ULONGLONG dark = draw ? darkMs : darkMs + (screen::AwakeMs() - darkSince);
+            t = (double)(screen::AwakeMs() - clockStart - dark) / 1000.0;
+        }
+
+        float opacity = 1.0f;
+        if (g_overlay.woke) {
+            const float k = (float)(now - g_overlay.fadeStart) / 1000.0f / kFadeSeconds;
+            opacity = k >= 1.0f ? 0.0f : 1.0f - k;
+            if (k >= 1.0f) {  // faded out: hand the screen back and park
+                done = true;
+                end = LiveEnd::Dismissed;
+            }
+        }
+
+        if (draw) {
+            std::vector<Presenter::Picture> pictures(targets.size());
+            std::vector<VideoPlayer::Frame> held(targets.size());
+            for (size_t i = 0; i < targets.size(); ++i) {
+                auto it = players.find(targets[i].videoId);
+                if (it == players.end()) continue;
+                bool changed = false;
+                if (it->second->FrameAt(t, &held[i], &changed)) {
+                    pictures[i].frame = &held[i];
+                    pictures[i].videoW = it->second->width();
+                    pictures[i].videoH = it->second->height();
+                }
+            }
+            if (!presenter.Render(pictures, settings.scaling, 0.0f, opacity)) {
+                if (presenter.DeviceLost()) {
+                    ALOG(L"overlay: the graphics device was lost -- exiting so a fresh one starts");
+                    end = LiveEnd::Leave;
+                    break;
+                }
+            }
+        }
+
+        if (now - lastKeepTop > 500) {
+            lastKeepTop = now;
+            presenter.KeepOnTop();
+        }
+
+        for (auto &[id, player] : players)
+            if (!done && player->failed()) {
+                done = true;
+                if (presenter.DeviceLost()) {
+                    ALOG(L"overlay: the graphics device was lost -- exiting so a fresh one starts");
+                    end = LiveEnd::Leave;
+                } else {
+                    ALOG(L"overlay: %s stopped decoding -- leaving the screen", id.c_str());
+                    end = LiveEnd::Dismissed;
+                }
+            }
+
+        // Leave when the logon screen does (real mode), after three readings.
+        if (!opt.windowed && now - lastExitCheck > 500) {
+            lastExitCheck = now;
+            const screen::Session s = screen::ReadSession(g_overlay.session);
+            const bool stillLogon = s.console && (!s.signedIn || s.locked);
+            if (!screen::InputDesktopIsSecure() && !stillLogon) {
+                if (++awayTicks >= 3) {
+                    ALOG(L"overlay: the logon screen is gone");
+                    end = LiveEnd::LogonGone;
+                    break;
+                }
+            } else {
+                awayTicks = 0;
+            }
+            if (events::IsSet(events::kStop) || animelogon::machine::Paused()) {
+                g_overlay.leaving = true;
+                end = LiveEnd::Leave;
+                break;
+            }
+        }
+
+        if (opt.seconds && now - start > (ULONGLONG)opt.seconds * 1000) {
+            end = LiveEnd::Leave;
+            break;
+        }
+    }
+
+    // --- tear the appearance down ------------------------------------------------------
+    presenter.Hide();
+    g_live.store(false);
+    if (power) UnregisterPowerSettingNotification(power);
+    if (g_overlay.keyhookOn) keyhook::Uninstall();
+    UnregisterHotKey(g_overlay.inputWindow, kRescueHotkeyId);
+    inputsink::Unregister();
+    audio.FadeOut(0.2f);
+    for (int i = 0; i < 12; ++i) {
+        audio.Tick();
+        Sleep(16);
+    }
+    players.clear();
+    presenter.DestroyWindows();
+    g_overlay.inputWindow = nullptr;
+    if (timer) CloseHandle(timer);
+    return end;
+}
+
+// Ends the process if a live screen's loop stops turning. The launcher then starts a parked
+// overlay, and Windows' own screen is back within a few seconds.
+void StartWatchdog() {
+    std::thread([] {
+        for (;;) {
+            Sleep(500);
+            if (g_live.load() && GetTickCount64() - g_heartbeat.load() > kHangMs)
+                TerminateProcess(GetCurrentProcess(), kExitDismissed);
+        }
+    }).detach();
+}
+
+}  // namespace
+
+int wmain(int argc, wchar_t **argv) {
+    const Options opt = ParseOptions(argc, argv);
+    animelogon::log::Open(animelogon::paths::LogPath(L"overlay.log"));
+    DeclareDpi();
+    CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    const HRESULT mfStart = MFStartup(MF_VERSION, MFSTARTUP_LITE);
+    if (FAILED(mfStart)) ALOG(L"overlay: MFStartup failed (0x%08X)", mfStart);
+    ProcessIdToSessionId(GetCurrentProcessId(), &g_overlay.session);
+
+    animelogon::instance::Guard guard;
+    if (!opt.windowed && guard.Acquire(animelogon::instance::OverlayName(), true) != animelogon::instance::Result::Acquired) {
+        ALOG(L"overlay: another overlay already owns this desktop -- exiting");
+        return 0;
+    }
+
+    WNDCLASSEXW wc{};
+    wc.cbSize = sizeof(wc);
+    wc.lpfnWndProc = WndProc;
+    wc.hInstance = GetModuleHandleW(nullptr);
+    wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    wc.lpszClassName = kWindowClass;
+    RegisterClassExW(&wc);
+
+    // Session lock and unlock notifications arrive at a window that is never shown.
+    HWND notify = CreateWindowExW(0, kWindowClass, L"", 0, 0, 0, 0, 0, HWND_MESSAGE, nullptr, wc.hInstance, nullptr);
+    if (!opt.windowed && (!notify || !WTSRegisterSessionNotification(notify, NOTIFY_FOR_THIS_SESSION)))
+        ALOG(L"overlay: no session notifications (%lu) -- relying on the session state", GetLastError());
+
+    Presenter presenter;
+    if (!presenter.CreateDevice()) return 2;
+    StartWatchdog();
+
+    // Park, appear, hand back, park again. Once dismissed, the parked wait holds the video off
+    // the screen until the session is used and locked afresh.
+    bool dismissed = opt.dismissed;
+    for (;;) {
+        if (!opt.windowed && !opt.now && !WaitForLogonScreen(&dismissed)) break;
+
+        const LiveEnd end = GoLiveOnce(presenter, opt, wc.hInstance);
+
+        if (opt.windowed || opt.now) break;  // development runs are one-shot
+        if (end == LiveEnd::Dismissed) {
+            dismissed = true;
+            continue;
+        }
+        if (end == LiveEnd::LogonGone) {
+            dismissed = false;
+            continue;
+        }
+        // Leaving: a screen somebody already waved away must stay away in the next process.
+        dismissed = dismissed || g_overlay.woke;
+        break;
+    }
+
+    if (notify) {
+        WTSUnRegisterSessionNotification(notify);
+        DestroyWindow(notify);
+    }
+    MFShutdown();
+    ALOG(L"overlay: gone");
+    return dismissed ? kExitDismissed : 0;
 }
