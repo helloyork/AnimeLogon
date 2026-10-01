@@ -32,6 +32,8 @@ constexpr DWORD kAudioRate = 48000;
 constexpr DWORD kAudioChannels = 2;
 constexpr DWORD kAudioFrameBytes = kAudioChannels * 2;
 constexpr UINT32 kMaxDimension = 3840;
+// The logon screen gains nothing above this, and H.264 cannot carry 4K much faster.
+constexpr UINT32 kMaxFps = 60;
 // RIFF sizes are 32-bit, which caps the data chunk.
 constexpr uint64_t kMaxWavData = 0xFFFFFFFFull - 36;
 constexpr LONGLONG kTicksPerSecond = 10000000;
@@ -412,6 +414,15 @@ Result Run(const std::wstring &source, const std::wstring &outputDir, const std:
     UINT32 fpsNum = 0, fpsDen = 1;
     if (!ConfigureVideo(reader.Get(), &frame, &fpsNum, &fpsDen, &r.error)) return r;
     const UINT32 w = frame.Width(), h = frame.Height();
+    // Faster sources are resampled onto a 60 fps timeline: each slot takes the first frame
+    // due at or after it.
+    const bool resample = (uint64_t)fpsNum > (uint64_t)kMaxFps * fpsDen;
+    if (resample) {
+        fpsNum = kMaxFps;
+        fpsDen = 1;
+    }
+    const LONGLONG slot = 10000000LL * fpsDen / fpsNum;
+    LONGLONG firstTs = -1, slotsWritten = 0;
 
     ComPtr<IMFAttributes> writerAttrs;
     MFCreateAttributes(&writerAttrs, 1);
@@ -459,9 +470,16 @@ Result Run(const std::wstring &source, const std::wstring &outputDir, const std:
             continue;
         }
         if (!sample) continue;
+        if (firstTs < 0) firstTs = ts;
+        if (resample && ts - firstTs < slotsWritten * slot - slot / 2) continue;  // not due yet
         ComPtr<IMFSample> packed;
-        if (FAILED(CopyPicture(sample.Get(), frame, &packed)) || FAILED(writer->WriteSample(stream, packed.Get())))
-            return abandon(L"编码视频时出错。");
+        if (FAILED(CopyPicture(sample.Get(), frame, &packed))) return abandon(L"编码视频时出错。");
+        if (resample) {
+            packed->SetSampleTime(firstTs + slotsWritten * slot);
+            packed->SetSampleDuration(slot);
+            ++slotsWritten;
+        }
+        if (FAILED(writer->WriteSample(stream, packed.Get()))) return abandon(L"编码视频时出错。");
         lastTs = ts;
         wroteAny = true;
         if (duration > 0 && progress) progress(0.9 * std::min(1.0, (double)ts / duration));

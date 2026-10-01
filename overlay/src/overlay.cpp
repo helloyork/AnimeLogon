@@ -419,6 +419,9 @@ LiveEnd GoLiveOnce(Presenter &presenter, const Options &opt, HINSTANCE instance)
     ULONGLONG darkMs = 0, darkSince = 0;
     bool wasOn = true;
     int awayTicks = 0;
+    // What reached the glass on the first display, for the log.
+    int shownFrames = 0;
+    double firstT = -1.0, lastT = 0.0;
     ULONGLONG lastExitCheck = 0;
     ULONGLONG lastKeepTop = 0;
     bool done = false;
@@ -490,6 +493,11 @@ LiveEnd GoLiveOnce(Presenter &presenter, const Options &opt, HINSTANCE instance)
                 if (it == players.end()) continue;
                 bool changed = false;
                 if (it->second->FrameAt(t, &held[i], &changed)) {
+                    if (i == 0 && changed) {
+                        ++shownFrames;
+                        if (firstT < 0) firstT = t;
+                        lastT = t;
+                    }
                     pictures[i].frame = &held[i];
                     pictures[i].videoW = it->second->width();
                     pictures[i].videoH = it->second->height();
@@ -547,6 +555,13 @@ LiveEnd GoLiveOnce(Presenter &presenter, const Options &opt, HINSTANCE instance)
             end = LiveEnd::Leave;
             break;
         }
+    }
+
+    if (shownFrames > 1 && lastT > firstT) {
+        const auto it = players.find(targets.front().videoId);
+        const double videoFps = it != players.end() ? 1.0 / it->second->frameSeconds() : 0.0;
+        ALOG(L"overlay: %d frames in %.1f s of video, %.1f fps shown of %.1f", shownFrames, lastT - firstT,
+             (shownFrames - 1) / (lastT - firstT), videoFps);
     }
 
     // --- tear the appearance down ------------------------------------------------------
