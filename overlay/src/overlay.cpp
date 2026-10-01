@@ -45,8 +45,9 @@ namespace {
 constexpr wchar_t kWindowClass[] = L"AnimeLogonOverlay";
 constexpr int kRescueHotkeyId = 0xA10E;  // Ctrl+Alt+F11
 constexpr float kFadeSeconds = 0.5f;
-// How long before the compositor's frame the next picture is drawn.
-constexpr double kComposeLeadSeconds = 0.002;
+// How long after the compositor's frame the next picture is drawn: right after one frame
+// leaves nearly a whole frame of slack for the next, which a late wake-up would not.
+constexpr double kAfterComposeSeconds = 0.001;
 // A live screen whose loop has not turned for this long is ended, so it can never hold the
 // password box hostage.
 constexpr ULONGLONG kHangMs = 5000;
@@ -442,10 +443,10 @@ LiveEnd GoLiveOnce(Presenter &presenter, const Options &opt, HINSTANCE instance)
         for (auto &[id, player] : players) period = std::min(period, player->frameSeconds());
         period = std::max(period, 1.0 / 120.0);
         if (g_overlay.woke) period = std::min(period, refresh);
-        // Wake just before the compositor's next frame, so each one it shows is a fresh one;
-        // a fixed period drifts against the display and drops frames.
+        // Wake just after the compositor's next frame, so the picture drawn then is ready for
+        // the one after; a fixed period drifts against the display and drops frames.
         double wait = period;
-        if (presenter.SecondsToNextComposition(&wait)) wait = std::max(0.0, wait - kComposeLeadSeconds);
+        if (presenter.SecondsToNextComposition(&wait)) wait += kAfterComposeSeconds;
         LARGE_INTEGER due;
         due.QuadPart = -(LONGLONG)(wait * 1e7);
         SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE);
