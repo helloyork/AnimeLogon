@@ -28,6 +28,9 @@
 #include "animelogon/settings.h"
 
 #include "audio.h"
+#include "bake.h"
+#include "clockface.h"
+#include "clocktext.h"
 #include "events.h"
 #include "inputsink.h"
 #include "keyhook.h"
@@ -48,12 +51,19 @@ constexpr ULONGLONG kHangMs = 5000;
 // Exit code telling the launcher to start the next overlay parked (see kDismissedFlag).
 constexpr int kExitDismissed = 3;
 constexpr wchar_t kDismissedFlag[] = L"--dismissed";
+// How often a parked overlay looks at whether the sign-in background needs baking again.
+constexpr ULONGLONG kBakeCheckMs = 5000;
+// How long the windows stay hidden waiting for the first frame. Until they show, Windows'
+// own background -- that same frame -- is what is on the screen.
+constexpr ULONGLONG kFirstFrameWaitMs = 1500;
 
 struct Options {
     bool windowed = false;   // run on the ordinary desktop, for development
     bool now = false;        // skip the parked wait for a logon screen
     bool dismissed = false;  // the previous overlay was waved away: wait for the screen to be used
+    bool still = false;      // with --windowed: input does not wake it, for screenshots
     int seconds = 0;         // exit after this many seconds, for testing; 0 is forever
+    std::wstring bakePreview;  // write the sign-in background this would bake there, and exit
 };
 
 // Why a live appearance ended, and so what to do next.
@@ -87,8 +97,10 @@ std::atomic<ULONGLONG> g_heartbeat{0};
 
 void Beat() { g_heartbeat.store(GetTickCount64()); }
 
+bool g_still = false;
+
 void Wake() {
-    if (g_overlay.woke) return;
+    if (g_overlay.woke || g_still) return;
     g_overlay.woke = true;
     g_overlay.fadeStart = GetTickCount64();
     // A click wakes too; after any wake no further key is withheld.
@@ -161,6 +173,8 @@ Options ParseOptions(int argc, wchar_t **argv) {
         if (a == L"--windowed") o.windowed = true;
         else if (a == L"--now") o.now = true;
         else if (a == kDismissedFlag) o.dismissed = true;
+        else if (a == L"--still") o.still = true;
+        else if (a == L"--bake-preview" && i + 1 < argc) o.bakePreview = argv[++i];
         else if (a == L"--seconds" && i + 1 < argc) o.seconds = _wtoi(argv[++i]);
     }
     return o;
@@ -192,6 +206,7 @@ bool PumpMessages() {
 // unlocked, or the secure desktop is gone), so the video never fights somebody signing in. It is
 // cleared there, and the next genuine lock brings the video back. Returns false to exit.
 bool WaitForLogonScreen(bool *dismissed) {
+    ULONGLONG bakedAt = 0;
     for (;;) {
         Beat();
         if (events::IsSet(events::kStop) || animelogon::machine::Paused()) return false;
@@ -199,6 +214,13 @@ bool WaitForLogonScreen(bool *dismissed) {
         const bool secure = screen::InputDesktopIsSecure();
         const screen::Session s = screen::ReadSession(g_overlay.session);
         if (s.signedIn) g_overlay.hadUser = true;
+
+        // The background is only ever rewritten while somebody is using the session.
+        if (!secure && s.console && s.signedIn && !s.locked && !g_overlay.lockNotified &&
+            GetTickCount64() - bakedAt > kBakeCheckMs) {
+            bake::Refresh();
+            bakedAt = GetTickCount64();
+        }
 
         // A dismissed appearance stays dismissed until the screen is used again.
         if (*dismissed) {
@@ -262,6 +284,7 @@ LiveEnd GoLiveOnce(Presenter &presenter, const Options &opt, HINSTANCE instance)
         const animelogon::MonitorInfo &m = monitors.front();
         t.rect = {m.rect.left + 80, m.rect.top + 80, m.rect.left + 80 + 960, m.rect.top + 80 + 540};
         t.canvas = t.rect;
+        t.clock = settings.clock.enabled;
         t.videoId = settings.video.empty() ? (animelogon::ListVideos().empty() ? std::wstring()
                                                                                : animelogon::ListVideos().front().id)
                                            : settings.video;
@@ -305,11 +328,26 @@ LiveEnd GoLiveOnce(Presenter &presenter, const Options &opt, HINSTANCE instance)
         return LiveEnd::Dismissed;  // park until the screen is used
     }
 
+    // The clock is drawn into the video's own frames, so it fades with them.
+    ClockFace clock;
+    bool anyClock = false;
+    for (const Presenter::Target &t : targets) anyClock = anyClock || t.clock;
+    const bool withClock = anyClock && clock.Init(presenter.device(), settings.clock, clocktext::Resolve(settings.clock));
+
     if (!presenter.CreateWindows(targets, kWindowClass, instance)) {
         ALOG(L"overlay: could not create the windows");
         return LiveEnd::Leave;
     }
     g_overlay.inputWindow = presenter.primary();
+    if (withClock) presenter.SetClock(&clock);
+    // By default the clock goes where Windows puts its password box, which LogonUI may not
+    // have drawn yet; it is looked for again below until found.
+    bool clockPlaced = !withClock || opt.windowed || settings.clock.displays != animelogon::ClockDisplays::Auto;
+    auto placeClock = [&] {
+        RECT monitor{};
+        if (!clockPlaced && screen::CredentialMonitor(&monitor) && presenter.MoveClockTo(monitor)) clockPlaced = true;
+    };
+    placeClock();
 
     // Without raw input nothing could wake the screen, so it is never covered.
     if (!inputsink::Register(g_overlay.inputWindow)) {
@@ -344,6 +382,30 @@ LiveEnd GoLiveOnce(Presenter &presenter, const Options &opt, HINSTANCE instance)
     }
     HPOWERNOTIFY power =
         RegisterPowerSettingNotification(g_overlay.inputWindow, &kConsoleDisplayState, DEVICE_NOTIFY_WINDOW_HANDLE);
+    // Hidden until every display has its first frame, so the change from Windows' background
+    // (that frame, baked) to the video is not a change at all.
+    for (const ULONGLONG until = GetTickCount64() + kFirstFrameWaitMs;;) {
+        Beat();
+        std::vector<Presenter::Picture> pictures(targets.size());
+        std::vector<VideoPlayer::Frame> held(targets.size());
+        bool all = true;
+        for (size_t i = 0; i < targets.size(); ++i) {
+            auto it = players.find(targets[i].videoId);
+            bool changed = false;
+            if (it != players.end() && it->second->FrameAt(0.0, &held[i], &changed)) {
+                pictures[i].frame = &held[i];
+                pictures[i].videoW = it->second->width();
+                pictures[i].videoH = it->second->height();
+            } else {
+                all = false;
+            }
+        }
+        if (all || GetTickCount64() >= until) {
+            presenter.Render(pictures, settings.scaling, 0.0f, 1.0f);
+            break;
+        }
+        Sleep(5);
+    }
     Beat();
     presenter.Show();
     g_live.store(true);
@@ -402,6 +464,7 @@ LiveEnd GoLiveOnce(Presenter &presenter, const Options &opt, HINSTANCE instance)
         }
 
         audio.Tick();
+        if (withClock) clock.Tick();
 
         double t = 0.0;
         if (!audio.TrackClock(&t)) {
@@ -461,6 +524,7 @@ LiveEnd GoLiveOnce(Presenter &presenter, const Options &opt, HINSTANCE instance)
         // Leave when the logon screen does (real mode), after three readings.
         if (!opt.windowed && now - lastExitCheck > 500) {
             lastExitCheck = now;
+            placeClock();
             const screen::Session s = screen::ReadSession(g_overlay.session);
             const bool stillLogon = s.console && (!s.signedIn || s.locked);
             if (!screen::InputDesktopIsSecure() && !stillLogon) {
@@ -520,6 +584,15 @@ void StartWatchdog() {
 
 int wmain(int argc, wchar_t **argv) {
     const Options opt = ParseOptions(argc, argv);
+    g_still = opt.windowed && opt.still;
+    if (!opt.bakePreview.empty()) {
+        DeclareDpi();
+        CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+        MFStartup(MF_VERSION, MFSTARTUP_LITE);
+        const bool ok = bake::Refresh(opt.bakePreview);
+        MFShutdown();
+        return ok ? 0 : 1;
+    }
     animelogon::log::Open(animelogon::paths::LogPath(L"overlay.log"));
     DeclareDpi();
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);

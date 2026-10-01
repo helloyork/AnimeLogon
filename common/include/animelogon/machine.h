@@ -20,6 +20,19 @@ bool WindowsLockScreenApplied();
 // Group policy that makes Windows ignore the lock screen image and paint a flat colour.
 bool LogonBackgroundDisabledByPolicy();
 
+// Each account's "Show lock screen background picture on the sign-in screen". Windows keeps
+// it where only SYSTEM may write, so these run in the service. Show turns it on wherever it
+// is off, recording the original; Restore puts the originals back.
+DWORD ShowSignInBackground();
+DWORD RestoreSignInBackground();
+bool SignInBackgroundRestorePending();
+// The service's control code for RestoreSignInBackground, and the start argument that runs
+// it once in a service that is not running.
+constexpr DWORD kServiceControlRestore = 128;
+constexpr const wchar_t *kServiceRestoreArg = L"--restore";
+// Has the service put the sign-in background settings back; succeeds if nothing is pending.
+DWORD AskServiceToRestore();
+
 // --- The service -------------------------------------------------------------------
 DWORD InstallService(const std::wstring &launcherPath);
 DWORD RemoveService();

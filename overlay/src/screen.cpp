@@ -36,6 +36,35 @@ Session ReadSession(DWORD session) {
     return s;
 }
 
+bool CredentialMonitor(RECT *monitor) {
+    HWND best = nullptr;
+    LONGLONG bestArea = 0;
+    for (HWND w = GetTopWindow(nullptr); w; w = GetWindow(w, GW_HWNDNEXT)) {
+        if (!IsWindowVisible(w)) continue;
+        RECT r{};
+        GetWindowRect(w, &r);
+        const LONGLONG area = (LONGLONG)(r.right - r.left) * (r.bottom - r.top);
+        if (area <= bestArea) continue;
+        DWORD pid = 0;
+        GetWindowThreadProcessId(w, &pid);
+        HANDLE p = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+        if (!p) continue;
+        wchar_t image[MAX_PATH] = L"";
+        DWORD n = ARRAYSIZE(image);
+        const bool ok = QueryFullProcessImageNameW(p, 0, image, &n) != FALSE;
+        CloseHandle(p);
+        const wchar_t *name = wcsrchr(image, L'\\');
+        if (ok && name && _wcsicmp(name + 1, L"LogonUI.exe") == 0) {
+            best = w;
+            bestArea = area;
+        }
+    }
+    MONITORINFO mi{sizeof(mi)};
+    if (!best || !GetMonitorInfoW(MonitorFromWindow(best, MONITOR_DEFAULTTONULL), &mi)) return false;
+    *monitor = mi.rcMonitor;
+    return true;
+}
+
 bool ShutdownUnderway() {
     if (GetSystemMetrics(SM_SHUTTINGDOWN)) return true;
     const DWORD self = GetCurrentProcessId();

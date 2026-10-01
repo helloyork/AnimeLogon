@@ -112,6 +112,28 @@ Settings ParseSettings(const std::wstring &text, std::vector<std::wstring> *prob
             ok = ParseBool(value, &s.audio.videoTrack.enabled);
         } else if (key == L"video_audio_volume") {
             ok = ParseVolume(value, &s.audio.videoTrack.volume);
+        } else if (key == L"clock") {
+            ok = ParseBool(value, &s.clock.enabled);
+        } else if (key == L"clock_displays") {
+            ok = Parse(std::wstring(value), &s.clock.displays);
+        } else if (key == L"clock_position") {
+            ok = Parse(std::wstring(value), &s.clock.anchor);
+        } else if (key == L"clock_size") {
+            ok = Parse(std::wstring(value), &s.clock.size);
+        } else if (key == L"clock_font") {
+            const bool automatic = value.empty() || EqualsNoCase(value, L"auto");
+            ok = automatic || IsFontFamilyName(std::wstring(value));
+            if (ok) s.clock.font = automatic ? std::wstring() : std::wstring(value);
+        } else if (key == L"clock_color") {
+            ok = ParseColor(std::wstring(value), &s.clock.color);
+        } else if (key == L"clock_date") {
+            ok = Parse(std::wstring(value), &s.clock.date);
+        } else if (key == L"clock_24_hour") {
+            ok = ParseBool(value, &s.clock.hour24);
+        } else if (key == L"clock_language") {
+            const bool automatic = EqualsNoCase(value, L"auto");
+            ok = automatic || IsClockLanguage(std::wstring(value));
+            if (ok) s.clock.language = automatic ? std::wstring() : std::wstring(value);
         } else {
             if (problems) problems->push_back(Format(L"line %zu: unknown key '%.*s'", lineNo, (int)key.size(), key.data()));
             continue;
@@ -133,6 +155,16 @@ std::wstring SerializeSettings(const Settings &s) {
     out += L"audio_volume = " + std::to_wstring(s.audio.volume) + L"\r\n";
     out += L"video_audio = " + std::wstring(s.audio.videoTrack.enabled ? L"true" : L"false") + L"\r\n";
     out += L"video_audio_volume = " + std::to_wstring(s.audio.videoTrack.volume) + L"\r\n";
+    const ClockSettings &c = s.clock;
+    out += L"clock = " + std::wstring(c.enabled ? L"true" : L"false") + L"\r\n";
+    out += L"clock_displays = " + std::wstring(ToString(c.displays)) + L"\r\n";
+    out += L"clock_position = " + std::wstring(ToString(c.anchor)) + L"\r\n";
+    out += L"clock_size = " + std::wstring(ToString(c.size)) + L"\r\n";
+    out += L"clock_font = " + (c.font.empty() ? std::wstring(L"auto") : c.font) + L"\r\n";
+    out += L"clock_color = " + FormatColor(c.color) + L"\r\n";
+    out += L"clock_date = " + std::wstring(ToString(c.date)) + L"\r\n";
+    out += L"clock_24_hour = " + std::wstring(c.hour24 ? L"true" : L"false") + L"\r\n";
+    out += L"clock_language = " + (c.language.empty() ? std::wstring(L"auto") : c.language) + L"\r\n";
     return out;
 }
 

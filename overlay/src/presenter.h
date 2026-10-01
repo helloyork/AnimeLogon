@@ -15,12 +15,15 @@
 #include "animelogon/settings.h"
 #include "player.h"
 
+class ClockFace;
+
 class Presenter {
 public:
     struct Target {
         RECT rect{};             // the display, in desktop pixels
         RECT canvas{};           // what the video is fitted to: the display, or all of them
         std::wstring videoId;    // empty draws black
+        bool clock = false;      // draw the clock over it
     };
 
     Presenter() = default;
@@ -42,6 +45,11 @@ public:
     HWND primary() const { return windows_.empty() ? nullptr : windows_.front().hwnd; }
     bool Owns(HWND hwnd) const;
     const std::vector<Target> &targets() const { return targets_; }
+
+    // Drawn over the targets that ask for it; null for none. Not owned.
+    void SetClock(ClockFace *clock) { clock_ = clock; }
+    // Puts the clock on the target covering `monitor` alone. False if none covers it.
+    bool MoveClockTo(const RECT &monitor);
 
     void Show();
     void Hide();
@@ -85,4 +93,6 @@ private:
     bool visible_ = false;
     float opacity_ = -1.0f;
     bool lost_ = false;
+    ClockFace *clock_ = nullptr;
+    bool clockFailed_ = false;
 };

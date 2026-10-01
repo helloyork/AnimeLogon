@@ -8,6 +8,7 @@
 #include <shellapi.h>
 #include <shlobj.h>
 
+#include <algorithm>
 #include <atomic>
 #include <memory>
 #include <string>
@@ -25,6 +26,7 @@
 
 #include "commit.h"
 #include "devices.h"
+#include "fonts.h"
 #include "transcode.h"
 
 #pragma comment(lib, "comdlg32.lib")
@@ -36,7 +38,9 @@ using namespace animelogon;
 namespace {
 
 constexpr float kNavW = 200.0f;
-constexpr float kNavTop = kCaptionH + 12.0f;
+constexpr float kNavTop = kCaptionH + 48.0f;
+constexpr float kPageTop = kCaptionH + 56.0f;  // where the scrolling part of a page starts
+constexpr float kWheelStep = 48.0f;
 constexpr float kNavRowH = 36.0f;
 constexpr float kNavPitch = 40.0f;
 constexpr float kCardH = 68.0f;
@@ -52,6 +56,7 @@ struct NavItem {
 const NavItem kNav[] = {
     {glyph::kPlay, L"视频"},
     {glyph::kFullScreen, L"显示与登录"},
+    {glyph::kRecent, L"时钟"},
     {glyph::kVolume, L"声音"},
     {glyph::kSettings, L"系统"},
     {glyph::kInfo, L"关于"},
@@ -68,6 +73,23 @@ std::wstring PickVideoFile(HWND owner) {
     ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
     return GetOpenFileNameW(&ofn) ? std::wstring(buf) : std::wstring();
 }
+
+struct ColorChoice {
+    const wchar_t *name;
+    uint32_t rgb;
+};
+const ColorChoice kColors[] = {
+    {L"白色", 0xFFFFFF}, {L"暖白", 0xFFF1DC}, {L"浅灰", 0xD4D4D4}, {L"黑色", 0x101010},
+    {L"天蓝", 0x9AD0FF}, {L"樱粉", 0xFFC2D4}, {L"金色", 0xFFD27A},
+};
+
+struct LanguageChoice {
+    const wchar_t *name, *locale;
+};
+const LanguageChoice kLanguages[] = {
+    {L"跟随区域格式", L""}, {L"简体中文", L"zh-CN"}, {L"繁體中文", L"zh-TW"},
+    {L"日本語", L"ja-JP"},   {L"한국어", L"ko-KR"},   {L"English", L"en-US"},
+};
 
 std::wstring MegaBytes(uint64_t bytes) {
     wchar_t b[32];
@@ -91,6 +113,8 @@ struct Config : Window {
     std::vector<VideoInfo> library;
     std::vector<MonitorInfo> monitors;
     std::vector<devices::Output> outputs;
+    std::vector<fonts::Family> families;
+    bool familiesRead = false;
 
     // Import worker.
     std::thread worker;
@@ -106,6 +130,11 @@ struct Config : Window {
 
     motion::Span nav;
     bool navSet = false;
+
+    // The page below its title scrolls when it is taller than the window.
+    float scroll = 0.0f;
+    float contentBottom = 0.0f;
+    ScrollBar *bar = nullptr;
 
     struct Card {
         D2D1_RECT_F r;
@@ -171,8 +200,24 @@ struct Config : Window {
     }
 
     void GoTo(int p) {
+        if (p != page) scroll = 0.0f;
         page = p;
         Layout();
+        Invalidate();
+    }
+
+    D2D1_RECT_F ClipRect() const override { return {kNavW, kPageTop, ClientW(), ClientH()}; }
+    void ContentTransform(float *dy, float *opacity) const override {
+        *dy = -scroll;
+        *opacity = 1.0f;
+    }
+    float MaxScroll() const { return std::max(0.0f, contentBottom + 24.0f - ClientH()); }
+    void ScrollTo(float y) {
+        scroll = std::clamp(y, 0.0f, MaxScroll());
+        if (bar) {
+            bar->value = bar->drawn = scroll;
+            bar->Wake();
+        }
         Invalidate();
     }
 
@@ -265,7 +310,11 @@ struct Config : Window {
         GoTo(page);
     }
 
-    bool OnAppMessage(UINT msg, WPARAM, LPARAM) override {
+    bool OnAppMessage(UINT msg, WPARAM wp, LPARAM) override {
+        if (msg == WM_MOUSEWHEEL) {
+            ScrollTo(scroll - (float)GET_WHEEL_DELTA_WPARAM(wp) / WHEEL_DELTA * kWheelStep);
+            return true;
+        }
         if (msg == kImportProgress) {
             if (progress) progress->value = importPermille.load() / 1000.0f;
             Invalidate();
@@ -288,6 +337,7 @@ struct Config : Window {
                          float height = kCardH);
     void PushHeading(const wchar_t *text);
     void AddVolumeSlider(int *volume, const wchar_t *icon, const wchar_t *title, const wchar_t *detail);
+    void LayoutClock();
 };
 
 D2D1_RECT_F Config::PushCard(const wchar_t *icon, std::wstring title, std::wstring detail, float controlW,
@@ -312,6 +362,116 @@ void Config::AddVolumeSlider(int *volume, const wchar_t *icon, const wchar_t *ti
         Invalidate();
     };
     s->onCommit = [this](float) { Save(); };
+}
+
+void Config::LayoutClock() {
+    ClockSettings &c = set.clock;
+    Add(new ToggleSwitch(L"", c.enabled, [this](bool on) {
+            set.clock.enabled = on;
+            Save();
+            GoTo(page);
+        }))
+        ->rect = PushCard(glyph::kRecent, L"显示时钟", L"在视频上显示时间和日期，随视频一起淡出。", 40);
+    cards.back().aside = c.enabled ? L"开" : L"关";
+    if (!c.enabled) return;
+
+    Add(new DropDown({L"密码界面所在的显示器", L"主显示器", L"所有显示器"}, (int)c.displays, [this](int i) {
+            set.clock.displays = (ClockDisplays)i;
+            Save();
+        }))
+        ->rect = PushCard(glyph::kFullScreen, L"显示在", L"视频在每个屏幕上播放，时钟只在这里。", 220);
+    Add(new DropDown({L"左上", L"上方居中", L"右上", L"左侧居中", L"居中", L"右侧居中", L"左下", L"下方居中", L"右下"},
+                     (int)c.anchor, [this](int i) {
+                         set.clock.anchor = (ClockAnchor)i;
+                         Save();
+                     }))
+        ->rect = PushCard(glyph::kView, L"位置", L"边距随分辨率自动调整。", 160);
+    Add(new Segmented({L"小", L"中", L"大", L"特大"}, (int)c.size, [this](int i) {
+            set.clock.size = (ClockSize)i;
+            Save();
+        }))
+        ->rect = PushCard(glyph::kZoomIn, L"大小", L"相对屏幕高度缩放。", 200);
+
+    PushHeading(L"样式");
+    if (!familiesRead) {
+        families = fonts::MachineFamilies();
+        familiesRead = true;
+    }
+    std::vector<std::wstring> fontNames = {L"默认（Segoe UI）"};
+    int fontSel = 0;
+    for (size_t i = 0; i < families.size(); ++i) {
+        fontNames.push_back(families[i].name);
+        if (!c.font.empty() && EqualsNoCase(c.font, families[i].stored)) fontSel = (int)i + 1;
+    }
+    if (!c.font.empty() && fontSel == 0) {  // no longer installed for all users
+        fontNames.push_back(c.font + L"（未安装）");
+        fontSel = (int)fontNames.size() - 1;
+    }
+    Add(new DropDown(fontNames, fontSel, [this](int i) {
+            if (i == 0) set.clock.font.clear();
+            else if (i - 1 < (int)families.size()) set.clock.font = families[i - 1].stored;
+            Save();
+        }))
+        ->rect = PushCard(glyph::kEdit, L"字体", L"仅列出为所有用户安装的字体。", 220);
+
+    std::vector<std::wstring> colorNames;
+    int colorSel = -1;
+    for (size_t i = 0; i < ARRAYSIZE(kColors); ++i) {
+        colorNames.push_back(kColors[i].name);
+        if (kColors[i].rgb == c.color) colorSel = (int)i;
+    }
+    if (colorSel < 0) {
+        colorNames.push_back(L"自定义");
+        colorSel = (int)colorNames.size() - 1;
+    }
+    Add(new DropDown(colorNames, colorSel, [this](int i) {
+            if (i < (int)ARRAYSIZE(kColors)) set.clock.color = kColors[i].rgb;
+            Save();
+            GoTo(page);
+        }))
+        ->rect = PushCard(glyph::kColor, L"颜色", L"文字带有阴影，在明亮的画面上也能看清。", 140);
+    TextBox *hex = Add(new TextBox());
+    hex->SetText(FormatColor(c.color));
+    hex->placeholder = L"#RRGGBB";
+    hex->onCommit = [this](const std::wstring &text) {
+        uint32_t rgb = 0;
+        if (ParseColor(std::wstring(Trim(text)), &rgb)) {
+            if (rgb != set.clock.color) {
+                set.clock.color = rgb;
+                Save();
+                GoTo(page);
+            }
+        } else {
+            Note(L"颜色格式应为 #RRGGBB。");
+        }
+    };
+    hex->rect = PushCard(glyph::kColor, L"颜色代码", L"输入十六进制颜色，例如 #FFD27A。", 120);
+
+    PushHeading(L"格式");
+    Add(new Segmented({L"不显示", L"长日期", L"带星期"}, (int)c.date, [this](int i) {
+            set.clock.date = (DateStyle)i;
+            Save();
+        }))
+        ->rect = PushCard(glyph::kCalendar, L"日期", L"长日期与 Windows 一致。", 240);
+    Add(new ToggleSwitch(L"", c.hour24, [this](bool on) {
+            set.clock.hour24 = on;
+            Save();
+            GoTo(page);
+        }))
+        ->rect = PushCard(glyph::kRecent, L"24 小时制", L"关闭时跟随区域格式。", 40);
+    cards.back().aside = c.hour24 ? L"开" : L"关";
+    int langSel = 0;
+    std::vector<std::wstring> langNames;
+    for (size_t i = 0; i < ARRAYSIZE(kLanguages); ++i) {
+        langNames.push_back(kLanguages[i].name);
+        if (c.language == kLanguages[i].locale) langSel = (int)i;
+    }
+    Add(new DropDown(langNames, langSel, [this](int i) {
+            set.clock.language = kLanguages[i].locale;
+            Save();
+        }))
+        ->rect = PushCard(glyph::kGlobe, L"语言",
+                          L"默认与任务栏时钟一致。", 160);
 }
 
 void Config::PushHeading(const wchar_t *text) {
@@ -340,7 +500,8 @@ void Config::Layout() {
 
     layoutLeft = kNavW + 12;
     layoutRight = w - 24;
-    layoutY = kCaptionH + 60;
+    layoutY = kPageTop + 4;
+    const size_t firstPageWidget = widgets.size();
 
     switch (page) {
     case 0:  // 视频
@@ -386,7 +547,7 @@ void Config::Layout() {
                               Save();
                               GoTo(page);
                           }))
-            ->rect = PushCard(glyph::kFullScreen, L"多显示器", L"选择视频在多个屏幕上的显示方式。", 260);
+            ->rect = PushCard(glyph::kFullScreen, L"多显示器", L"视频在多个屏幕上的显示方式。", 340);
         Add(new Segmented({L"填充", L"适应", L"拉伸"}, (int)set.scaling,
                           [this](int i) {
                               set.scaling = (Scaling)i;
@@ -414,7 +575,10 @@ void Config::Layout() {
             }
         }
         break;
-    case 2: {  // 声音
+    case 2:  // 时钟
+        LayoutClock();
+        break;
+    case 3: {  // 声音
         Add(new ToggleSwitch(L"", set.audio.enabled, [this](bool on) {
                 set.audio.enabled = on;
                 Save();
@@ -448,7 +612,7 @@ void Config::Layout() {
         }
         break;
     }
-    case 3: {  // 系统
+    case 4: {  // 系统
         const bool on = machine::IsOn();
         Add(new ToggleSwitch(L"", on, [this, on](bool) { Switch(!on); }))
             ->rect = PushCard(glyph::kLock, L"启用 AnimeLogon", L"关闭后登录界面恢复系统默认，设置与视频保留。", 40);
@@ -466,10 +630,23 @@ void Config::Layout() {
                                    uninstall->PreferredWidth(measure));
         break;
     }
-    case 4:  // 关于
+    case 5:  // 关于
         PushCard(glyph::kInfo, L"AnimeLogon 0.1.0", L"用自己绘制的叠层替换 Windows 10/11 的锁屏界面。", 0);
         PushCard(glyph::kSettings, L"MIT 许可证 © 2026 Nomen (helloyork)", L"界面基于 Micula " MICULA_VERSION_STRING, 0);
         break;
+    }
+
+    for (size_t i = firstPageWidget; i < widgets.size(); ++i) widgets[i]->scrolls = true;
+    contentBottom = layoutY;
+    scroll = std::clamp(scroll, 0.0f, MaxScroll());
+    bar = nullptr;
+    if (MaxScroll() > 0.0f) {
+        bar = Add(new ScrollBar([this](float to, bool) { ScrollTo(to); }));
+        bar->rect = {w - 2 - ScrollBar::kSize, kPageTop, w - 2, ClientH() - 2};
+        bar->area = ClipRect();
+        bar->viewport = ClientH() - kPageTop;
+        bar->extent = contentBottom + 24.0f - kPageTop;
+        bar->value = bar->drawn = scroll;
     }
 }
 
@@ -489,6 +666,9 @@ void Config::PaintPage(const Painter &p) {
 
     p.Text(kNav[page].label, {left, kCaptionH + 8, w - 24, kCaptionH + 52}, p.font->title, c.textPrimary);
 
+    // The cards scroll with the page's controls, under the same clip.
+    p.rt->PushAxisAlignedClip(ClipRect(), D2D1_ANTIALIAS_MODE_ALIASED);
+    p.rt->SetTransform(D2D1::Matrix3x2F::Translation(0.0f, -scroll));
     for (const Card &cd : cards) {
         if (!cd.icon) {  // a heading
             p.Text(cd.title, {cd.r.left, cd.r.top, cd.r.right, cd.r.bottom}, p.font->bodyStrong, c.textPrimary);
@@ -508,6 +688,8 @@ void Config::PaintPage(const Painter &p) {
         p.Text(cd.title, {r.left + 50, r.top + 13, textRight, r.top + 33}, p.font->body, c.textPrimary);
         p.Text(cd.detail, {r.left + 50, r.top + 33, textRight, r.top + 53}, p.font->caption, c.textSecondary);
     }
+    p.rt->SetTransform(D2D1::Matrix3x2F::Identity());
+    p.rt->PopAxisAlignedClip();
 
     if (!toast.empty())
         p.Text(toast, {left, ClientH() - 36.0f, w - 24, ClientH() - 12.0f}, p.font->body, c.accent);

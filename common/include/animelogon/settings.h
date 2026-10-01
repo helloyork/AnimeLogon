@@ -6,6 +6,8 @@
 #include <string>
 #include <vector>
 
+#include "animelogon/clock.h"
+
 namespace animelogon {
 
 enum class MonitorMode {
@@ -38,6 +40,7 @@ struct Settings {
     std::wstring video;                          // library id; used unless a display has its own
     std::map<std::wstring, std::wstring> screens; // monitor key -> library id (PerMonitor)
     AudioSettings audio;
+    ClockSettings clock;
 
     // The video a display should play, or empty for none.
     std::wstring VideoFor(const std::wstring &monitorKey) const;

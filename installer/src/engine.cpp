@@ -224,13 +224,11 @@ Report Install(const std::wstring &targetDir) {
     }
     step(L"复制程序文件");
 
-    // The sign-in background: fixed bytes, rewritten only if they differ or the file is not
-    // administrators-only (every change costs one black credential screen).
+    // The sign-in background. One already in place is kept -- the overlay may have baked it
+    // from the video -- since every change costs one black credential screen.
     const std::vector<uint8_t> png = background::Render();
-    std::vector<uint8_t> existing;
     std::wstring why;
-    if (!(secure::IsTrusted(paths::BackgroundPath(), &why) &&
-          secure::ReadFileBytes(paths::BackgroundPath(), &existing, 4 * 1024 * 1024) && existing == png)) {
+    if (!secure::IsTrusted(paths::BackgroundPath(), &why)) {
         e = secure::WriteBytes(paths::BackgroundPath(), png.data(), png.size());
         if (e != ERROR_SUCCESS) return fail(WithError(L"无法写入背景图", e));
     }
@@ -299,6 +297,10 @@ Report Uninstall(bool keepData) {
     if (e != ERROR_SUCCESS && e != ERROR_FILE_NOT_FOUND) problem(L"删除卸载项", e);
     step(L"移除卸载项与快捷方式");
 
+    // Only the service can write these back, so before it goes.
+    const DWORD signIn = machine::AskServiceToRestore();
+    if (signIn != ERROR_SUCCESS) problem(L"恢复登录屏幕背景设置", signIn);
+
     e = machine::RemoveService();
     if (e != ERROR_SUCCESS) problem(L"删除服务", e);
     step(L"停止并删除服务");
@@ -317,7 +319,7 @@ Report Uninstall(bool keepData) {
         machine::ClearPausedMarker();
     }
     // A failed restore keeps its recorded originals for the next uninstall.
-    e = machine::RemoveInstallRecord(restored != ERROR_SUCCESS);
+    e = machine::RemoveInstallRecord(restored != ERROR_SUCCESS || signIn != ERROR_SUCCESS);
     if (e != ERROR_SUCCESS) problem(L"删除安装记录", e);
 
     if (!dir.empty()) {

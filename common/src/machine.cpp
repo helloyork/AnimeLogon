@@ -13,6 +13,9 @@ constexpr const wchar_t *kPolicyKey = L"SOFTWARE\\Policies\\Microsoft\\Windows\\
 constexpr const wchar_t *kCspKey = L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\PersonalizationCSP";
 constexpr const wchar_t *kSystemPolicyKey = L"SOFTWARE\\Policies\\Microsoft\\Windows\\System";
 constexpr const wchar_t *kRestoreKey = L"SOFTWARE\\AnimeLogon\\Restore";
+constexpr const wchar_t *kProtectedKey = L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\SystemProtectedUserData";
+constexpr const wchar_t *kHideValue = L"HideLogonBackgroundImage";
+constexpr const wchar_t *kSignInTag = L"SignIn.";
 
 struct Tracked {
     const wchar_t *key;
@@ -158,6 +161,53 @@ DWORD Restore(const Tracked &t) {
     return e;
 }
 
+// Removed only while it says 1, and recorded first.
+const Tracked kDisabledByPolicy = {kSystemPolicyKey, L"DisableLogonBackgroundImage",
+                                   L"System.DisableLogonBackgroundImage"};
+
+std::wstring LockScreenKey(const std::wstring &sid) {
+    return std::wstring(kProtectedKey) + L"\\" + sid + L"\\AnyoneRead\\LockScreen";
+}
+
+// The accounts Windows keeps the setting for: local and domain users, and SYSTEM's own,
+// which the sign-in screen falls back to.
+std::vector<std::wstring> ProtectedSids() {
+    std::vector<std::wstring> sids;
+    HKEY h = nullptr;
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, kProtectedKey, 0, KEY_ENUMERATE_SUB_KEYS | KEY_WOW64_64KEY, &h) !=
+        ERROR_SUCCESS)
+        return sids;
+    wchar_t name[256];
+    for (DWORD i = 0;; ++i) {
+        DWORD n = ARRAYSIZE(name);
+        if (RegEnumKeyExW(h, i, name, &n, nullptr, nullptr, nullptr, nullptr) != ERROR_SUCCESS) break;
+        const std::wstring sid(name, n);
+        if (sid == L"S-1-5-18" || sid.rfind(L"S-1-5-21-", 0) == 0) sids.push_back(sid);
+    }
+    RegCloseKey(h);
+    return sids;
+}
+
+// Restore-key values recording a sign-in background setting, by SID.
+std::vector<std::wstring> RecordedSignInSids() {
+    std::vector<std::wstring> sids;
+    HKEY h = nullptr;
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, kRestoreKey, 0, KEY_QUERY_VALUE | KEY_WOW64_64KEY, &h) != ERROR_SUCCESS)
+        return sids;
+    const std::wstring prefix = kSignInTag, suffix = L".Recorded";
+    wchar_t name[512];
+    for (DWORD i = 0;; ++i) {
+        DWORD n = ARRAYSIZE(name);
+        if (RegEnumValueW(h, i, name, &n, nullptr, nullptr, nullptr, nullptr) != ERROR_SUCCESS) break;
+        const std::wstring v(name, n);
+        if (v.size() > prefix.size() + suffix.size() && v.rfind(prefix, 0) == 0 &&
+            v.compare(v.size() - suffix.size(), suffix.size(), suffix) == 0)
+            sids.push_back(v.substr(prefix.size(), v.size() - prefix.size() - suffix.size()));
+    }
+    RegCloseKey(h);
+    return sids;
+}
+
 class Service {
 public:
     explicit Service(DWORD access) {
@@ -192,6 +242,13 @@ DWORD ApplyWindowsLockScreen(const std::wstring &image) {
     if (e != ERROR_SUCCESS) return e;
     e = WriteDword(kPolicyKey, L"NoLockScreen", 1);
     if (e != ERROR_SUCCESS) return e;
+    // The policy that paints a flat colour instead of the background goes, recorded.
+    DWORD disabled = 0;
+    if (AsDword(ReadValue(kDisabledByPolicy.key, kDisabledByPolicy.value), &disabled) && disabled) {
+        e = Remember(kDisabledByPolicy);
+        if (e == ERROR_SUCCESS) e = DeleteValue(kDisabledByPolicy.key, kDisabledByPolicy.value);
+        if (e != ERROR_SUCCESS) return e;
+    }
     // Every change to these values costs one black sign-in background, so an unchanged
     // value is left alone.
     DWORD status = 0;
@@ -204,7 +261,7 @@ DWORD ApplyWindowsLockScreen(const std::wstring &image) {
 }
 
 DWORD RestoreWindowsLockScreen() {
-    DWORD first = ERROR_SUCCESS;
+    DWORD first = Restore(kDisabledByPolicy);
     for (const Tracked &t : kTracked) {
         const DWORD e = Restore(t);
         if (e != ERROR_SUCCESS && first == ERROR_SUCCESS) first = e;
@@ -226,6 +283,52 @@ bool WindowsLockScreenApplied() {
 bool LogonBackgroundDisabledByPolicy() {
     DWORD v = 0;
     return AsDword(ReadValue(kSystemPolicyKey, L"DisableLogonBackgroundImage"), &v) && v != 0;
+}
+
+DWORD ShowSignInBackground() {
+    DWORD first = ERROR_SUCCESS;
+    for (const std::wstring &sid : ProtectedSids()) {
+        const std::wstring key = LockScreenKey(sid), tag = kSignInTag + sid;
+        DWORD hidden = 0;
+        if (!AsDword(ReadValue(key.c_str(), kHideValue), &hidden) || !hidden) continue;  // absent or 0: shown
+        const Tracked t{key.c_str(), kHideValue, tag.c_str()};
+        DWORD e = Remember(t);
+        if (e == ERROR_SUCCESS) e = WriteDword(key.c_str(), kHideValue, 0);
+        if (e == ERROR_SUCCESS) ALOG(L"sign-in background: turned on for %s", sid.c_str());
+        else if (first == ERROR_SUCCESS) first = e;
+    }
+    return first;
+}
+
+DWORD RestoreSignInBackground() {
+    DWORD first = ERROR_SUCCESS;
+    for (const std::wstring &sid : RecordedSignInSids()) {
+        const std::wstring key = LockScreenKey(sid), tag = kSignInTag + sid;
+        const DWORD e = Restore(Tracked{key.c_str(), kHideValue, tag.c_str()});
+        if (e != ERROR_SUCCESS && first == ERROR_SUCCESS) first = e;
+    }
+    return first;
+}
+
+bool SignInBackgroundRestorePending() { return !RecordedSignInSids().empty(); }
+
+DWORD AskServiceToRestore() {
+    if (!SignInBackgroundRestorePending()) return ERROR_SUCCESS;
+    Service s(SERVICE_USER_DEFINED_CONTROL | SERVICE_START | SERVICE_QUERY_STATUS);
+    if (!s.get()) return s.error();
+    SERVICE_STATUS status{};
+    if (QueryServiceStatus(s.get(), &status) && status.dwCurrentState == SERVICE_RUNNING) {
+        if (!ControlService(s.get(), kServiceControlRestore, &status)) return GetLastError();
+    } else {
+        const wchar_t *args[] = {paths::kServiceName, kServiceRestoreArg};
+        if (!StartServiceW(s.get(), 2, args)) return GetLastError();
+        // It restores and stops by itself.
+        for (int i = 0; i < 100; ++i) {
+            if (QueryServiceStatus(s.get(), &status) && status.dwCurrentState == SERVICE_STOPPED) break;
+            Sleep(100);
+        }
+    }
+    return SignInBackgroundRestorePending() ? ERROR_CAN_NOT_COMPLETE : ERROR_SUCCESS;
 }
 
 DWORD InstallService(const std::wstring &launcherPath) {
@@ -345,12 +448,13 @@ DWORD TurnOn(const std::wstring &launcherPath, const std::wstring &image) {
 }
 
 DWORD TurnOff() {
+    const DWORD signIn = AskServiceToRestore();
     const DWORD stop = StopLauncherService();
     const DWORD start = SetServiceAutoStart(false);
     const DWORD restore = RestoreWindowsLockScreen();
     if (stop != ERROR_SUCCESS) return stop;
     if (start != ERROR_SUCCESS) return start;
-    return restore;
+    return restore != ERROR_SUCCESS ? restore : signIn;
 }
 
 bool IsOn() { return ServiceAutoStart() && WindowsLockScreenApplied(); }

@@ -5,6 +5,7 @@
 #include <cstring>
 
 #include "animelogon/log.h"
+#include "clockface.h"
 #include "layout.h"
 #include "video_ps.h"
 #include "video_vs.h"
@@ -185,11 +186,21 @@ void Presenter::DestroyWindows() {
     windows_.clear();
     targets_.clear();
     visible_ = false;
+    clock_ = nullptr;
+    clockFailed_ = false;
     if (dcomp_) dcomp_->Commit();
     if (context_) {
         context_->ClearState();
         context_->Flush();
     }
+}
+
+bool Presenter::MoveClockTo(const RECT &monitor) {
+    bool found = false;
+    for (const Target &t : targets_) found = found || EqualRect(&t.rect, &monitor);
+    if (!found) return false;
+    for (Target &t : targets_) t.clock = EqualRect(&t.rect, &monitor) != FALSE;
+    return true;
 }
 
 bool Presenter::Owns(HWND hwnd) const {
@@ -270,6 +281,14 @@ bool Presenter::Render(const std::vector<Picture> &pictures, animelogon::Scaling
         ID3D11ShaderResourceView *none[2] = {};
         context_->PSSetShaderResources(0, 2, none);
         context_->OMSetRenderTargets(0, nullptr, nullptr);
+        if (clock_ && targets_[i].clock && !clockFailed_) {
+            ComPtr<IDXGISurface> surface;
+            if (FAILED(back.As(&surface)) || !clock_->Draw(surface.Get(), w.width, w.height, i)) {
+                // The video goes on without it.
+                ALOG(L"present: the clock could not be drawn -- continuing without it");
+                clockFailed_ = true;
+            }
+        }
         hr = w.swapChain->Present(0, 0);
         if (FAILED(hr)) {
             if (IsLost(hr)) lost_ = true;

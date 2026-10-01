@@ -4,6 +4,7 @@ animelogon_add_executable(config WIN32
         src/commit.cpp
         src/transcode.cpp
         src/devices.cpp
+        src/fonts.cpp
     DESCRIPTION "AnimeLogon 设置"
     LIBS micula::micula mfplat mfreadwrite mfuuid mmdevapi ole32 shell32 delayimp)
 

@@ -26,6 +26,9 @@ SERVICE_STATUS_HANDLE g_statusHandle = nullptr;
 SERVICE_STATUS g_status{};
 std::atomic<bool> g_stop{false};
 HANDLE g_stopEvent = nullptr;
+// Set once the settings app or uninstaller has asked for the sign-in background setting back.
+std::atomic<bool> g_restored{false};
+constexpr ULONGLONG kSignInCheckMs = 60000;
 
 std::wstring OverlayPath() { return animelogon::paths::ModuleDir() + L"overlay.exe"; }
 
@@ -110,10 +113,19 @@ void Supervise() {
     ULONGLONG spawnedAt = 0;
     bool dismissed = false;  // the next overlay starts parked until the screen is used
     bool saidPaused = false;
+    ULONGLONG signInCheckedAt = 0;
 
     while (WaitForSingleObject(g_stopEvent, 0) != WAIT_OBJECT_0) {
         const DWORD session = WTSGetActiveConsoleSessionId();
         const ULONGLONG now = GetTickCount64();
+
+        // Windows hides the background behind the credential screen for any account whose
+        // setting says so; accounts appear and settings change, so this is checked again.
+        if (!g_restored.load() && (!signInCheckedAt || now - signInCheckedAt > kSignInCheckMs)) {
+            signInCheckedAt = now;
+            const DWORD e = animelogon::machine::ShowSignInBackground();
+            if (e != ERROR_SUCCESS) ALOG(L"launcher: the sign-in background setting could not be changed (%lu)", e);
+        }
 
         if (child && session != 0xFFFFFFFF && session != childSession && childSession != 0xFFFFFFFF) {
             TerminateProcess(child, 0);
@@ -168,15 +180,29 @@ DWORD WINAPI HandlerEx(DWORD control, DWORD, LPVOID, LPVOID) {
         return NO_ERROR;
     case SERVICE_CONTROL_INTERROGATE:
         return NO_ERROR;
+    case animelogon::machine::kServiceControlRestore: {
+        g_restored = true;
+        const DWORD e = animelogon::machine::RestoreSignInBackground();
+        ALOG(L"launcher: sign-in background setting restored (%lu)", e);
+        return NO_ERROR;
+    }
     default:
         return ERROR_CALL_NOT_IMPLEMENTED;
     }
 }
 
-void WINAPI ServiceMain(DWORD, LPWSTR *) {
+void WINAPI ServiceMain(DWORD argc, LPWSTR *argv) {
     g_statusHandle = RegisterServiceCtrlHandlerExW(animelogon::paths::kServiceName, HandlerEx, nullptr);
     if (!g_statusHandle) return;
     g_status.dwServiceType = SERVICE_WIN32_OWN_PROCESS;
+    // Started only to put the sign-in background setting back, which needs SYSTEM.
+    if (argc >= 2 && _wcsicmp(argv[1], animelogon::machine::kServiceRestoreArg) == 0) {
+        SetState(SERVICE_START_PENDING, 3000);
+        const DWORD e = animelogon::machine::RestoreSignInBackground();
+        ALOG(L"launcher: started to restore the sign-in background setting (%lu)", e);
+        SetState(SERVICE_STOPPED);
+        return;
+    }
     SetState(SERVICE_START_PENDING, 3000);
     g_stopEvent = events::Create(events::kStop);
     ResetEvent(g_stopEvent);

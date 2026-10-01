@@ -20,6 +20,9 @@ struct Session {
 };
 Session ReadSession(DWORD session);
 
+// The display LogonUI's credential window is on, if it has one up.
+bool CredentialMonitor(RECT *monitor);
+
 // Windows' shutdown screen is on this desktop.
 bool ShutdownUnderway();
 
