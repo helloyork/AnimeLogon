@@ -124,15 +124,26 @@ Settings ParseSettings(const std::wstring &text, std::vector<std::wstring> *prob
             ok = ParseBool(value, &s.clock.enabled);
         } else if (key == L"clock_displays") {
             ok = Parse(std::wstring(value), &s.clock.displays);
+        } else if (key == L"clock_hours") {
+            ok = Parse(std::wstring(value), &s.clock.style.hours);
+        } else if (key == L"clock_ampm") {
+            ok = ParseBool(value, &s.clock.style.ampm);
+        } else if (key == L"clock_date") {
+            ok = Parse(std::wstring(value), &s.clock.style.date);
+        } else if (key == L"clock_language") {
+            ok = value.empty() || IsClockLanguage(std::wstring(value));
+            if (ok) s.clock.style.locale = value;
         } else if (key == L"skin") {
             ok = skin::IsSkinId(std::wstring(value));
             if (ok) s.clock.skin = value;
         } else if (key.substr(0, wcslen(kSkinPrefix)) == kSkinPrefix) {
-            // skin.<skin id>.<setting id>: checked against the skin's own settings when it is drawn.
+            // skin.<skin id>.<setting id>, or skin.<skin id>.<element>.<attribute> for one attribute
+            // adjusted by hand: checked against the skin itself when it is drawn.
             const std::wstring_view rest = key.substr(wcslen(kSkinPrefix));
             const size_t dot = rest.find(L'.');
+            const std::wstring name = dot == std::wstring_view::npos ? L"" : std::wstring(rest.substr(dot + 1));
             ok = dot != std::wstring_view::npos && skin::IsSkinId(std::wstring(rest.substr(0, dot))) &&
-                 skin::IsSettingId(std::wstring(rest.substr(dot + 1))) && IsValueText(value);
+                 (skin::IsSettingId(name) || skin::IsAdjustmentKey(name)) && IsValueText(value);
             if (ok) s.clock.values[std::wstring(rest.substr(0, dot))][std::wstring(rest.substr(dot + 1))] = value;
         } else {
             if (problems) problems->push_back(Format(L"line %zu: unknown key '%.*s'", lineNo, (int)key.size(), key.data()));
@@ -158,6 +169,10 @@ std::wstring SerializeSettings(const Settings &s) {
     const ClockSettings &c = s.clock;
     out += L"clock = " + std::wstring(c.enabled ? L"true" : L"false") + L"\r\n";
     out += L"clock_displays = " + std::wstring(ToString(c.displays)) + L"\r\n";
+    out += L"clock_hours = " + std::wstring(ToString(c.style.hours)) + L"\r\n";
+    out += L"clock_ampm = " + std::wstring(c.style.ampm ? L"true" : L"false") + L"\r\n";
+    out += L"clock_date = " + std::wstring(ToString(c.style.date)) + L"\r\n";
+    out += L"clock_language = " + c.style.locale + L"\r\n";
     out += L"skin = " + c.skin + L"\r\n";
     for (const auto &[id, values] : c.values)
         for (const auto &[setting, value] : values) out += kSkinPrefix + id + L"." + setting + L" = " + value + L"\r\n";

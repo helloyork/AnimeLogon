@@ -13,10 +13,23 @@ namespace animelogon {
 
 // Auto is the display Windows puts its password box on.
 enum class ClockDisplays { Auto, Primary, All };
+// Auto follows the regional format.
+enum class ClockHours { Auto, H12, H24 };
+// Short is the weekday with the month and day; Long is the regional long date.
+enum class ClockDate { Short, Long, None };
+
+// What the clock says, whichever skin shows it.
+struct ClockStyle {
+    ClockHours hours = ClockHours::Auto;
+    bool ampm = true;     // the AM/PM marker, when the time is 12-hour
+    ClockDate date = ClockDate::Short;
+    std::wstring locale;  // empty: the regional format's own language
+};
 
 struct ClockSettings {
     bool enabled = true;
     ClockDisplays displays = ClockDisplays::Auto;
+    ClockStyle style;
     std::wstring skin = L"default";               // "default" or a skin's library id
     std::map<std::wstring, skin::Values> values;  // by skin id
 
@@ -52,11 +65,17 @@ RegionalFormat StandardFormat(const std::wstring &locale);
 // `user`, unless `locale` names another language: then that language's standard format.
 RegionalFormat FormatFor(const RegionalFormat &user, const std::wstring &locale);
 
-// A skin text with its data filled in: {time}, {date} ...
-std::wstring FillText(const std::wstring &text, const RegionalFormat &format, skin::Hours hours, const SYSTEMTIME &t);
+// A skin text with its data filled in: {time}, {date} ... `format` is already in the style's
+// language.
+std::wstring FillText(const std::wstring &text, const RegionalFormat &format, const ClockStyle &style,
+                      const SYSTEMTIME &t);
 
 const wchar_t *ToString(ClockDisplays displays);
 bool Parse(const std::wstring &text, ClockDisplays *out);
+const wchar_t *ToString(ClockHours hours);
+bool Parse(const std::wstring &text, ClockHours *out);
+const wchar_t *ToString(ClockDate date);
+bool Parse(const std::wstring &text, ClockDate *out);
 bool ParseColor(const std::wstring &text, uint32_t *rgb);  // #RRGGBB
 std::wstring FormatColor(uint32_t rgb);
 

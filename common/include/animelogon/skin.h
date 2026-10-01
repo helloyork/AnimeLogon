@@ -2,10 +2,12 @@
 // (elements and their attributes) plus settings the person can adjust; the settings' values
 // live in settings.ini. Nothing in a skin computes: an attribute is either a literal, or
 // "$id" for the value of one of the skin's settings, and text may name data such as {time}.
+// Beyond the skin's own settings, any attribute that shapes how an element looks can be
+// adjusted by hand, element by element; those values live in settings.ini too.
 //
 // A skin's structure can put any words on the screen, so it is only read from where
-// administrators alone can write. Setting values carry no free text: a colour, a number in
-// range, a font, or one of the skin's own options.
+// administrators alone can write. Setting values and adjustments carry no free text: a
+// colour, a number in range, a font, or one of a fixed set of words.
 #pragma once
 
 #include <cstdint>
@@ -53,10 +55,41 @@ std::wstring ValueOf(const Setting &setting, const Values &values);
 bool IsSettingId(const std::wstring &id);
 bool IsSkinId(const std::wstring &id);  // "default" or 16 lowercase hex digits
 
+// --- adjusting one attribute of one element ----------------------------------------------
+//
+// Elements are named by where they are: p1 is the first panel, p1.l2.t1 the first text on its
+// second line, p1.s1 its first shadow, p1.b its backdrop. An adjustment is stored under the
+// element's name and the attribute's, as in p1.l1.t1.weight, and wins over the skin's own
+// value for that attribute.
+
+enum class Control { Slider, Choice, Color, Font };
+
+struct Adjustment {
+    std::wstring key;  // e.g. p1.l1.t1.weight
+    std::wstring label, detail;
+    Control control = Control::Slider;
+    double min = 0, max = 1, step = 0.01;  // Slider
+    std::vector<Option> options;           // Choice
+};
+
+// One element as the settings app offers it.
+struct Part {
+    std::wstring key, label;  // e.g. p1.l1.t1, "时间"
+    std::vector<Adjustment> adjustments;
+};
+
+std::vector<Part> Parts(const Skin &skin);
+// The value an adjustment shows: adjusted by hand, from a setting, as written, or the default.
+// A weight is always a number.
+std::wstring Effective(const Skin &skin, const Values &values, const Adjustment &adjustment);
+bool IsAdjustmentKey(const std::wstring &key);
+bool IsAdjustmentValue(const std::wstring &key, const std::wstring &value);
+// The adjustments of attributes that take their value from `setting`.
+std::vector<std::wstring> AdjustmentsOf(const Skin &skin, const std::wstring &setting);
+
 // --- the skin with its settings applied --------------------------------------------------
 
 enum class Align { Auto, Left, Center, Right };
-enum class Hours { Auto, H12, H24 };
 enum class Case { None, Upper, Lower };
 
 struct Text {
@@ -88,8 +121,6 @@ struct Panel {
     float margin = 7.0f;   // percent of the display's shorter side
     float offsetX = 0.0f, offsetY = 0.0f;  // percent of the display's width and height
     Align align = Align::Auto;
-    std::wstring locale;   // empty: the regional format
-    Hours hours = Hours::Auto;
     std::vector<Line> lines;
     std::vector<Shadow> shadows;
     float backdrop = 0.0f;  // opacity of a soft dark glow behind the panel

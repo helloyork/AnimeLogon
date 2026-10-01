@@ -25,9 +25,11 @@ bool SavePicture(const std::wstring &path, const Picture &picture);
 
 class SkinPreview {
 public:
-    // Draws the skin over `background` as on a display of the background's size.
-    bool Render(const Picture &background, const skin::Resolved &skin, const RegionalFormat &format,
-                const SYSTEMTIME &now, Picture *out);
+    // Draws the skin over `background` as on a display of the background's size. `bounds`, if
+    // given, says where each panel and text landed.
+    bool Render(const Picture &background, const skin::Resolved &skin, const ClockStyle &style,
+                const RegionalFormat &format, const SYSTEMTIME &now, Picture *out,
+                std::vector<SkinView::Bound> *bounds = nullptr);
 
 private:
     bool Ready();

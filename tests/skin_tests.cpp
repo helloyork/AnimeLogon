@@ -77,8 +77,9 @@ TEST(SkinDefaultParses) {
     CHECK(skin::Parse(skin::DefaultText(), &s, &error));
     CHECK(error.empty());
     CHECK(s.name == L"\x65F6\x949F");  // 时钟
-    CHECK(s.Find(L"weight") && s.Find(L"weight")->fallback == L"semibold");
-    CHECK(s.Find(L"date") && s.Find(L"date")->fallback == L"{date}");
+    CHECK(s.Find(L"size") && s.Find(L"size")->fallback == L"10");
+    // What the clock says is the clock's, not the skin's.
+    CHECK(!s.Find(L"date") && !s.Find(L"hours") && !s.Find(L"language") && !s.Find(L"ampm"));
     skin::Skin again;
     CHECK(skin::Parse(skin::Normalize(s), &again, nullptr) && again.settings.size() == s.settings.size());
 }
@@ -88,26 +89,83 @@ TEST(SkinResolvesSettings) {
     skin::Resolved r = skin::Resolve(s, {});
     CHECK(r.panels.size() == 1);
     const skin::Panel &p = r.panels[0];
-    CHECK(p.anchor == 1 && p.size == 10.0f && p.backdrop > 0.2f && p.hours == skin::Hours::Auto);
+    CHECK(p.anchor == 1 && p.size == 10.0f && p.backdrop > 0.2f);
     CHECK(p.lines.size() == 2 && p.lines[0].texts.size() == 2);
     CHECK(p.lines[0].texts[0].value == L"{time}" && p.lines[0].texts[0].weight == 600);
     CHECK(p.lines[0].texts[1].value == L"{ampm}" && p.lines[0].texts[1].hang);
     CHECK(p.lines[1].texts[0].value == L"{date}");
-    CHECK(p.shadows.size() == 2);
+    // No shadow by default; one is there, at nothing, to be turned up.
+    CHECK(p.shadows.size() == 1 && p.shadows[0].opacity == 0.0f);
 
-    r = skin::Resolve(s, {{L"position", L"bottom-left"}, {L"size", L"15"}, {L"weight", L"light"},
-                          {L"color", L"#FFD27A"}, {L"shade", L"off"}, {L"ampm", L"off"}, {L"date", L""},
-                          {L"hours", L"24"}, {L"language", L"ja-JP"}});
+    r = skin::Resolve(s, {{L"position", L"bottom-left"}, {L"size", L"15"}, {L"color", L"#FFD27A"},
+                          {L"shade", L"off"}});
     const skin::Panel &q = r.panels[0];
-    CHECK(q.anchor == 6 && q.size == 15.0f && q.backdrop == 0.0f && q.hours == skin::Hours::H24);
-    CHECK(q.locale == L"ja-JP" && q.lines[0].texts[0].weight == 300);
+    CHECK(q.anchor == 6 && q.size == 15.0f && q.backdrop == 0.0f);
     CHECK(q.lines[0].texts[0].color == 0xFFFFD27A);
-    CHECK(q.lines[0].texts[1].value.empty() && q.lines[1].texts[0].value.empty());
 
     // Values that do not fit fall back to the defaults.
-    r = skin::Resolve(s, {{L"size", L"99"}, {L"weight", L"heavy"}, {L"color", L"red"}, {L"font", L"a\\b"}});
+    r = skin::Resolve(s, {{L"size", L"99"}, {L"color", L"red"}, {L"font", L"a\\b"}});
     CHECK(r.panels[0].size == 10.0f && r.panels[0].lines[0].texts[0].weight == 600);
     CHECK(r.panels[0].lines[0].texts[0].color == 0xFFFFFFFF && r.panels[0].lines[0].texts[0].font.empty());
+}
+
+TEST(SkinTakesAdjustments) {
+    const skin::Skin &s = skin::Default();
+    // By hand, element by element; over the skin's own values and its settings'.
+    skin::Resolved r = skin::Resolve(s, {{L"size", L"15"},
+                                         {L"p1.size", L"12"},
+                                         {L"p1.offset-x", L"-3.5"},
+                                         {L"p1.l1.t1.weight", L"350"},
+                                         {L"p1.l1.t1.tracking", L"0.05"},
+                                         {L"p1.l2.t1.color", L"#FF000080"},
+                                         {L"p1.l2.gap", L"0.4"},
+                                         {L"p1.s1.opacity", L"0.5"},
+                                         {L"p1.b.opacity", L"0"}});
+    const skin::Panel &p = r.panels[0];
+    CHECK(p.size == 12.0f && p.offsetX == -3.5f && p.backdrop == 0.0f);
+    CHECK(p.lines[0].texts[0].weight == 350 && p.lines[0].texts[0].tracking == 0.05f);
+    CHECK(p.lines[1].texts[0].color == 0x80FF0000 && p.lines[1].gap == 0.4f);
+    CHECK(p.shadows[0].opacity == 0.5f);
+    // Out of range, of the wrong kind, or not adjustable: ignored.
+    r = skin::Resolve(s, {{L"p1.size", L"99"}, {L"p1.l1.t1.weight", L"heavy"}, {L"p1.l1.t1.value", L"x"},
+                          {L"p1.l1.t2.hang", L"false"}});
+    CHECK(r.panels[0].size == 10.0f && r.panels[0].lines[0].texts[0].weight == 600);
+    CHECK(r.panels[0].lines[0].texts[0].value == L"{time}" && r.panels[0].lines[0].texts[1].hang);
+
+    CHECK(skin::IsAdjustmentKey(L"p1.l2.t1.weight") && skin::IsAdjustmentKey(L"p1.b.opacity"));
+    CHECK(skin::IsAdjustmentKey(L"p2.s1.blur") && skin::IsAdjustmentKey(L"p1.offset-x"));
+    CHECK(!skin::IsAdjustmentKey(L"p1.l1.t1.value") && !skin::IsAdjustmentKey(L"p1.l1.t1.label"));
+    CHECK(!skin::IsAdjustmentKey(L"p0.size") && !skin::IsAdjustmentKey(L"p1.t1.size"));
+    CHECK(!skin::IsAdjustmentKey(L"size") && !skin::IsAdjustmentKey(L"p1.l1.weight"));
+    CHECK(skin::IsAdjustmentValue(L"p1.l1.t1.weight", L"350") && !skin::IsAdjustmentValue(L"p1.size", L"80"));
+}
+
+TEST(SkinOffersItsParts) {
+    const skin::Skin &s = skin::Default();
+    const std::vector<skin::Part> parts = skin::Parts(s);
+    // The panel, time, AM/PM, date, shadow and backdrop.
+    CHECK(parts.size() == 6);
+    CHECK(parts[0].key == L"p1" && parts[1].key == L"p1.l1.t1" && parts[1].label == L"\x65F6\x95F4");  // 时间
+    CHECK(parts[3].key == L"p1.l2.t1" && parts[4].key == L"p1.s1" && parts[5].key == L"p1.b");
+    auto find = [](const skin::Part &part, const std::wstring &key) -> const skin::Adjustment * {
+        for (const skin::Adjustment &a : part.adjustments)
+            if (a.key == key) return &a;
+        return nullptr;
+    };
+    // The date's line carries its distance from the line above; a first text has no space before it.
+    CHECK(find(parts[3], L"p1.l2.gap") && !find(parts[1], L"p1.l1.gap") && !find(parts[1], L"p1.l1.t1.space"));
+    CHECK(find(parts[2], L"p1.l1.t2.space"));
+    const skin::Adjustment *weight = find(parts[1], L"p1.l1.t1.weight");
+    CHECK(weight && skin::Effective(s, {}, *weight) == L"600");
+    CHECK(skin::Effective(s, {{L"p1.l1.t1.weight", L"350"}}, *weight) == L"350");
+    const skin::Adjustment *anchor = find(parts[0], L"p1.anchor");
+    CHECK(anchor && skin::Effective(s, {{L"position", L"left"}}, *anchor) == L"left");
+    const skin::Adjustment *offset = find(parts[0], L"p1.offset-x");
+    CHECK(offset && skin::Effective(s, {}, *offset) == L"0");
+    // Changing a setting brings back whatever takes its value from it.
+    const std::vector<std::wstring> sized = skin::AdjustmentsOf(s, L"size");
+    CHECK(sized.size() == 1 && sized[0] == L"p1.size");
+    CHECK(skin::AdjustmentsOf(s, L"color").size() == 3);
 }
 
 TEST(SkinRefusesBadStructure) {

@@ -48,6 +48,8 @@ public:
 
     // Drawn over the targets that ask for it; null for none. Not owned.
     void SetClock(ClockFace *clock) { clock_ = clock; }
+    // The clock's own opacity, for fading it in over the video.
+    void SetClockOpacity(float opacity) { clockOpacity_ = opacity; }
     // Puts the clock on the target covering `monitor` alone. False if none covers it.
     bool MoveClockTo(const RECT &monitor);
 
@@ -62,9 +64,15 @@ public:
     // The compositor's frame rate, or 0 if it cannot say.
     double CompositionRate() const;
 
+    // The baked sign-in background, decoded while parked so that it can cover the screen the
+    // moment it locks. Reloaded only when the file changes; false if there is none to show.
+    bool LoadStill(const std::wstring &path);
+    bool HasStill() const { return stillView_ != nullptr; }
+
     struct Picture {
-        const VideoPlayer::Frame *frame = nullptr;  // null draws black
+        const VideoPlayer::Frame *frame = nullptr;  // null draws the still if asked, else black
         int videoW = 0, videoH = 0;
+        bool still = false;
     };
     // One picture per target. `dim` fades the picture to black; `opacity` fades the window.
     bool Render(const std::vector<Picture> &pictures, animelogon::Scaling scaling, float dim, float opacity);
@@ -92,6 +100,9 @@ private:
     Microsoft::WRL::ComPtr<ID3D11PixelShader> ps_;
     Microsoft::WRL::ComPtr<ID3D11Buffer> constants_;
     Microsoft::WRL::ComPtr<ID3D11SamplerState> sampler_;
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> stillView_;
+    UINT stillW_ = 0, stillH_ = 0;
+    FILETIME stillStamp_{};
 
     std::vector<Target> targets_;
     std::vector<Window> windows_;
@@ -100,4 +111,5 @@ private:
     bool lost_ = false;
     ClockFace *clock_ = nullptr;
     bool clockFailed_ = false;
+    float clockOpacity_ = 1.0f;
 };

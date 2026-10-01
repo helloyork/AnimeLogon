@@ -13,14 +13,15 @@
 class ClockFace {
 public:
     // False leaves the video without a clock.
-    bool Init(ID3D11Device *device, const animelogon::skin::Resolved &skin, const animelogon::RegionalFormat &format);
+    bool Init(ID3D11Device *device, const animelogon::skin::Resolved &skin, const animelogon::ClockStyle &style,
+              const animelogon::RegionalFormat &format);
     void Release();
 
     // Reads the time; returns true when the words changed.
     bool Tick() { return view_.Tick(); }
 
     // Draws onto `surface`, a window's back buffer. `slot` keeps one cache per window.
-    bool Draw(IDXGISurface *surface, UINT width, UINT height, size_t slot);
+    bool Draw(IDXGISurface *surface, UINT width, UINT height, size_t slot, float opacity = 1.0f);
 
 private:
     Microsoft::WRL::ComPtr<ID3D11Device> device_;

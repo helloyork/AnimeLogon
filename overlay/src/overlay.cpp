@@ -46,6 +46,8 @@ namespace {
 constexpr wchar_t kWindowClass[] = L"AnimeLogonOverlay";
 constexpr int kRescueHotkeyId = 0xA10E;  // Ctrl+Alt+F11
 constexpr float kFadeSeconds = 0.5f;
+// The clock fades in once the video is up.
+constexpr float kClockFadeInSeconds = 0.4f;
 // How long after the compositor's frame the next picture is drawn: right after one frame
 // leaves nearly a whole frame of slack for the next, which a late wake-up would not.
 constexpr double kAfterComposeSeconds = 0.001;
@@ -92,6 +94,7 @@ struct Overlay {
     DWORD session = 0xFFFFFFFF;
     bool lockNotified = false;   // WTS_SESSION_LOCK seen, and no unlock or logon since
     bool hadUser = false;        // somebody has been signed in to this session
+    ULONGLONG seenAt = 0;        // when the parked wait saw the logon screen
 };
 
 Overlay g_overlay;
@@ -211,12 +214,21 @@ bool PumpMessages() {
     return true;
 }
 
+// The baked sign-in background, ready on the device. It is written by this process into the
+// administrators-only data directory, and checked like everything else read as SYSTEM.
+bool LoadStill(Presenter &presenter) {
+    const std::wstring path = animelogon::paths::BackgroundPath();
+    std::wstring why;
+    if (!animelogon::secure::IsTrusted(path, &why)) return false;
+    return presenter.LoadStill(path);
+}
+
 // The parked wait: return when a logon screen is the desktop on the glass, or the service is
 // stopping. `dismissed` is true after somebody has waved the video away; while it is, the wait
 // holds -- without re-covering the screen -- until the session is actually used (signed in and
 // unlocked, or the secure desktop is gone), so the video never fights somebody signing in. It is
 // cleared there, and the next genuine lock brings the video back. Returns false to exit.
-bool WaitForLogonScreen(bool *dismissed) {
+bool WaitForLogonScreen(Presenter &presenter, bool *dismissed) {
     ULONGLONG bakedAt = 0;
     for (;;) {
         Beat();
@@ -230,6 +242,7 @@ bool WaitForLogonScreen(bool *dismissed) {
         if (!secure && s.console && s.signedIn && !s.locked && !g_overlay.lockNotified &&
             GetTickCount64() - bakedAt > kBakeCheckMs) {
             bake::Refresh();
+            LoadStill(presenter);
             bakedAt = GetTickCount64();
         }
 
@@ -249,7 +262,10 @@ bool WaitForLogonScreen(bool *dismissed) {
         in.hadUser = g_overlay.hadUser;
         in.shutdown = screen::ShutdownUnderway();
         in.lockNotified = g_overlay.lockNotified;
-        if (screen::Decide(in) == screen::Gate::GoLive) return true;
+        if (screen::Decide(in) == screen::Gate::GoLive) {
+            g_overlay.seenAt = GetTickCount64();
+            return true;
+        }
         Sleep(32);
     }
 }
@@ -305,42 +321,70 @@ LiveEnd GoLiveOnce(Presenter &presenter, const Options &opt, HINSTANCE instance)
         targets = plan::Build(settings, monitors);
     }
 
-    // Open one decoder per distinct video, before any window is shown, so that if there is
-    // nothing to play the screen is left to Windows rather than covered with black.
-    std::map<std::wstring, std::shared_ptr<VideoPlayer>> players;
+    // Only administrators-only video is handed to the SYSTEM decoder.
+    std::map<std::wstring, bool> trusted;
     for (const Presenter::Target &t : targets) {
-        if (t.videoId.empty() || players.count(t.videoId)) continue;
-        const std::wstring file = animelogon::VideoFilePath(t.videoId);
+        if (t.videoId.empty() || trusted.count(t.videoId)) continue;
         std::wstring trust;
-        // The SYSTEM decoder only touches administrators-only content.
-        if (!opt.windowed && !animelogon::secure::IsTrusted(file, &trust)) {
-            ALOG(L"overlay: %s is not trusted (%s) -- skipping it", t.videoId.c_str(), trust.c_str());
-            continue;
-        }
-        auto player = std::make_shared<VideoPlayer>();
-        if (player->Open(file, presenter.device(), presenter.videoManager()))
-            players[t.videoId] = player;
-        else
-            ALOG(L"overlay: %s could not be opened", t.videoId.c_str());
+        trusted[t.videoId] = opt.windowed || animelogon::secure::IsTrusted(animelogon::VideoFilePath(t.videoId), &trust);
+        if (!trusted[t.videoId]) ALOG(L"overlay: %s is not trusted (%s) -- skipping it", t.videoId.c_str(), trust.c_str());
     }
+    std::map<std::wstring, std::shared_ptr<VideoPlayer>> players;
+    auto openPlayers = [&] {
+        for (const auto &[id, ok] : trusted) {
+            if (!ok) continue;
+            auto player = std::make_shared<VideoPlayer>();
+            if (player->Open(animelogon::VideoFilePath(id), presenter.device(), presenter.videoManager()))
+                players[id] = player;
+            else
+                ALOG(L"overlay: %s could not be opened", id.c_str());
+        }
+    };
 
+    // The screen is covered first with the baked still, the picture Windows is already showing,
+    // so that its credential screen is never seen; the video takes over when its first frame is
+    // ready. Without a still, nothing is shown until there is a video to show.
+    if (!opt.windowed) {
+        std::vector<Presenter::Target> playable;
+        for (const Presenter::Target &t : targets)
+            if (!t.videoId.empty() && trusted[t.videoId]) playable.push_back(t);
+        targets.swap(playable);
+    }
+    const bool cover = !opt.windowed && !targets.empty() && LoadStill(presenter);
+    if (!cover) {
+        openPlayers();
+        if (!opt.windowed) {
+            std::vector<Presenter::Target> playable;
+            for (const Presenter::Target &t : targets)
+                if (players.count(t.videoId)) playable.push_back(t);
+            targets.swap(playable);
+        }
+    }
     if (presenter.DeviceLost()) {
         ALOG(L"overlay: the graphics device was lost -- exiting so a fresh one starts");
         return LiveEnd::Leave;
     }
-    // A display whose video cannot play is left to Windows, never covered with black.
-    if (!opt.windowed) {
-        std::vector<Presenter::Target> playable;
-        for (const Presenter::Target &t : targets)
-            if (players.count(t.videoId)) playable.push_back(t);
-        targets.swap(playable);
-    }
-    if (targets.empty() || (!opt.windowed && players.empty())) {
+    if (targets.empty() || (!opt.windowed && !cover && players.empty())) {
         ALOG(L"overlay: no video to show -- leaving the screen to Windows");
         return LiveEnd::Dismissed;  // park until the screen is used
     }
 
-    // The clock is drawn into the video's own frames, so it fades with them.
+    if (!presenter.CreateWindows(targets, kWindowClass, instance)) {
+        ALOG(L"overlay: could not create the windows");
+        return LiveEnd::Leave;
+    }
+    g_overlay.inputWindow = presenter.primary();
+
+    std::vector<Presenter::Picture> stills(targets.size());
+    for (Presenter::Picture &p : stills) p.still = cover;
+    if (cover) {
+        presenter.Render(stills, settings.scaling, 0.0f, 1.0f);
+        presenter.Show();
+        ALOG(L"cover: the sign-in background is up, %llu ms after the logon screen", GetTickCount64() - g_overlay.seenAt);
+    }
+
+    // The clock is drawn into the video's own frames, so it fades out with them. It is set up
+    // after the cover and fades in once the video is up, so the cover never waits for it.
     ClockFace clock;
     bool anyClock = false;
     for (const Presenter::Target &t : targets) anyClock = anyClock || t.clock;
@@ -352,15 +396,13 @@ LiveEnd GoLiveOnce(Presenter &presenter, const Options &opt, HINSTANCE instance)
             ALOG(L"clock: skin %s refused (%s) -- using the default", settings.clock.skin.c_str(), refused.c_str());
         const std::wstring &id = refused.empty() ? settings.clock.skin : std::wstring(L"default");
         withClock = clock.Init(presenter.device(), animelogon::skin::Resolve(skin, settings.clock.ValuesFor(id)),
-                               clocktext::UserFormat());
+                               settings.clock.style, clocktext::UserFormat());
     }
 
-    if (!presenter.CreateWindows(targets, kWindowClass, instance)) {
-        ALOG(L"overlay: could not create the windows");
-        return LiveEnd::Leave;
+    if (withClock) {
+        presenter.SetClock(&clock);
+        presenter.SetClockOpacity(0.0f);
     }
-    g_overlay.inputWindow = presenter.primary();
-    if (withClock) presenter.SetClock(&clock);
     // By default the clock goes where Windows puts its password box, which LogonUI may not
     // have drawn yet; it is looked for again below until found.
     bool clockPlaced = !withClock || opt.windowed || settings.clock.displays != animelogon::ClockDisplays::Auto;
@@ -377,20 +419,6 @@ LiveEnd GoLiveOnce(Presenter &presenter, const Options &opt, HINSTANCE instance)
         g_overlay.inputWindow = nullptr;
         return LiveEnd::Dismissed;
     }
-
-    AudioSystem audio;
-    audio.Open(settings.audio);
-    const double refresh = RefreshSeconds();
-    if (!opt.windowed) {
-        AudioSystem::RememberConsoleDefault();
-        const std::wstring &primaryVideo = targets.front().videoId;
-        if (!primaryVideo.empty()) {
-            animelogon::VideoInfo info;
-            if (animelogon::LoadVideo(primaryVideo, &info) && info.hasAudio)
-                audio.PlayVideoTrack(animelogon::AudioFilePath(primaryVideo), 0.0, kFadeSeconds);
-        }
-    }
-
     g_overlay.intent.Prime(wake::CaptureKeys(), GetTickCount());
     if (!RegisterHotKey(g_overlay.inputWindow, kRescueHotkeyId, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, VK_F11))
         ALOG(L"overlay: the rescue hotkey could not be registered (%lu)", GetLastError());
@@ -403,11 +431,38 @@ LiveEnd GoLiveOnce(Presenter &presenter, const Options &opt, HINSTANCE instance)
     }
     HPOWERNOTIFY power =
         RegisterPowerSettingNotification(g_overlay.inputWindow, &kConsoleDisplayState, DEVICE_NOTIFY_WINDOW_HANDLE);
-    // Hidden until every display has its first frame, so the change from Windows' background
-    // (that frame, baked) to the video is not a change at all.
-    for (const ULONGLONG until = GetTickCount64() + kFirstFrameWaitMs;;) {
+
+    if (cover) openPlayers();
+    bool done = false;
+    LiveEnd end = LiveEnd::Leave;
+    if (presenter.DeviceLost()) {
+        ALOG(L"overlay: the graphics device was lost -- exiting so a fresh one starts");
+        done = true;
+    } else if (players.empty() && !opt.windowed) {
+        ALOG(L"overlay: no video to show -- leaving the screen to Windows");
+        done = true;
+        end = LiveEnd::Dismissed;
+    }
+
+    AudioSystem audio;
+    audio.Open(settings.audio);
+    const double refresh = RefreshSeconds();
+    if (!opt.windowed && !done) {
+        AudioSystem::RememberConsoleDefault();
+        const std::wstring &primaryVideo = targets.front().videoId;
+        if (!primaryVideo.empty()) {
+            animelogon::VideoInfo info;
+            if (animelogon::LoadVideo(primaryVideo, &info) && info.hasAudio)
+                audio.PlayVideoTrack(animelogon::AudioFilePath(primaryVideo), 0.0, kFadeSeconds);
+        }
+    }
+
+    // Until every display has its first frame the still stays up (or, without one, the windows
+    // stay hidden), so the change from Windows' background -- that frame, baked -- to the video
+    // is not a change at all.
+    for (const ULONGLONG until = GetTickCount64() + kFirstFrameWaitMs; !done;) {
         Beat();
-        std::vector<Presenter::Picture> pictures(targets.size());
+        std::vector<Presenter::Picture> pictures = stills;
         std::vector<VideoPlayer::Frame> held(targets.size());
         bool all = true;
         for (size_t i = 0; i < targets.size(); ++i) {
@@ -417,7 +472,7 @@ LiveEnd GoLiveOnce(Presenter &presenter, const Options &opt, HINSTANCE instance)
                 pictures[i].frame = &held[i];
                 pictures[i].videoW = it->second->width();
                 pictures[i].videoH = it->second->height();
-            } else {
+            } else if (it != players.end()) {
                 all = false;
             }
         }
@@ -428,13 +483,17 @@ LiveEnd GoLiveOnce(Presenter &presenter, const Options &opt, HINSTANCE instance)
         Sleep(5);
     }
     Beat();
-    presenter.Show();
-    g_live.store(true);
-    ALOG(L"overlay: live on %zu display(s)", targets.size());
+    if (!done) {
+        presenter.Show();
+        g_live.store(true);
+        ALOG(L"overlay: live on %zu display(s), %llu ms after the logon screen", targets.size(),
+             GetTickCount64() - g_overlay.seenAt);
+    }
 
     // --- frame loop --------------------------------------------------------------------
     HANDLE timer = CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
     const ULONGLONG start = GetTickCount64();
+    bool clockFading = withClock;
     // The video's clock stands still while the panel is dark or the machine sleeps.
     const ULONGLONG clockStart = screen::AwakeMs();
     ULONGLONG darkMs = 0, darkSince = 0;
@@ -445,8 +504,6 @@ LiveEnd GoLiveOnce(Presenter &presenter, const Options &opt, HINSTANCE instance)
     double firstT = -1.0, lastT = 0.0;
     ULONGLONG lastExitCheck = 0;
     ULONGLONG lastKeepTop = 0;
-    bool done = false;
-    LiveEnd end = LiveEnd::Leave;
 
     while (!done) {
         double period = 1.0 / 30.0;
@@ -513,11 +570,16 @@ LiveEnd GoLiveOnce(Presenter &presenter, const Options &opt, HINSTANCE instance)
         }
 
         if (draw) {
-            std::vector<Presenter::Picture> pictures(targets.size());
+            std::vector<Presenter::Picture> pictures = stills;
             std::vector<VideoPlayer::Frame> held(targets.size());
             // Drawn only when something on it changed: a high refresh rate need not cost a
             // full-screen draw per tick.
-            bool fresh = lit || clockChanged || g_overlay.woke;
+            bool fresh = lit || clockChanged || g_overlay.woke || clockFading;
+            if (clockFading) {
+                const float k = std::min(1.0f, (float)(now - start) / 1000.0f / kClockFadeInSeconds);
+                clockFading = k < 1.0f;
+                presenter.SetClockOpacity(k * k * (3.0f - 2.0f * k));
+            }
             for (size_t i = 0; i < targets.size(); ++i) {
                 auto it = players.find(targets[i].videoId);
                 if (it == players.end()) continue;
@@ -678,13 +740,15 @@ int wmain(int argc, wchar_t **argv) {
 
     Presenter presenter;
     if (!presenter.CreateDevice()) return 2;
+    if (!opt.windowed) LoadStill(presenter);
+    g_overlay.seenAt = GetTickCount64();
     StartWatchdog();
 
     // Park, appear, hand back, park again. Once dismissed, the parked wait holds the video off
     // the screen until the session is used and locked afresh.
     bool dismissed = opt.dismissed;
     for (;;) {
-        if (!opt.windowed && !opt.now && !WaitForLogonScreen(&dismissed)) break;
+        if (!opt.windowed && !opt.now && !WaitForLogonScreen(presenter, &dismissed)) break;
 
         LiveEnd end = GoLiveOnce(presenter, opt, wc.hInstance);
         while (end == LiveEnd::Rebuild) {

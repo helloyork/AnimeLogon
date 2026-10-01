@@ -51,12 +51,20 @@ TEST(ClockSettingsRoundTrip) {
     s.clock.displays = ClockDisplays::Primary;
     s.clock.skin = L"0123456789abcdef";
     s.clock.values[L"default"][L"color"] = L"#12ABEF";
+    s.clock.values[L"default"][L"p1.l1.t1.weight"] = L"350";
     s.clock.values[L"0123456789abcdef"][L"font"] = L"Microsoft YaHei UI";
+    s.clock.style.hours = ClockHours::H24;
+    s.clock.style.ampm = false;
+    s.clock.style.date = ClockDate::None;
+    s.clock.style.locale = L"ja-JP";
     std::vector<std::wstring> problems;
     const Settings t = ParseSettings(SerializeSettings(s), &problems);
     CHECK(problems.empty());
     CHECK(!t.clock.enabled && t.clock.displays == ClockDisplays::Primary && t.clock.skin == L"0123456789abcdef");
+    CHECK(t.clock.style.hours == ClockHours::H24 && !t.clock.style.ampm && t.clock.style.date == ClockDate::None);
+    CHECK(t.clock.style.locale == L"ja-JP");
     CHECK(t.clock.ValuesFor(L"default").at(L"color") == L"#12ABEF");
+    CHECK(t.clock.ValuesFor(L"default").at(L"p1.l1.t1.weight") == L"350");
     CHECK(t.clock.ValuesFor(L"0123456789abcdef").at(L"font") == L"Microsoft YaHei UI");
     CHECK(t.clock.ValuesFor(L"fedcba9876543210").empty());
 }
@@ -64,11 +72,15 @@ TEST(ClockSettingsRoundTrip) {
 TEST(ClockSettingsDefaultsAndBadValues) {
     const Settings d;
     CHECK(d.clock.enabled && d.clock.displays == ClockDisplays::Auto && d.clock.skin == L"default");
+    CHECK(d.clock.style.hours == ClockHours::Auto && d.clock.style.ampm && d.clock.style.date == ClockDate::Short);
+    CHECK(d.clock.style.locale.empty());
     std::vector<std::wstring> problems;
     const Settings t = ParseSettings(L"skin = ../x\r\nskin.default = 1\r\nskin.default.Color = #FFFFFF\r\n"
-                                     L"skin.nothex.color = #FFFFFF\r\nskin.default.color = a\x01\r\n",
+                                     L"skin.nothex.color = #FFFFFF\r\nskin.default.color = a\x01\r\n"
+                                     L"skin.default.p1.l1.t1.value = x\r\nclock_hours = 13\r\nclock_date = soon\r\n"
+                                     L"clock_language = xx-YY\r\n",
                                      &problems);
-    CHECK(problems.size() == 5);
+    CHECK(problems.size() == 9);
     CHECK(t.clock.skin == L"default" && t.clock.values.empty());
 }
 
@@ -91,17 +103,26 @@ TEST(ClockFillsText) {
     t.wHour = 22;
     t.wMinute = 8;
     const RegionalFormat us{L"en-US", L"h:mm tt", L"dddd, MMMM d, yyyy"};
-    CHECK(FillText(L"{time}", us, skin::Hours::Auto, t) == L"10:08");
-    CHECK(FillText(L"{ampm}", us, skin::Hours::Auto, t) == L"PM");
-    CHECK(FillText(L"{time}", us, skin::Hours::H24, t) == L"22:08");
-    CHECK(FillText(L"{ampm}", us, skin::Hours::H24, t).empty());
-    CHECK(FillText(L"{date}", us, skin::Hours::Auto, t) == L"Friday, October 2");
-    CHECK(FillText(L"{date.long}", us, skin::Hours::Auto, t) == L"Friday, October 2, 2026");
-    CHECK(FillText(L"{day} {month} {year} ({weekday})", us, skin::Hours::Auto, t) == L"2 October 2026 (Friday)");
+    ClockStyle style, h24, h12, quiet, full, none;
+    h24.hours = ClockHours::H24;
+    h12.hours = ClockHours::H12;
+    quiet.ampm = false;
+    full.date = ClockDate::Long;
+    none.date = ClockDate::None;
+    CHECK(FillText(L"{time}", us, style, t) == L"10:08");
+    CHECK(FillText(L"{ampm}", us, style, t) == L"PM");
+    CHECK(FillText(L"{ampm}", us, quiet, t).empty() && FillText(L"{time}", us, quiet, t) == L"10:08");
+    CHECK(FillText(L"{time}", us, h24, t) == L"22:08");
+    CHECK(FillText(L"{ampm}", us, h24, t).empty());
+    CHECK(FillText(L"{date}", us, style, t) == L"Friday, October 2");
+    CHECK(FillText(L"{date}", us, full, t) == L"Friday, October 2, 2026");
+    CHECK(FillText(L"{date}", us, none, t).empty() && FillText(L"{weekday} {year}", us, none, t) == L" ");
+    CHECK(FillText(L"{date.long}", us, style, t) == L"Friday, October 2, 2026");
+    CHECK(FillText(L"{day} {month} {year} ({weekday})", us, style, t) == L"2 October 2026 (Friday)");
     const RegionalFormat cn{L"zh-CN", L"H:mm", L"yyyy'\x5E74'M'\x6708'd'\x65E5'"};
-    CHECK(FillText(L"{time}", cn, skin::Hours::Auto, t) == L"22:08");
-    CHECK(FillText(L"{ampm}", cn, skin::Hours::Auto, t).empty());
-    CHECK(FillText(L"{time}", cn, skin::Hours::H12, t) == L"10:08");
-    CHECK(FillText(L"{date}", cn, skin::Hours::Auto, t) == L"10\x6708" L"2\x65E5 \x661F\x671F\x4E94");
+    CHECK(FillText(L"{time}", cn, style, t) == L"22:08");
+    CHECK(FillText(L"{ampm}", cn, style, t).empty());
+    CHECK(FillText(L"{time}", cn, h12, t) == L"10:08");
+    CHECK(FillText(L"{date}", cn, style, t) == L"10\x6708" L"2\x65E5 \x661F\x671F\x4E94");
     CHECK(FormatFor(cn, L"zh-CN").shortTime == L"H:mm" && FormatFor(cn, L"en-US").locale == L"en-US");
 }

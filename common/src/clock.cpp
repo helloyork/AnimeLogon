@@ -20,6 +20,8 @@ bool ParseName(const std::wstring &text, const wchar_t *const (&names)[N], E *ou
 }
 
 const wchar_t *const kDisplays[] = {L"auto", L"primary", L"all"};
+const wchar_t *const kHours[] = {L"auto", L"12", L"24"};
+const wchar_t *const kDates[] = {L"weekday", L"long", L"none"};
 
 // Calls `visit(i)` for each character of `picture` outside a quoted literal.
 template <typename F>
@@ -228,9 +230,12 @@ RegionalFormat FormatFor(const RegionalFormat &user, const std::wstring &locale)
     return StandardFormat(locale);
 }
 
-std::wstring FillText(const std::wstring &text, const RegionalFormat &format, skin::Hours hours, const SYSTEMTIME &t) {
+std::wstring FillText(const std::wstring &text, const RegionalFormat &format, const ClockStyle &style,
+                      const SYSTEMTIME &t) {
     const std::wstring &time = format.shortTime;
-    const bool marker = hours == skin::Hours::H12 || (hours == skin::Hours::Auto && HasMarker(time));
+    const ClockHours hours = style.hours;
+    const bool marker = style.ampm && (hours == ClockHours::H12 || (hours == ClockHours::Auto && HasMarker(time)));
+    const bool dated = style.date != ClockDate::None;
     std::wstring out;
     for (size_t i = 0; i < text.size(); ++i) {
         const size_t end = text[i] == L'{' ? text.find(L'}', i) : std::wstring::npos;
@@ -242,13 +247,17 @@ std::wstring FillText(const std::wstring &text, const RegionalFormat &format, sk
         i = end;
         if (name == L"time")
             out += Formatted(format.locale, t,
-                             hours == skin::Hours::H24   ? To24HourPicture(time)
-                             : hours == skin::Hours::H12 ? WithoutMarkerPicture(To12HourPicture(time))
-                                                         : WithoutMarkerPicture(time),
+                             hours == ClockHours::H24   ? To24HourPicture(time)
+                             : hours == ClockHours::H12 ? WithoutMarkerPicture(To12HourPicture(time))
+                                                        : WithoutMarkerPicture(time),
                              false);
         else if (name == L"ampm" && marker) out += Formatted(format.locale, t, L"tt", false);
+        else if (!dated) continue;  // without a date, every part of one is empty
         else if (name == L"date")
-            out += Formatted(format.locale, t, WithoutYearPicture(WeekdayDatePicture(format.locale, format.longDate)),
+            out += Formatted(format.locale, t,
+                             style.date == ClockDate::Long
+                                 ? format.longDate
+                                 : WithoutYearPicture(WeekdayDatePicture(format.locale, format.longDate)),
                              true);
         else if (name == L"date.long") out += Formatted(format.locale, t, format.longDate, true);
         else if (name == L"weekday") out += Formatted(format.locale, t, L"dddd", true);
@@ -267,6 +276,10 @@ const skin::Values &ClockSettings::ValuesFor(const std::wstring &skinId) const {
 
 const wchar_t *ToString(ClockDisplays displays) { return kDisplays[(int)displays]; }
 bool Parse(const std::wstring &text, ClockDisplays *out) { return ParseName(text, kDisplays, out); }
+const wchar_t *ToString(ClockHours hours) { return kHours[(int)hours]; }
+bool Parse(const std::wstring &text, ClockHours *out) { return ParseName(text, kHours, out); }
+const wchar_t *ToString(ClockDate date) { return kDates[(int)date]; }
+bool Parse(const std::wstring &text, ClockDate *out) { return ParseName(text, kDates, out); }
 
 bool ParseColor(const std::wstring &text, uint32_t *rgb) {
     if (text.size() != 7 || text[0] != L'#') return false;

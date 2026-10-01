@@ -26,7 +26,7 @@ private:
 }  // namespace
 
 bool ClockFace::Init(ID3D11Device *device, const animelogon::skin::Resolved &skin,
-                     const animelogon::RegionalFormat &format) {
+                     const animelogon::ClockStyle &style, const animelogon::RegionalFormat &format) {
     Release();
     device_ = device;
     ComPtr<IDXGIDevice> dxgi;
@@ -41,7 +41,7 @@ bool ClockFace::Init(ID3D11Device *device, const animelogon::skin::Resolved &ski
         Release();
         return false;
     }
-    view_.Set(skin, format);
+    view_.Set(skin, style, format);
     return true;
 }
 
@@ -52,7 +52,7 @@ void ClockFace::Release() {
     device_.Reset();
 }
 
-bool ClockFace::Draw(IDXGISurface *surface, UINT width, UINT height, size_t slot) {
+bool ClockFace::Draw(IDXGISurface *surface, UINT width, UINT height, size_t slot, float opacity) {
     if (!view_.context()) return false;
     DeviceLock lock(device_.Get());
     const D2D1_BITMAP_PROPERTIES1 props =
@@ -60,5 +60,5 @@ bool ClockFace::Draw(IDXGISurface *surface, UINT width, UINT height, size_t slot
                                 D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE));
     ComPtr<ID2D1Bitmap1> target;
     if (FAILED(view_.context()->CreateBitmapFromDxgiSurface(surface, &props, &target))) return false;
-    return view_.Draw(target.Get(), width, height, slot);
+    return view_.Draw(target.Get(), width, height, slot, opacity);
 }

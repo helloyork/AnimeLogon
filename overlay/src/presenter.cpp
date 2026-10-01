@@ -1,6 +1,7 @@
 #include "presenter.h"
 
 #include <d3d10.h>
+#include <wincodec.h>
 
 #include <cstring>
 
@@ -19,7 +20,7 @@ struct Params {
     float offset[2];
     float uvMax[2];
     float dim;
-    float hasVideo;
+    float source;  // 0 black, 1 the video, 2 the still
 };
 static_assert(sizeof(Params) % 16 == 0, "constant buffer size");
 
@@ -103,7 +104,64 @@ bool Presenter::CreateShaders() {
     return SUCCEEDED(device_->CreateSamplerState(&s, &sampler_));
 }
 
+bool Presenter::LoadStill(const std::wstring &path) {
+    WIN32_FILE_ATTRIBUTE_DATA a{};
+    if (!GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &a)) {
+        stillView_.Reset();
+        return false;
+    }
+    if (stillView_ && CompareFileTime(&a.ftLastWriteTime, &stillStamp_) == 0) return true;
+    stillView_.Reset();
+    if (!device_) return false;
+    ComPtr<IWICImagingFactory> wic;
+    ComPtr<IWICBitmapDecoder> decoder;
+    ComPtr<IWICBitmapFrameDecode> frame;
+    ComPtr<IWICFormatConverter> bgra;
+    UINT w = 0, h = 0;
+    HRESULT hr = CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&wic));
+    if (SUCCEEDED(hr))
+        hr = wic->CreateDecoderFromFilename(path.c_str(), nullptr, GENERIC_READ, WICDecodeMetadataCacheOnDemand,
+                                            &decoder);
+    if (SUCCEEDED(hr)) hr = decoder->GetFrame(0, &frame);
+    if (SUCCEEDED(hr)) hr = wic->CreateFormatConverter(&bgra);
+    if (SUCCEEDED(hr))
+        hr = bgra->Initialize(frame.Get(), GUID_WICPixelFormat32bppBGRA, WICBitmapDitherTypeNone, nullptr, 0.0,
+                              WICBitmapPaletteTypeCustom);
+    if (SUCCEEDED(hr)) hr = bgra->GetSize(&w, &h);
+    if (SUCCEEDED(hr) && (!w || !h || w > 16384 || h > 16384)) hr = E_FAIL;
+    std::vector<BYTE> pixels;
+    if (SUCCEEDED(hr)) {
+        pixels.resize((size_t)w * h * 4);
+        hr = bgra->CopyPixels(nullptr, w * 4, (UINT)pixels.size(), pixels.data());
+    }
+    ComPtr<ID3D11Texture2D> texture;
+    if (SUCCEEDED(hr)) {
+        D3D11_TEXTURE2D_DESC d{};
+        d.Width = w;
+        d.Height = h;
+        d.MipLevels = 1;
+        d.ArraySize = 1;
+        d.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        d.SampleDesc.Count = 1;
+        d.Usage = D3D11_USAGE_IMMUTABLE;
+        d.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+        const D3D11_SUBRESOURCE_DATA data{pixels.data(), w * 4, 0};
+        hr = device_->CreateTexture2D(&d, &data, &texture);
+    }
+    if (SUCCEEDED(hr)) hr = device_->CreateShaderResourceView(texture.Get(), nullptr, &stillView_);
+    if (FAILED(hr)) {
+        ALOG(L"present: the sign-in background could not be loaded (0x%08X)", hr);
+        stillView_.Reset();
+        return false;
+    }
+    stillW_ = w;
+    stillH_ = h;
+    stillStamp_ = a.ftLastWriteTime;
+    return true;
+}
+
 void Presenter::ReleaseDevice() {
+    stillView_.Reset();
     sampler_.Reset();
     constants_.Reset();
     ps_.Reset();
@@ -188,6 +246,7 @@ void Presenter::DestroyWindows() {
     visible_ = false;
     clock_ = nullptr;
     clockFailed_ = false;
+    clockOpacity_ = 1.0f;
     if (dcomp_) dcomp_->Commit();
     if (context_) {
         context_->ClearState();
@@ -269,8 +328,17 @@ bool Presenter::Render(const std::vector<Picture> &pictures, animelogon::Scaling
         }
         Params p{};
         p.dim = dim;
-        p.hasVideo = pic.frame && pic.videoW > 0 ? 1.0f : 0.0f;
-        if (p.hasVideo > 0.0f) {
+        const bool video = pic.frame && pic.videoW > 0, still = !video && pic.still && stillView_;
+        p.source = video ? 1.0f : still ? 2.0f : 0.0f;
+        if (still) {
+            // As Windows draws it: filling each display.
+            const RECT &r = targets_[i].rect;
+            const layout::Mapping m = layout::Map((int)stillW_, (int)stillH_, r, r, animelogon::Scaling::Fill);
+            p.scale[0] = m.scaleX;
+            p.scale[1] = m.scaleY;
+            p.offset[0] = m.offsetX;
+            p.offset[1] = m.offsetY;
+        } else if (video) {
             const layout::Mapping m = layout::Map(pic.videoW, pic.videoH, targets_[i].canvas, targets_[i].rect, scaling);
             p.scale[0] = m.scaleX;
             p.scale[1] = m.scaleY;
@@ -292,16 +360,16 @@ bool Presenter::Render(const std::vector<Picture> &pictures, animelogon::Scaling
         context_->PSSetConstantBuffers(0, 1, cb);
         ID3D11SamplerState *samplers[] = {sampler_.Get()};
         context_->PSSetSamplers(0, 1, samplers);
-        ID3D11ShaderResourceView *views[] = {pic.frame ? pic.frame->luma : nullptr,
-                                             pic.frame ? pic.frame->chroma : nullptr};
-        context_->PSSetShaderResources(0, 2, views);
+        ID3D11ShaderResourceView *views[] = {video ? pic.frame->luma : nullptr, video ? pic.frame->chroma : nullptr,
+                                             still ? stillView_.Get() : nullptr};
+        context_->PSSetShaderResources(0, 3, views);
         context_->Draw(3, 0);
-        ID3D11ShaderResourceView *none[2] = {};
-        context_->PSSetShaderResources(0, 2, none);
+        ID3D11ShaderResourceView *none[3] = {};
+        context_->PSSetShaderResources(0, 3, none);
         context_->OMSetRenderTargets(0, nullptr, nullptr);
-        if (clock_ && targets_[i].clock && !clockFailed_) {
+        if (clock_ && targets_[i].clock && !clockFailed_ && clockOpacity_ > 0.0f) {
             ComPtr<IDXGISurface> surface;
-            if (FAILED(back.As(&surface)) || !clock_->Draw(surface.Get(), w.width, w.height, i)) {
+            if (FAILED(back.As(&surface)) || !clock_->Draw(surface.Get(), w.width, w.height, i, clockOpacity_)) {
                 // The video goes on without it.
                 ALOG(L"present: the clock could not be drawn -- continuing without it");
                 clockFailed_ = true;

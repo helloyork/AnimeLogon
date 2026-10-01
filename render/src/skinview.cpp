@@ -73,9 +73,10 @@ void SkinView::Release() {
     version_ = 0;
 }
 
-void SkinView::Set(const skin::Resolved &skin, const RegionalFormat &format) {
+void SkinView::Set(const skin::Resolved &skin, const ClockStyle &style, const RegionalFormat &format) {
     skin_ = skin;
-    format_ = format;
+    style_ = style;
+    format_ = FormatFor(format, style.locale);
     words_.clear();
     ++version_;
     Tick();
@@ -94,12 +95,11 @@ bool SkinView::Tick(const SYSTEMTIME &now) {
     shown_ = now;
     std::vector<std::vector<std::vector<std::wstring>>> words;
     for (const skin::Panel &p : skin_.panels) {
-        const RegionalFormat format = FormatFor(format_, p.locale);
         auto &panel = words.emplace_back();
         for (const skin::Line &l : p.lines) {
             auto &line = panel.emplace_back();
             for (const skin::Text &t : l.texts)
-                line.push_back(Cased(FillText(t.value, format, p.hours, now), t.textCase, format.locale));
+                line.push_back(Cased(FillText(t.value, format_, style_, now), t.textCase, format_.locale));
         }
     }
     if (words == words_) return false;
@@ -113,7 +113,7 @@ std::wstring SkinView::Family(const std::wstring &wanted) const {
     return HasFamily(write_.Get(), L"Segoe UI Variable Display") ? L"Segoe UI Variable Display" : L"Segoe UI";
 }
 
-bool SkinView::Lay(Line &line, const skin::Panel &panel, const skin::Line &source,
+bool SkinView::Lay(Line &line, const skin::Panel &, const skin::Line &source,
                    const std::vector<std::wstring> &words, float px) {
     struct Run {
         const skin::Text *text;
@@ -127,10 +127,12 @@ bool SkinView::Lay(Line &line, const skin::Panel &panel, const skin::Line &sourc
         s += words[i];
     }
     line.layout.Reset();
+    line.runs.clear();
     if (runs.empty()) return true;  // nothing to say on this line
+    for (const Run &r : runs) line.runs.push_back({(size_t)(r.text - source.texts.data()), {r.start, r.length}});
 
     const skin::Text &first = *runs.front().text;
-    const std::wstring locale = panel.locale.empty() ? format_.locale : panel.locale;
+    const std::wstring &locale = format_.locale;
     ComPtr<IDWriteTextFormat> format;
     if (FAILED(write_->CreateTextFormat(Family(first.font).c_str(), nullptr, (DWRITE_FONT_WEIGHT)first.weight,
                                         first.italic ? DWRITE_FONT_STYLE_ITALIC : DWRITE_FONT_STYLE_NORMAL,
@@ -261,14 +263,15 @@ bool SkinView::Build(Built &built, size_t index, UINT width, UINT height) {
         FAILED(dc_->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::White), &brush)))
         return false;
     const float refX = std::round(pad + before), originY = std::round(pad - top);
+    std::vector<D2D1_POINT_2F> origins(lines.size());
     dc_->SetTarget(built.text.Get());
     dc_->BeginDraw();
     dc_->Clear(D2D1::ColorF(0, 0, 0, 0));
     for (size_t i = 0; i < lines.size(); ++i) {
         const Line &l = lines[i];
         if (!l.layout) continue;
-        dc_->DrawTextLayout(D2D1::Point2F(std::round(refX - ref(l)), std::round(originY + baselines[i]) - l.baseline),
-                            l.layout.Get(), brush.Get());
+        origins[i] = D2D1::Point2F(std::round(refX - ref(l)), std::round(originY + baselines[i]) - l.baseline);
+        dc_->DrawTextLayout(origins[i], l.layout.Get(), brush.Get());
     }
     const HRESULT hr = dc_->EndDraw();
     dc_->SetTarget(nullptr);
@@ -279,6 +282,24 @@ bool SkinView::Build(Built &built, size_t index, UINT width, UINT height) {
     const float refY = row == 0 ? top : row == 1 ? (top + lastBaseline) / 2.0f : lastBaseline;
     built.at = D2D1::Point2F(std::floor(anchorX - refX), std::floor(anchorY - (originY + refY)));
     built.px = px;
+
+    const std::wstring pk = L"p" + std::to_wstring(index + 1);
+    built.bounds.push_back({pk, D2D1::RectF(built.at.x + refX - before, built.at.y + originY + top,
+                                            built.at.x + refX + after, built.at.y + originY + bottom)});
+    for (size_t i = 0; i < lines.size(); ++i) {
+        const Line &l = lines[i];
+        if (!l.layout) continue;
+        for (const Line::Run &r : l.runs) {
+            DWRITE_HIT_TEST_METRICS hit{};
+            UINT32 count = 0;
+            if (FAILED(l.layout->HitTestTextRange(r.range.startPosition, r.range.length, 0.0f, 0.0f, &hit, 1, &count)) ||
+                !count)
+                continue;
+            const float x = built.at.x + origins[i].x + hit.left, y = built.at.y + origins[i].y + hit.top;
+            built.bounds.push_back({pk + L".l" + std::to_wstring(i + 1) + L".t" + std::to_wstring(r.text + 1),
+                                    D2D1::RectF(x, y, x + hit.width, y + hit.height)});
+        }
+    }
 
     if (panel.backdrop > 0.0f) {
         // An ellipse around the ink, fading to nothing well before its edge.
@@ -303,7 +324,14 @@ bool SkinView::Build(Built &built, size_t index, UINT width, UINT height) {
     return true;
 }
 
-bool SkinView::Draw(ID2D1Bitmap1 *target, UINT width, UINT height, size_t slot) {
+std::vector<SkinView::Bound> SkinView::Bounds(size_t slot) const {
+    std::vector<Bound> out;
+    if (slot < slots_.size())
+        for (const Built &b : slots_[slot].panels) out.insert(out.end(), b.bounds.begin(), b.bounds.end());
+    return out;
+}
+
+bool SkinView::Draw(ID2D1Bitmap1 *target, UINT width, UINT height, size_t slot, float opacity) {
     if (!dc_) return false;
     if (slot >= slots_.size()) slots_.resize(slot + 1);
     Slot &s = slots_[slot];
@@ -321,6 +349,11 @@ bool SkinView::Draw(ID2D1Bitmap1 *target, UINT width, UINT height, size_t slot) 
     }
     dc_->SetTarget(target);
     dc_->BeginDraw();
+    const bool faded = opacity < 1.0f;
+    if (faded)
+        dc_->PushLayer(D2D1::LayerParameters1(D2D1::InfiniteRect(), nullptr, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+                                              D2D1::IdentityMatrix(), std::max(0.0f, opacity)),
+                       nullptr);
     for (size_t i = 0; i < s.panels.size(); ++i) {
         const Built &b = s.panels[i];
         if (!b.text) continue;
@@ -337,6 +370,7 @@ bool SkinView::Draw(ID2D1Bitmap1 *target, UINT width, UINT height, size_t slot) 
         }
         dc_->DrawImage(b.text.Get(), b.at);
     }
+    if (faded) dc_->PopLayer();
     const HRESULT hr = dc_->EndDraw();
     dc_->SetTarget(nullptr);
     return SUCCEEDED(hr);

@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <string>
 #include <fstream>
@@ -93,6 +94,22 @@ const ColorChoice kColors[] = {
 
 constexpr float kPreviewMaxH = 360.0f;
 constexpr size_t kMaxSkinFile = 64 * 1024;
+
+// The languages the clock can be put in, besides the regional format's own.
+const skin::Option kClockLanguages[] = {{L"", L"跟随区域格式"}, {L"zh-CN", L"简体中文"}, {L"zh-TW", L"繁體中文"},
+                                        {L"ja-JP", L"日本語"},   {L"ko-KR", L"한국어"},     {L"en-US", L"English"}};
+
+// A slider's value as it is stored and shown: as many decimals as its step has.
+std::wstring StepText(double v, double step) {
+    int decimals = 0;
+    for (double s = step; decimals < 4 && std::fabs(s - std::round(s)) > 1e-6; s *= 10) ++decimals;
+    std::wstring text = Format(L"%.*f", decimals, v);
+    if (text.find(L'.') != std::wstring::npos) {
+        while (text.back() == L'0') text.pop_back();
+        if (text.back() == L'.') text.pop_back();
+    }
+    return text == L"-0" ? L"0" : text;
+}
 
 std::wstring PickSkinFile(HWND owner, bool save, const std::wstring &suggested) {
     wchar_t buf[MAX_PATH * 4] = L"";
@@ -195,6 +212,9 @@ struct Config : Window {
     std::vector<SkinEntry> skins;
     skin::Skin clockSkin;
     std::wstring clockSkinId;
+    std::vector<skin::Part> parts;
+    std::wstring partKey;  // the element being adjusted
+    std::vector<SkinView::Bound> previewBounds;
     SkinPreview previewer;
     Picture previewBackground, preview;
     unsigned previewVersion = 0;
@@ -375,14 +395,73 @@ struct Config : Window {
         std::wstring why;
         clockSkin = LoadSkin(set.clock.skin, &why);
         clockSkinId = why.empty() ? set.clock.skin : L"default";
+        parts = skin::Parts(clockSkin);
+        if (!PartNamed(partKey)) partKey = parts.empty() ? L"" : parts.front().key;
+    }
+
+    const skin::Part *PartNamed(const std::wstring &key) const {
+        for (const skin::Part &p : parts)
+            if (p.key == key) return &p;
+        return nullptr;
     }
 
     skin::Values &ClockValues() { return set.clock.values[clockSkinId]; }
 
-    void SetClockValue(const std::wstring &id, const std::wstring &value, bool save = true) {
-        ClockValues()[id] = value;
+    // A setting of the skin's own. What was adjusted by hand on attributes that take their
+    // value from it goes, so the setting is seen to work. True if anything went.
+    bool SetSkinSetting(const std::wstring &id, const std::wstring &value, bool save = true) {
+        skin::Values &v = ClockValues();
+        v[id] = value;
+        bool cleared = false;
+        for (const std::wstring &key : skin::AdjustmentsOf(clockSkin, id)) cleared = v.erase(key) > 0 || cleared;
         if (save) Save();
         RenderPreview();
+        return cleared;
+    }
+
+    void SetAdjustment(const std::wstring &key, const std::wstring &value, bool save = true) {
+        if (!skin::IsAdjustmentValue(key, value)) return;
+        ClockValues()[key] = value;
+        if (save) Save();
+        RenderPreview();
+    }
+
+    void SaveStyle() {
+        Save();
+        RenderPreview();
+    }
+
+    // Chooses the element under a point of the preview, in page DIPs.
+    void PickAt(float x, float y) {
+        if (!preview.width || previewRect.right <= previewRect.left) return;
+        const float k = (float)preview.width / (previewRect.right - previewRect.left);
+        const float px = (x - previewRect.left) * k, py = (y - previewRect.top) * k;
+        const std::wstring *best = nullptr;
+        float bestArea = 0.0f;
+        for (const SkinView::Bound &b : previewBounds) {
+            const float pad = 4.0f * k;
+            if (px < b.rect.left - pad || px > b.rect.right + pad || py < b.rect.top - pad || py > b.rect.bottom + pad)
+                continue;
+            const float area = (b.rect.right - b.rect.left) * (b.rect.bottom - b.rect.top);
+            if (!best || area < bestArea) best = &b.key, bestArea = area;
+        }
+        if (best && PartNamed(*best) && *best != partKey) {
+            partKey = *best;
+            GoTo(page);
+        }
+    }
+
+    // Where the chosen element is in the preview, in page DIPs.
+    bool ChosenRect(D2D1_RECT_F *out) const {
+        if (!preview.width || previewRect.right <= previewRect.left) return false;
+        const float k = (previewRect.right - previewRect.left) / (float)preview.width;
+        for (const SkinView::Bound &b : previewBounds)
+            if (b.key == partKey) {
+                *out = {previewRect.left + b.rect.left * k - 3, previewRect.top + b.rect.top * k - 3,
+                        previewRect.left + b.rect.right * k + 3, previewRect.top + b.rect.bottom * k + 3};
+                return true;
+            }
+        return false;
     }
 
     // Draws the preview at the size it is shown, in pixels.
@@ -398,7 +477,7 @@ struct Config : Window {
         SYSTEMTIME now{};
         GetLocalTime(&now);
         if (previewer.Render(previewBackground, skin::Resolve(clockSkin, set.clock.ValuesFor(clockSkinId)),
-                             UserFormat(), now, &preview))
+                             set.clock.style, UserFormat(), now, &preview, &previewBounds))
             ++previewVersion;
         Invalidate();
     }
@@ -486,6 +565,33 @@ struct Config : Window {
     void AddVolumeSlider(int *volume, const wchar_t *icon, const wchar_t *title, const wchar_t *detail);
     void LayoutClock();
     void AddSkinSetting(const skin::Setting &s);
+
+    // One adjustable value as a card: its control is chosen by its kind. `set` is called with
+    // the new value, and `commit` false while a slider is still being dragged.
+    struct Field {
+        const wchar_t *icon;
+        std::wstring label, detail;
+        skin::Control control = skin::Control::Slider;
+        double min = 0, max = 1, step = 0.01;
+        std::vector<skin::Option> options;
+        std::wstring value;
+        std::function<bool(const std::wstring &)> valid;
+        std::function<void(const std::wstring &, bool commit)> set;
+    };
+    void AddField(const Field &field);
+};
+
+// The preview, which picks the element to adjust when clicked and outlines it.
+struct PreviewPicker : Widget {
+    Config *page = nullptr;
+    D2D1_POINT_2F at{};
+    void OnPress(float x, float y) override { at = {x, y}; }
+    void OnClick() override { page->PickAt(at.x, at.y); }
+    bool HandCursor() const override { return true; }
+    void Paint(const Painter &p) override {
+        D2D1_RECT_F r{};
+        if (page->ChosenRect(&r)) p.StrokeRound(r, 4.0f, p.pal->accent);
+    }
 };
 
 D2D1_RECT_F Config::PushCard(const wchar_t *icon, std::wstring title, std::wstring detail, float controlW,
@@ -535,13 +641,49 @@ void Config::LayoutClock() {
     previewShown = true;
     layoutY += std::round(ph) + kCardGap * 3;
     RenderPreview();
+    PreviewPicker *picker = Add(new PreviewPicker());
+    picker->page = this;
+    picker->rect = previewRect;
 
+    // --- what the clock says, whichever skin shows it ---
+    PushHeading(L"时钟");
     Add(new DropDown({L"密码界面所在的显示器", L"主显示器", L"所有显示器"}, (int)c.displays, [this](int i) {
             set.clock.displays = (ClockDisplays)i;
             Save();
         }))
         ->rect = PushCard(glyph::kFullScreen, L"显示在", L"视频在每个屏幕上播放，时钟只在这里。", 220);
+    Add(new Segmented({L"跟随区域格式", L"12 小时制", L"24 小时制"}, (int)c.style.hours, [this](int i) {
+            set.clock.style.hours = (ClockHours)i;
+            SaveStyle();
+        }))
+        ->rect = PushCard(glyph::kRecent, L"时间制式", L"默认与任务栏一致。", 300);
+    Add(new ToggleSwitch(L"", c.style.ampm, [this](bool on) {
+            set.clock.style.ampm = on;
+            SaveStyle();
+            GoTo(page);
+        }))
+        ->rect = PushCard(glyph::kRecent, L"显示上午/下午", L"12 小时制时，以小字显示在时间旁边。", 40);
+    cards.back().aside = c.style.ampm ? L"开" : L"关";
+    Add(new Segmented({L"星期与月日", L"完整日期", L"不显示"}, (int)c.style.date, [this](int i) {
+            set.clock.style.date = (ClockDate)i;
+            SaveStyle();
+        }))
+        ->rect = PushCard(glyph::kCalendar, L"日期", L"完整日期带年份。", 280);
+    {
+        std::vector<std::wstring> names;
+        int sel = 0;
+        for (size_t i = 0; i < ARRAYSIZE(kClockLanguages); ++i) {
+            names.push_back(kClockLanguages[i].label);
+            if (c.style.locale == kClockLanguages[i].value) sel = (int)i;
+        }
+        Add(new DropDown(names, sel, [this](int i) {
+                set.clock.style.locale = kClockLanguages[i].value;
+                SaveStyle();
+            }))
+            ->rect = PushCard(glyph::kGlobe, L"语言", L"时间和日期的文字语言。", 200);
+    }
 
+    // --- the skin: how it looks ---
     PushHeading(L"皮肤");
     std::vector<std::wstring> names;
     int selected = 0;
@@ -573,96 +715,128 @@ void Config::LayoutClock() {
     import->rect = {files.left, files.top, files.left + iw, files.bottom};
     exportButton->rect = {files.right - ew, files.top, files.right, files.bottom};
 
-    if (clockSkin.settings.empty()) return;
-    PushHeading(L"自定义");
-    for (const skin::Setting &s : clockSkin.settings) AddSkinSetting(s);
+    if (!clockSkin.settings.empty()) {
+        PushHeading(L"样式");
+        for (const skin::Setting &s : clockSkin.settings) AddSkinSetting(s);
+    }
+
+    // --- every attribute of every element ---
+    const skin::Part *part = PartNamed(partKey);
+    if (part) {
+        PushHeading(L"逐项调整");
+        std::vector<std::wstring> labels;
+        int sel = 0;
+        for (size_t i = 0; i < parts.size(); ++i) {
+            labels.push_back(parts[i].label);
+            if (parts[i].key == partKey) sel = (int)i;
+        }
+        DropDown *which = Add(new DropDown(labels, sel, [this](int i) {
+            partKey = parts[(size_t)i].key;
+            GoTo(page);
+        }));
+        Button *undo = Add(new Button(L"恢复此项", ButtonStyle::Subtle, [this, key = partKey] {
+            if (const skin::Part *p = PartNamed(key))
+                for (const skin::Adjustment &a : p->adjustments) ClockValues().erase(a.key);
+            SaveStyle();
+            GoTo(page);
+        }));
+        const float uw = undo->PreferredWidth(measure);
+        const D2D1_RECT_F slot = PushCard(glyph::kEdit, L"调整", L"也可以在预览里点选。", 160 + 8 + uw);
+        which->rect = {slot.left, slot.top, slot.left + 160, slot.bottom};
+        undo->rect = {slot.right - uw, slot.top, slot.right, slot.bottom};
+        for (const skin::Adjustment &a : part->adjustments) {
+            Field field;
+            field.icon = glyph::kSettings;
+            field.label = a.label;
+            field.detail = a.detail;
+            field.control = a.control;
+            field.min = a.min;
+            field.max = a.max;
+            field.step = a.step;
+            field.options = a.options;
+            field.value = skin::Effective(clockSkin, set.clock.ValuesFor(clockSkinId), a);
+            field.valid = [key = a.key](const std::wstring &v) { return skin::IsAdjustmentValue(key, v); };
+            field.set = [this, key = a.key](const std::wstring &v, bool commit) { SetAdjustment(key, v, commit); };
+            AddField(field);
+        }
+    }
+
     Button *reset = Add(new Button(L"恢复默认", ButtonStyle::Standard, [this] {
         set.clock.values.erase(clockSkinId);
         Save();
         GoTo(page);
     }));
-    reset->rect = PushCard(glyph::kUndo, L"恢复默认", L"把以上选项恢复为这个皮肤的默认值。", reset->PreferredWidth(measure));
+    reset->rect = PushCard(glyph::kUndo, L"恢复默认", L"把这个皮肤的样式和逐项调整全部恢复为默认。",
+                           reset->PreferredWidth(measure));
 }
 
-void Config::AddSkinSetting(const skin::Setting &s) {
-    const std::wstring value = skin::ValueOf(s, set.clock.ValuesFor(clockSkinId));
-    const std::wstring detail = s.detail;
-    switch (s.kind) {
-    case skin::SettingKind::Choice: {
+void Config::AddField(const Field &field) {
+    switch (field.control) {
+    case skin::Control::Choice: {
         std::vector<std::wstring> labels;
         int sel = 0;
         float width = 0.0f;
-        for (size_t i = 0; i < s.options.size(); ++i) {
-            labels.push_back(s.options[i].label);
-            if (s.options[i].value == value) sel = (int)i;
-            width += measure.MeasureWidth(s.options[i].label, fonts.body) + 28.0f;
+        for (size_t i = 0; i < field.options.size(); ++i) {
+            labels.push_back(field.options[i].label);
+            if (field.options[i].value == field.value) sel = (int)i;
+            width += measure.MeasureWidth(field.options[i].label, fonts.body) + 28.0f;
         }
-        auto pick = [this, id = s.id, options = s.options](int i) { SetClockValue(id, options[(size_t)i].value); };
-        if (s.options.size() <= 4 && width <= 320.0f)
-            Add(new Segmented(labels, sel, pick))->rect = PushCard(glyph::kMenu, s.label, detail, std::max(width, 120.0f));
+        auto pick = [set = field.set, options = field.options](int i) { set(options[(size_t)i].value, true); };
+        if (field.options.size() <= 4 && width <= 320.0f)
+            Add(new Segmented(labels, sel, pick))->rect =
+                PushCard(field.icon, field.label, field.detail, std::max(width, 120.0f));
         else
-            Add(new DropDown(labels, sel, pick))->rect = PushCard(glyph::kMenu, s.label, detail, 200);
+            Add(new DropDown(labels, sel, pick))->rect = PushCard(field.icon, field.label, field.detail, 200);
         break;
     }
-    case skin::SettingKind::Toggle: {
-        const bool on = value == L"on";
-        Add(new ToggleSwitch(L"", on, [this, id = s.id](bool v) {
-                SetClockValue(id, v ? L"on" : L"off");
-                GoTo(page);
-            }))
-            ->rect = PushCard(glyph::kCheck, s.label, detail, 40);
-        cards.back().aside = on ? L"开" : L"关";
-        break;
-    }
-    case skin::SettingKind::Number: {
-        const float v = (float)_wtof(value.c_str());
-        Slider *slider = Add(new Slider(v, (float)s.min, (float)s.max, (float)s.step, nullptr));
-        slider->rect = PushCard(glyph::kZoomIn, s.label, detail, 160);
+    case skin::Control::Slider: {
+        const float v = (float)_wtof(field.value.c_str());
+        Slider *slider = Add(new Slider(v, (float)field.min, (float)field.max, (float)field.step, nullptr));
+        slider->rect = PushCard(field.icon, field.label, field.detail, 160);
         const size_t card = cards.size() - 1;
-        auto shown = [](float x) { return Format(x == std::floor(x) ? L"%.0f" : L"%.1f", x); };
-        cards[card].aside = shown(v);
-        slider->onChange = [this, id = s.id, card, shown](float x) {
-            cards[card].aside = shown(x);
-            SetClockValue(id, shown(x), false);
+        cards[card].aside = StepText(v, field.step);
+        slider->onChange = [this, card, step = field.step, set = field.set](float x) {
+            cards[card].aside = StepText(x, step);
+            set(StepText(x, step), false);
         };
-        slider->onCommit = [this](float) { Save(); };
+        slider->onCommit = [step = field.step, set = field.set](float x) { set(StepText(x, step), true); };
         break;
     }
-    case skin::SettingKind::Color: {
-        uint32_t argb = 0xFFFFFFFF, rgb = 0;
-        if (ParseColor(value.substr(0, 7), &rgb)) argb = rgb;
+    case skin::Control::Color: {
+        uint32_t rgb = 0xFFFFFF;
+        ParseColor(field.value.substr(0, 7), &rgb);
         std::vector<std::wstring> names;
         int sel = -1;
         for (size_t i = 0; i < ARRAYSIZE(kColors); ++i) {
             names.push_back(kColors[i].name);
-            if (value.size() == 7 && kColors[i].rgb == (argb & 0xFFFFFF)) sel = (int)i;
+            if (field.value.size() == 7 && kColors[i].rgb == (rgb & 0xFFFFFF)) sel = (int)i;
         }
         if (sel < 0) {
             names.push_back(L"自定义");
             sel = (int)names.size() - 1;
         }
-        DropDown *presets = Add(new DropDown(names, sel, [this, id = s.id](int i) {
-            if (i < (int)ARRAYSIZE(kColors)) SetClockValue(id, FormatColor(kColors[i].rgb));
+        DropDown *presets = Add(new DropDown(names, sel, [this, set = field.set](int i) {
+            if (i < (int)ARRAYSIZE(kColors)) set(FormatColor(kColors[i].rgb), true);
             GoTo(page);
         }));
         TextBox *hex = Add(new TextBox());
-        hex->SetText(value);
+        hex->SetText(field.value);
         hex->placeholder = L"#RRGGBB";
-        hex->onCommit = [this, setting = s](const std::wstring &text) {
+        hex->onCommit = [this, valid = field.valid, set = field.set](const std::wstring &text) {
             const std::wstring v(Trim(text));
-            if (skin::IsValue(setting, v)) {
-                SetClockValue(setting.id, v);
+            if (valid(v)) {
+                set(v, true);
                 GoTo(page);
             } else {
                 Note(L"颜色格式应为 #RRGGBB 或 #RRGGBBAA。");
             }
         };
-        const D2D1_RECT_F slot = PushCard(glyph::kColor, s.label, detail, 120 + 8 + 110);
+        const D2D1_RECT_F slot = PushCard(field.icon, field.label, field.detail, 120 + 8 + 110);
         presets->rect = {slot.left, slot.top, slot.left + 120, slot.bottom};
         hex->rect = {slot.right - 110, slot.top, slot.right, slot.bottom};
         break;
     }
-    case skin::SettingKind::Font: {
+    case skin::Control::Font: {
         if (!familiesRead) {
             families = fonts::MachineFamilies();
             familiesRead = true;
@@ -671,20 +845,57 @@ void Config::AddSkinSetting(const skin::Setting &s) {
         int sel = 0;
         for (size_t i = 0; i < families.size(); ++i) {
             fontNames.push_back(families[i].name);
-            if (!value.empty() && EqualsNoCase(value, families[i].stored)) sel = (int)i + 1;
+            if (!field.value.empty() && EqualsNoCase(field.value, families[i].stored)) sel = (int)i + 1;
         }
-        if (!value.empty() && sel == 0) {  // no longer installed for all users
-            fontNames.push_back(value + L"（未安装）");
+        if (!field.value.empty() && sel == 0) {  // no longer installed for all users
+            fontNames.push_back(field.value + L"（未安装）");
             sel = (int)fontNames.size() - 1;
         }
-        Add(new DropDown(fontNames, sel, [this, id = s.id](int i) {
-                if (i == 0) SetClockValue(id, L"");
-                else if (i - 1 < (int)families.size()) SetClockValue(id, families[(size_t)i - 1].stored);
+        Add(new DropDown(fontNames, sel, [this, set = field.set](int i) {
+                if (i == 0) set(L"", true);
+                else if (i - 1 < (int)families.size()) set(families[(size_t)i - 1].stored, true);
             }))
-            ->rect = PushCard(glyph::kEdit, s.label, detail, 220);
+            ->rect = PushCard(field.icon, field.label, field.detail, 220);
         break;
     }
     }
+}
+
+void Config::AddSkinSetting(const skin::Setting &s) {
+    const std::wstring value = skin::ValueOf(s, set.clock.ValuesFor(clockSkinId));
+    if (s.kind == skin::SettingKind::Toggle) {
+        const bool on = value == L"on";
+        Add(new ToggleSwitch(L"", on, [this, id = s.id](bool v) {
+                SetSkinSetting(id, v ? L"on" : L"off");
+                GoTo(page);
+            }))
+            ->rect = PushCard(glyph::kCheck, s.label, s.detail, 40);
+        cards.back().aside = on ? L"开" : L"关";
+        return;
+    }
+    Field field;
+    field.icon = s.kind == skin::SettingKind::Number ? glyph::kZoomIn
+                 : s.kind == skin::SettingKind::Color ? glyph::kColor
+                 : s.kind == skin::SettingKind::Font  ? glyph::kEdit
+                                                      : glyph::kMenu;
+    field.label = s.label;
+    field.detail = s.detail;
+    field.control = s.kind == skin::SettingKind::Number ? skin::Control::Slider
+                    : s.kind == skin::SettingKind::Color ? skin::Control::Color
+                    : s.kind == skin::SettingKind::Font  ? skin::Control::Font
+                                                         : skin::Control::Choice;
+    field.min = s.min;
+    field.max = s.max;
+    field.step = s.step;
+    field.options = s.options;
+    field.value = value;
+    field.valid = [s](const std::wstring &v) { return skin::IsValue(s, v); };
+    // A setting brings back what was adjusted by hand from it; the page shows that once the
+    // change is final.
+    field.set = [this, id = s.id](const std::wstring &v, bool commit) {
+        if (SetSkinSetting(id, v, commit) && commit) GoTo(page);
+    };
+    AddField(field);
 }
 
 void Config::PushHeading(const wchar_t *text) {
