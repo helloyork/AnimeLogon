@@ -5,6 +5,7 @@
 #include <propvarutil.h>
 
 #include "animelogon/log.h"
+#include "nv12.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -181,27 +182,11 @@ bool VideoPlayer::Store(IMFSample *sample, Slot &slot) {
         return true;
     }
     if (FAILED(sample->ConvertToContiguousBuffer(&buffer))) return false;
-    BYTE *scan0 = nullptr;
-    LONG pitch = 0;
-    ComPtr<IMF2DBuffer> twoD;
-    bool locked2D = SUCCEEDED(buffer.As(&twoD)) && SUCCEEDED(twoD->Lock2D(&scan0, &pitch));
-    DWORD length = 0;
-    if (!locked2D) {
-        if (FAILED(buffer->Lock(&scan0, nullptr, &length))) return false;
-        pitch = stride_;
-        if ((size_t)length < (size_t)pitch * allocH_ * 3 / 2) {
-            buffer->Unlock();
-            return false;
-        }
-    }
-    bool ok = pitch > 0;
-    if (ok) {
-        context_->UpdateSubresource(slot.y.Get(), 0, nullptr, scan0, (UINT)pitch, 0);
-        context_->UpdateSubresource(slot.uv.Get(), 0, nullptr, scan0 + (size_t)pitch * allocH_, (UINT)pitch, 0);
-    }
-    if (locked2D) twoD->Unlock2D();
-    else buffer->Unlock();
-    return ok;
+    Nv12Lock lock;
+    if (!lock.Lock(buffer.Get(), allocH_, stride_)) return false;
+    context_->UpdateSubresource(slot.y.Get(), 0, nullptr, lock.luma(), (UINT)lock.pitch(), 0);
+    context_->UpdateSubresource(slot.uv.Get(), 0, nullptr, lock.chroma(), (UINT)lock.pitch(), 0);
+    return true;
 }
 
 void VideoPlayer::Decode() {

@@ -65,3 +65,14 @@ TEST(WakeKeyLatchIsPerScreen) {
     latch = KeyLatch{};  // the next lock
     CHECK(Down(latch, s, VK_RETURN) == KeyVerdict::WithholdWake);
 }
+
+#include "nv12.h"
+
+TEST(Nv12PaddedPlaneRows) {
+    CHECK(Nv12Lock::PlaneRows(1080, 1920u * 1088 * 3 / 2, 1920) == 1088);  // software decoder padding
+    CHECK(Nv12Lock::PlaneRows(1080, 1920u * 1080 * 3 / 2, 1920) == 1080);
+    CHECK(Nv12Lock::PlaneRows(720, 1280u * 720 * 3 / 2, 1280) == 720);
+    CHECK(Nv12Lock::PlaneRows(1080, 2048u * 1088 * 3 / 2, 2048) == 1088);   // wider pitch
+    CHECK(Nv12Lock::PlaneRows(1080, 1920u * 1080 * 3 / 2 + 4096, 1920) == 1080);
+    CHECK(Nv12Lock::PlaneRows(1080, 1000, 1920) == 0);
+}

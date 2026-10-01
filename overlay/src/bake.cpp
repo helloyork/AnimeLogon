@@ -21,6 +21,7 @@
 #include "animelogon/settings.h"
 #include "animelogon/text.h"
 #include "layout.h"
+#include "nv12.h"
 #include "plan.h"
 
 using Microsoft::WRL::ComPtr;
@@ -29,7 +30,7 @@ namespace bake {
 namespace {
 
 // Bumped whenever the same settings would bake different bytes.
-constexpr const wchar_t *kVersion = L"1";
+constexpr const wchar_t *kVersion = L"2";
 // Windows scales the image to the display; beyond this it only costs bytes.
 constexpr int kMaxSide = 2560;
 constexpr size_t kMaxKeyBytes = 4096;
@@ -39,7 +40,7 @@ std::wstring KeyPath() { return animelogon::paths::DataDir() + L"\\background.ke
 struct Frame {
     int allocW = 0, allocH = 0, displayW = 0, displayH = 0;
     LONG pitch = 0;
-    std::vector<uint8_t> nv12;  // luma rows, then interleaved chroma rows, `pitch` apart
+    std::vector<uint8_t> luma, chroma;  // rows `pitch` apart
 };
 
 bool Aperture(IMFMediaType *type, GUID key, UINT32 *w, UINT32 *h) {
@@ -88,25 +89,14 @@ bool FirstFrame(const std::wstring &path, Frame *f) {
             return false;
         if (!sample) continue;
         ComPtr<IMFMediaBuffer> buffer;
-        if (FAILED(sample->ConvertToContiguousBuffer(&buffer))) return false;
-        ComPtr<IMF2DBuffer> twoD;
-        BYTE *scan0 = nullptr;
-        LONG pitch = 0;
-        DWORD length = 0;
-        const bool locked2D = SUCCEEDED(buffer.As(&twoD)) && SUCCEEDED(twoD->Lock2D(&scan0, &pitch));
-        if (!locked2D) {
-            if (FAILED(buffer->Lock(&scan0, nullptr, &length))) return false;
-            pitch = (LONG)aw;
-        }
-        const size_t bytes = (size_t)pitch * ah * 3 / 2;
-        const bool ok = pitch >= (LONG)aw && (locked2D || length >= bytes);
-        if (ok) {
-            f->pitch = pitch;
-            f->nv12.assign(scan0, scan0 + bytes);
-        }
-        if (locked2D) twoD->Unlock2D();
-        else buffer->Unlock();
-        return ok;
+        Nv12Lock lock;
+        if (FAILED(sample->ConvertToContiguousBuffer(&buffer)) || !lock.Lock(buffer.Get(), ah, (LONG)aw) ||
+            lock.pitch() < (LONG)aw)
+            return false;
+        f->pitch = lock.pitch();
+        f->luma.assign(lock.luma(), lock.luma() + (size_t)f->pitch * ah);
+        f->chroma.assign(lock.chroma(), lock.chroma() + (size_t)f->pitch * (ah / 2));
+        return true;
     }
     return false;
 }
@@ -127,8 +117,8 @@ float Bilinear(const uint8_t *plane, int w, int h, LONG pitch, int channels, int
 std::vector<uint8_t> Compose(const Frame &f, const layout::Mapping &m, int windowW, int windowH, int width,
                              int height) {
     std::vector<uint8_t> bgr((size_t)width * height * 3);
-    const uint8_t *luma = f.nv12.data();
-    const uint8_t *chroma = luma + (size_t)f.pitch * f.allocH;
+    const uint8_t *luma = f.luma.data();
+    const uint8_t *chroma = f.chroma.data();
     const float uMax = (float)f.displayW / (float)f.allocW, vMax = (float)f.displayH / (float)f.allocH;
     const float kx = (float)windowW / (float)width, ky = (float)windowH / (float)height;
     for (int y = 0; y < height; ++y) {

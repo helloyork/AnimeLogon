@@ -17,6 +17,7 @@
 
 #include "animelogon/instance.h"
 #include "animelogon/library.h"
+#include "animelogon/log.h"
 #include "animelogon/machine.h"
 #include "animelogon/monitors.h"
 #include "animelogon/paths.h"
@@ -697,6 +698,8 @@ void Config::PaintPage(const Painter &p) {
 
 // --- elevated child commands -----------------------------------------------------------
 int RunCommand(int argc, wchar_t **argv) {
+    // The elevated helper has no window; what goes wrong is in config.log.
+    log::Open(paths::LogPath(L"config.log"));
     const std::wstring cmd = argv[1];
     if (cmd == L"--commit-import" && argc >= 4) return commit::ImportInto(argv[2], argv[3]);
     if (cmd == L"--commit-remove" && argc >= 3) return commit::Remove(argv[2]);
