@@ -588,8 +588,9 @@ LiveEnd GoLiveOnce(Presenter &presenter, const Options &opt, HINSTANCE instance)
     if (shownFrames > 1 && lastT > firstT) {
         const auto it = players.find(targets.front().videoId);
         const double videoFps = it != players.end() ? 1.0 / it->second->frameSeconds() : 0.0;
-        ALOG(L"overlay: %d frames in %.1f s of video, %.1f fps shown of %.1f", shownFrames, lastT - firstT,
-             (shownFrames - 1) / (lastT - firstT), videoFps);
+        ALOG(L"overlay: %d frames in %.1f s of video, %.1f fps shown of %.1f; the compositor runs at %.1f Hz",
+             shownFrames, lastT - firstT, (shownFrames - 1) / (lastT - firstT), videoFps,
+             presenter.CompositionRate());
     }
 
     // --- tear the appearance down ------------------------------------------------------

@@ -248,6 +248,12 @@ bool Presenter::SecondsToNextComposition(double *seconds) const {
     return true;
 }
 
+double Presenter::CompositionRate() const {
+    DCOMPOSITION_FRAME_STATISTICS st{};
+    if (!dcomp_ || FAILED(dcomp_->GetFrameStatistics(&st)) || !st.currentCompositionRate.Denominator) return 0.0;
+    return (double)st.currentCompositionRate.Numerator / st.currentCompositionRate.Denominator;
+}
+
 bool Presenter::Render(const std::vector<Picture> &pictures, animelogon::Scaling scaling, float dim, float opacity) {
     if (!device_ || lost_) return false;
     for (size_t i = 0; i < windows_.size(); ++i) {

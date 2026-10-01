@@ -59,6 +59,8 @@ public:
 
     // Seconds until the compositor's next frame, when it can say.
     bool SecondsToNextComposition(double *seconds) const;
+    // The compositor's frame rate, or 0 if it cannot say.
+    double CompositionRate() const;
 
     struct Picture {
         const VideoPlayer::Frame *frame = nullptr;  // null draws black
