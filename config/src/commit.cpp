@@ -3,169 +3,50 @@
 #include <windows.h>
 #include <shellapi.h>
 
-#include <cstring>
-#include <vector>
-
-#include "animelogon/library.h"
 #include "animelogon/log.h"
 #include "animelogon/machine.h"
 #include "animelogon/paths.h"
-#include "animelogon/secure.h"
-#include "animelogon/skin.h"
-#include "animelogon/skins.h"
-#include "animelogon/text.h"
+#include "animelogon/wallpaper.h"
+
+#include "store.h"
 
 using namespace animelogon;
 
 namespace commit {
 namespace {
 
-constexpr size_t kMaxInfoBytes = 64 * 1024;
+enum class Arg { WallpaperId, ImportedId, Dir };
 
-class Handle {
-public:
-    Handle() = default;
-    explicit Handle(HANDLE h) : h_(h) {}
-    ~Handle() {
-        if (*this) CloseHandle(h_);
-    }
-    Handle(const Handle &) = delete;
-    Handle &operator=(const Handle &) = delete;
-    explicit operator bool() const { return h_ != INVALID_HANDLE_VALUE && h_ != nullptr; }
-    HANDLE get() const { return h_; }
-
-private:
-    HANDLE h_ = INVALID_HANDLE_VALUE;
+struct Spec {
+    const wchar_t *name;
+    std::vector<Arg> args;
 };
 
-// The settings app's work directory, %LOCALAPPDATA%\AnimeLogon\import\<12 hex digits>. The
-// elevated side may run as another account, so it checks the shape rather than the profile.
-bool IsImportDir(const std::wstring &dir) {
-    if (!paths::IsPlainAbsolute(dir)) return false;
-    const size_t a = dir.find_last_of(L'\\');
-    const size_t b = a == std::wstring::npos || a == 0 ? std::wstring::npos : dir.find_last_of(L'\\', a - 1);
-    const size_t c = b == std::wstring::npos || b == 0 ? std::wstring::npos : dir.find_last_of(L'\\', b - 1);
-    if (c == std::wstring::npos) return false;
-    const std::wstring_view leaf = std::wstring_view(dir).substr(a + 1);
-    if (leaf.size() != 12) return false;
-    for (wchar_t ch : leaf)
-        if (!((ch >= L'0' && ch <= L'9') || (ch >= L'a' && ch <= L'f'))) return false;
-    if (!EqualsNoCase(std::wstring_view(dir).substr(b + 1, a - b - 1), L"import") ||
-        !EqualsNoCase(std::wstring_view(dir).substr(c + 1, b - c - 1), L"AnimeLogon"))
-        return false;
-    return GetDriveTypeW(dir.substr(0, 3).c_str()) == DRIVE_FIXED;
+const Spec kSpecs[] = {
+    {L"--commit-wallpaper", {Arg::WallpaperId, Arg::Dir}},
+    {L"--remove-wallpaper", {Arg::WallpaperId}},
+    {L"--commit-component", {Arg::ImportedId, Arg::Dir}},
+    {L"--remove-component", {Arg::ImportedId}},
+    {L"--commit-theme", {Arg::ImportedId, Arg::Dir}},
+    {L"--remove-theme", {Arg::ImportedId}},
+    {L"--commit-package", {Arg::Dir}},
+    {L"--switch-on", {}},
+    {L"--switch-off", {}},
+};
+
+// Component and theme ids an import gets: 16 lowercase hex digits, never a built-in's name.
+bool IsImportedId(const std::wstring &id) { return IsWallpaperId(id); }
+
+bool Fits(Arg kind, const std::wstring &value) {
+    switch (kind) {
+    case Arg::WallpaperId: return IsWallpaperId(value);
+    case Arg::ImportedId: return IsImportedId(value);
+    case Arg::Dir: return store::IsImportDir(value);
+    }
+    return false;
 }
 
-HANDLE OpenSource(const std::wstring &path) {
-    std::wstring why;
-    HANDLE h = secure::OpenPlainFile(path, &why);
-    if (h == INVALID_HANDLE_VALUE) ALOG(L"import: %s %s", path.c_str(), why.c_str());
-    return h;
-}
-
-bool ReadHead(HANDLE h, uint8_t *head, DWORD size) {
-    DWORD got = 0;
-    LARGE_INTEGER zero{};
-    const bool ok = ReadFile(h, head, size, &got, nullptr) && got == size;
-    return SetFilePointerEx(h, zero, nullptr, FILE_BEGIN) && ok;
-}
-
-}  // namespace
-
-int ImportInto(const std::wstring &id, const std::wstring &tempDir) {
-    if (!IsVideoId(id) || !IsImportDir(tempDir)) return kBadArgs;
-    std::wstring why;
-    if (!secure::IsTrustedDirectory(paths::DataDir(), &why)) {
-        ALOG(L"import: data directory %s", why.c_str());
-        return kFailed;
-    }
-
-    // Each source is opened once, refusing links, and everything is read through that handle
-    // while writers are kept out.
-    const Handle video(OpenSource(tempDir + L"\\video.mp4"));
-    const Handle info(OpenSource(tempDir + L"\\info.ini"));
-    if (!video || !info) return kFailed;
-    const std::wstring wavPath = tempDir + L"\\audio.wav";
-    const bool wavThere = GetFileAttributesW(wavPath.c_str()) != INVALID_FILE_ATTRIBUTES;
-    const Handle audio(wavThere ? OpenSource(wavPath) : INVALID_HANDLE_VALUE);
-    if (wavThere && !audio) return kFailed;
-
-    // info.ini is parsed and written afresh, never copied.
-    std::vector<uint8_t> bytes;
-    VideoInfo v;
-    if (!secure::ReadHandleBytes(info.get(), &bytes, kMaxInfoBytes) ||
-        !ParseVideoInfo(FromUtf8(std::string_view((const char *)bytes.data(), bytes.size())), &v) ||
-        v.hasAudio != (bool)audio) {
-        ALOG(L"import: info.ini is not valid");
-        return kFailed;
-    }
-    uint8_t head[kWavHeaderBytes];
-    LARGE_INTEGER size{};
-    if (!ReadHead(video.get(), head, 12) || !LooksLikeMp4(head, 12)) {
-        ALOG(L"import: video.mp4 is not an MP4 file");
-        return kFailed;
-    }
-    if (audio && !(GetFileSizeEx(audio.get(), &size) && ReadHead(audio.get(), head, sizeof(head)) &&
-                   IsCanonicalWav(head, sizeof(head), (uint64_t)size.QuadPart))) {
-        ALOG(L"import: audio.wav is not 48 kHz 16-bit stereo PCM");
-        return kFailed;
-    }
-
-    const std::wstring dir = VideoDir(id);
-    if (secure::SecureDirectory(paths::LibraryDir()) != ERROR_SUCCESS) return kFailed;
-    if (GetFileAttributesW(dir.c_str()) != INVALID_FILE_ATTRIBUTES) return kFailed;  // ids are never reused
-    if (secure::SecureDirectory(dir) != ERROR_SUCCESS) return kFailed;
-    const std::string infoText = ToUtf8(SerializeVideoInfo(v));
-    DWORD e = secure::CopyInto(video.get(), VideoFilePath(id));
-    if (e == ERROR_SUCCESS && audio) e = secure::CopyInto(audio.get(), AudioFilePath(id));
-    if (e == ERROR_SUCCESS) e = secure::WriteBytes(InfoFilePath(id), infoText.data(), infoText.size());
-    if (e != ERROR_SUCCESS) {
-        ALOG(L"import: copying into %s failed (%lu)", dir.c_str(), e);
-        secure::RemoveTree(dir);
-        return kFailed;
-    }
-    return kOk;
-}
-
-int Remove(const std::wstring &id) {
-    if (!IsVideoId(id)) return kBadArgs;
-    return secure::RemoveTree(VideoDir(id)) == ERROR_SUCCESS ? kOk : kFailed;
-}
-
-int ImportSkin(const std::wstring &id, const std::wstring &tempDir) {
-    if (!skin::IsSkinId(id) || id == L"default" || !IsImportDir(tempDir)) return kBadArgs;
-    std::wstring why;
-    if (!secure::IsTrustedDirectory(paths::DataDir(), &why)) {
-        ALOG(L"skin: data directory %s", why.c_str());
-        return kFailed;
-    }
-    const Handle file(OpenSource(tempDir + L"\\skin.xml"));
-    std::vector<uint8_t> bytes;
-    skin::Skin parsed;
-    if (!file || !secure::ReadHandleBytes(file.get(), &bytes, kMaxInfoBytes) ||
-        !skin::Parse(std::string_view((const char *)bytes.data(), bytes.size()), &parsed, &why)) {
-        ALOG(L"skin: skin.xml refused: %s", why.c_str());
-        return kFailed;
-    }
-    const std::string text = skin::Normalize(parsed);
-    const std::wstring dir = SkinDir(id);
-    if (secure::SecureDirectory(SkinsDir()) != ERROR_SUCCESS) return kFailed;
-    if (GetFileAttributesW(dir.c_str()) != INVALID_FILE_ATTRIBUTES) return kFailed;  // ids are never reused
-    if (secure::SecureDirectory(dir) != ERROR_SUCCESS) return kFailed;
-    const DWORD e = secure::WriteBytes(SkinFilePath(id), text.data(), text.size());
-    if (e != ERROR_SUCCESS) {
-        ALOG(L"skin: writing %s failed (%lu)", dir.c_str(), e);
-        secure::RemoveTree(dir);
-        return kFailed;
-    }
-    return kOk;
-}
-
-int RemoveSkin(const std::wstring &id) {
-    if (!skin::IsSkinId(id) || id == L"default") return kBadArgs;
-    return secure::RemoveTree(SkinDir(id)) == ERROR_SUCCESS ? kOk : kFailed;
-}
-
+// The logon screen and the installer's switch, which need nothing staged.
 int SwitchOn() {
     const std::wstring dir = machine::InstallDir();
     if (dir.empty()) return kFailed;
@@ -173,6 +54,94 @@ int SwitchOn() {
 }
 
 int SwitchOff() { return machine::TurnOff() == ERROR_SUCCESS ? kOk : kFailed; }
+
+// Administrators enabled in the token: an elevated administrator, or SYSTEM.
+bool IsElevated() {
+    SID_IDENTIFIER_AUTHORITY nt = SECURITY_NT_AUTHORITY;
+    PSID admins = nullptr;
+    if (!AllocateAndInitializeSid(&nt, 2, SECURITY_BUILTIN_DOMAIN_RID, DOMAIN_ALIAS_RID_ADMINS, 0, 0, 0, 0, 0, 0, &admins))
+        return false;
+    BOOL member = FALSE;
+    const bool ok = CheckTokenMembership(nullptr, admins, &member) && member;
+    FreeSid(admins);
+    return ok;
+}
+
+}  // namespace
+
+int Parse(const std::vector<std::wstring> &args, std::vector<Command> *out) {
+    out->clear();
+    std::vector<Command> commands;
+    for (size_t at = 0; at < args.size();) {
+        const Spec *spec = nullptr;
+        for (const Spec &s : kSpecs)
+            if (args[at] == s.name) spec = &s;
+        if (!spec || args.size() - at - 1 < spec->args.size()) return kBadArgs;
+        Command c{args[at], {}};
+        for (size_t i = 0; i < spec->args.size(); ++i) {
+            const std::wstring &value = args[at + 1 + i];
+            if (!Fits(spec->args[i], value)) return kBadArgs;
+            c.args.push_back(value);
+        }
+        at += 1 + spec->args.size();
+        commands.push_back(std::move(c));
+    }
+    if (commands.empty()) return kBadArgs;
+    *out = std::move(commands);
+    return kOk;
+}
+
+int Execute(const Command &c, const store::Target &t) {
+    const std::wstring &n = c.name;
+    if (n == L"--commit-wallpaper") return store::CommitWallpaper(t, c.args.at(0), c.args.at(1));
+    if (n == L"--remove-wallpaper") return store::RemoveWallpaper(t, c.args.at(0));
+    if (n == L"--commit-component") return store::CommitComponent(t, c.args.at(0), c.args.at(1));
+    if (n == L"--remove-component") return store::RemoveComponent(t, c.args.at(0));
+    if (n == L"--commit-theme") return store::CommitTheme(t, c.args.at(0), c.args.at(1));
+    if (n == L"--remove-theme") return store::RemoveTheme(t, c.args.at(0));
+    if (n == L"--commit-package") return store::CommitPackage(t, c.args.at(0));
+    if (n == L"--switch-on") return SwitchOn();
+    if (n == L"--switch-off") return SwitchOff();
+    return kBadArgs;
+}
+
+int Run(const std::vector<std::wstring> &args) {
+    // The elevated helper has no window; what goes wrong is in config.log.
+    log::Open(paths::LogPath(L"config.log"));
+    std::vector<Command> commands;
+    if (Parse(args, &commands) != kOk) {
+        ALOG(L"commit: bad arguments");
+        return kBadArgs;
+    }
+    if (!IsElevated()) {
+        ALOG(L"commit: not running with administrator rights");
+        return kNotElevated;
+    }
+    for (const Command &c : commands) {
+        const int code = Execute(c, store::Disk());
+        ALOG(L"commit: %s -> %d", c.name.c_str(), code);
+        if (code != kOk) return code;
+    }
+    return kOk;
+}
+
+std::wstring Quote(const std::wstring &arg) {
+    if (!arg.empty() && arg.find_first_of(L" \t\"") == std::wstring::npos) return arg;
+    std::wstring out = L"\"";
+    size_t slashes = 0;
+    for (wchar_t c : arg) {
+        if (c == L'\\') {
+            ++slashes;
+            continue;
+        }
+        // Backslashes count only before a quote: there they are doubled, and the quote escaped.
+        out.append(c == L'"' ? slashes * 2 + 1 : slashes, L'\\');
+        slashes = 0;
+        out += c;
+    }
+    out.append(slashes * 2, L'\\');
+    return out + L"\"";
+}
 
 int RunElevated(HWND owner, const std::wstring &args) {
     wchar_t self[MAX_PATH * 2];

@@ -502,8 +502,8 @@ Result Run(const std::wstring &source, const std::wstring &outputDir, const std:
         return r;
     }
 
-    VideoInfo info;
-    info.id = NewVideoId();
+    WallpaperInfo info;
+    info.kind = WallpaperKind::Video;
     info.name = displayName;
     info.sourceName = source.substr(source.find_last_of(L"\\/") + 1);
     SYSTEMTIME st;
@@ -517,8 +517,10 @@ Result Run(const std::wstring &source, const std::wstring &outputDir, const std:
     info.durationMs = duration > 0 ? duration / 10000 : (lastTs / 10000);
     info.hasAudio = hasAudio;
 
-    if (!WriteText(outputDir + L"\\info.ini", ToUtf8(SerializeVideoInfo(info)))) {
+    if (!WriteText(outputDir + L"\\wallpaper.ini", ToUtf8(SerializeWallpaperInfo(info)))) {
         r.error = L"无法写入视频信息。";
+        DeleteFileW(videoPath.c_str());
+        DeleteFileW(wavPath.c_str());
         return r;
     }
     if (progress) progress(1.0);

@@ -1,5 +1,7 @@
 // Runs the settings app's transcoder from the command line, for testing it against real
 // videos: transcode_cli <source> <output dir>
+// The output directory receives a video wallpaper as the importer stages it: video.mp4,
+// audio.wav when the source has sound, and wallpaper.ini.
 #include <windows.h>
 #include <mfapi.h>
 
@@ -36,7 +38,8 @@ int wmain(int argc, wchar_t **argv) {
         std::fwprintf(stderr, L"\nfailed after %.1f s: %s\n", secs, r.error.c_str());
         return 1;
     }
-    std::wprintf(L"\nok in %.1f s: %dx%d, %u/%u fps, %lld ms, audio %s\n", secs, r.info.width, r.info.height,
-                 r.info.frameRateNum, r.info.frameRateDen, r.info.durationMs, r.info.hasAudio ? L"yes" : L"no");
+    std::wprintf(L"\nok in %.1f s: %dx%d, %u/%u fps, %lld ms, audio %s; wrote video.mp4%s and wallpaper.ini\n", secs,
+                 r.info.width, r.info.height, r.info.frameRateNum, r.info.frameRateDen, r.info.durationMs,
+                 r.info.hasAudio ? L"yes" : L"no", r.info.hasAudio ? L", audio.wav" : L"");
     return 0;
 }

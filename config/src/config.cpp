@@ -1,5 +1,10 @@
 // config.exe: the settings app. Runs as the user; whatever needs administrator rights runs
 // in a short elevated child of itself (commit.h).
+//
+// The person picks a theme from the library, imports new ones (a video or picture becomes a
+// theme of its own, an .altheme brings one in), exports and removes them. Everything they change
+// about a theme -- its fit, its components and how they look -- is an override in settings.ini
+// (settings.h), so editing never asks for elevation.
 
 #include <micula/micula.h>
 
@@ -10,18 +15,18 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cwchar>
 #include <functional>
 #include <memory>
+#include <set>
 #include <string>
-#include <fstream>
-#include <iterator>
 #include <thread>
 #include <vector>
 
 #include <wrl/client.h>
 
+#include "animelogon/components.h"
 #include "animelogon/instance.h"
-#include "animelogon/library.h"
 #include "animelogon/log.h"
 #include "animelogon/machine.h"
 #include "animelogon/monitors.h"
@@ -30,13 +35,15 @@
 #include "animelogon/settings.h"
 #include "animelogon/skin.h"
 #include "animelogon/skinpreview.h"
-#include "animelogon/skins.h"
 #include "animelogon/text.h"
+#include "animelogon/theme.h"
+#include "animelogon/wallpaper.h"
 
 #include "commit.h"
 #include "devices.h"
+#include "exporter.h"
 #include "fonts.h"
-#include "transcode.h"
+#include "staging.h"
 
 #pragma comment(lib, "comdlg32.lib")
 #pragma comment(lib, "shell32.lib")
@@ -63,7 +70,7 @@ struct NavItem {
     const wchar_t *icon, *label;
 };
 const NavItem kNav[] = {
-    {glyph::kPlay, L"视频"},
+    {glyph::kColor, L"主题"},
     {glyph::kFullScreen, L"显示与登录"},
     {glyph::kRecent, L"时钟"},
     {glyph::kVolume, L"声音"},
@@ -71,16 +78,44 @@ const NavItem kNav[] = {
     {glyph::kInfo, L"关于"},
 };
 
-std::wstring PickVideoFile(HWND owner) {
+std::wstring PickFile(HWND owner, const wchar_t *filter, const wchar_t *extension, bool save,
+                      const std::wstring &suggested) {
     wchar_t buf[MAX_PATH * 4] = L"";
+    wcsncpy_s(buf, suggested.c_str(), _TRUNCATE);
     OPENFILENAMEW ofn{};
     ofn.lStructSize = sizeof(ofn);
     ofn.hwndOwner = owner;
-    ofn.lpstrFilter = L"视频文件\0*.mp4;*.mkv;*.mov;*.webm;*.avi;*.m4v;*.wmv\0所有文件\0*.*\0";
+    ofn.lpstrFilter = filter;
     ofn.lpstrFile = buf;
     ofn.nMaxFile = ARRAYSIZE(buf);
-    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
-    return GetOpenFileNameW(&ofn) ? std::wstring(buf) : std::wstring();
+    ofn.lpstrDefExt = extension;
+    ofn.Flags = OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR | (save ? OFN_OVERWRITEPROMPT : OFN_FILEMUSTEXIST);
+    return (save ? GetSaveFileNameW(&ofn) : GetOpenFileNameW(&ofn)) ? std::wstring(buf) : std::wstring();
+}
+
+std::wstring PickMediaFile(HWND owner) {
+    return PickFile(owner,
+                    L"图片和视频\0*.png;*.jpg;*.jpeg;*.webp;*.bmp;*.gif;*.tif;*.tiff;*.heic;*.heif;*.avif;"
+                    L"*.mp4;*.mkv;*.mov;*.webm;*.avi;*.m4v;*.wmv\0"
+                    L"图片\0*.png;*.jpg;*.jpeg;*.webp;*.bmp;*.gif;*.tif;*.tiff;*.heic;*.heif;*.avif\0"
+                    L"视频\0*.mp4;*.mkv;*.mov;*.webm;*.avi;*.m4v;*.wmv\0"
+                    L"所有文件\0*.*\0",
+                    nullptr, false, L"");
+}
+
+std::wstring PickPackageFile(HWND owner, bool save, const std::wstring &suggested) {
+    return PickFile(owner, L"AnimeLogon 主题 (*.altheme)\0*.altheme\0所有文件\0*.*\0", L"altheme", save, suggested);
+}
+
+std::wstring PickComponentFile(HWND owner, bool save, const std::wstring &suggested) {
+    return PickFile(owner, L"组件文件 (*.xml)\0*.xml\0所有文件\0*.*\0", L"xml", save, suggested);
+}
+
+// A name as a file name: the characters Windows does not allow become underscores.
+std::wstring FileNameFor(const std::wstring &name) {
+    std::wstring out;
+    for (wchar_t c : name) out += (c < 0x20 || wcschr(L"\\/:*?\"<>|", c)) ? L'_' : c;
+    return out.empty() ? std::wstring(L"主题") : out;
 }
 
 struct ColorChoice {
@@ -93,7 +128,6 @@ const ColorChoice kColors[] = {
 };
 
 constexpr float kPreviewMaxH = 360.0f;
-constexpr size_t kMaxSkinFile = 64 * 1024;
 
 // The languages the clock can be put in, besides the regional format's own.
 const skin::Option kClockLanguages[] = {{L"", L"跟随区域格式"}, {L"zh-CN", L"简体中文"}, {L"zh-TW", L"繁體中文"},
@@ -109,20 +143,6 @@ std::wstring StepText(double v, double step) {
         if (text.back() == L'.') text.pop_back();
     }
     return text == L"-0" ? L"0" : text;
-}
-
-std::wstring PickSkinFile(HWND owner, bool save, const std::wstring &suggested) {
-    wchar_t buf[MAX_PATH * 4] = L"";
-    wcsncpy_s(buf, suggested.c_str(), _TRUNCATE);
-    OPENFILENAMEW ofn{};
-    ofn.lStructSize = sizeof(ofn);
-    ofn.hwndOwner = owner;
-    ofn.lpstrFilter = L"皮肤文件 (*.xml)\0*.xml\0所有文件\0*.*\0";
-    ofn.lpstrFile = buf;
-    ofn.nMaxFile = ARRAYSIZE(buf);
-    ofn.lpstrDefExt = L"xml";
-    ofn.Flags = OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR | (save ? OFN_OVERWRITEPROMPT : OFN_FILEMUSTEXIST);
-    return (save ? GetSaveFileNameW(&ofn) : GetOpenFileNameW(&ofn)) ? std::wstring(buf) : std::wstring();
 }
 
 // The signed-in person's regional format, as the logon screen will read it from their profile.
@@ -168,24 +188,56 @@ std::wstring FileStem(const std::wstring &path) {
     return dot == std::wstring::npos ? name : name.substr(0, dot);
 }
 
+bool IsImportedId(const std::wstring &id) { return IsWallpaperId(id); }  // 16 lowercase hex digits
+
+// The entries of themes\ by id, loadable or not.
+std::set<std::wstring> InstalledThemeIds() {
+    std::set<std::wstring> ids;
+    WIN32_FIND_DATAW fd;
+    HANDLE find = FindFirstFileW((ThemesDir() + L"\\*").c_str(), &fd);
+    if (find == INVALID_HANDLE_VALUE) return ids;
+    do {
+        if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && IsImportedId(fd.cFileName)) ids.insert(fd.cFileName);
+    } while (FindNextFileW(find, &fd));
+    FindClose(find);
+    return ids;
+}
+
+// What a theme's wallpaper is, in a few words.
+std::wstring WallpaperText(const std::wstring &ref) {
+    if (ref == kDefaultWallpaper) return L"默认背景";
+    if (ref == kNoWallpaper) return L"无壁纸";
+    WallpaperInfo w;
+    if (!LoadWallpaper(ref, &w)) return L"壁纸缺失";
+    if (w.kind == WallpaperKind::Image) return Format(L"图片 %d × %d", w.width, w.height);
+    return Format(L"视频 %d × %d · %s · %s", w.width, w.height, MegaBytes(w.bytes).c_str(),
+                  w.hasAudio ? L"有声音" : L"无声音");
+}
+
 }  // namespace
 
 struct Config : Window {
     int page = 0;
     Settings set;
-    std::vector<VideoInfo> library;
     std::vector<MonitorInfo> monitors;
     std::vector<devices::Output> outputs;
     std::vector<fonts::Family> families;
     bool familiesRead = false;
 
-    // Import worker.
+    // The theme library: the built-in theme first, then the installed ones.
+    struct ThemeRow {
+        ThemeEntry entry;
+        std::wstring detail;
+    };
+    std::vector<ThemeRow> themes;
+
+    // Import worker. The staging runs on the worker; the elevated commit after it, here.
     std::thread worker;
     std::atomic<bool> cancel{false};
     std::atomic<bool> importing{false};
     std::atomic<int> importPermille{0};
-    std::wstring importName, importTempDir, importId, importError;
-    bool importOk = false;
+    std::wstring importName, importDetail, importTempDir;
+    staging::Result importResult;  // written by the worker, read once it has been joined
     ProgressBar *progress = nullptr;
 
     std::wstring toast;
@@ -208,15 +260,20 @@ struct Config : Window {
     };
     std::vector<Card> cards;
 
-    // The clock page: the chosen skin, and a preview of it over the sign-in background.
-    std::vector<SkinEntry> skins;
-    skin::Skin clockSkin;
-    std::wstring clockSkinId;
+    // The clock page edits one component instance of the current theme ("clock" when the
+    // theme has one), through the theme's overrides.
+    std::wstring editTheme;   // the theme being edited
+    theme::Theme editOwn;     // as installed, before the overrides
+    std::wstring instanceId;  // the instance being edited
+    std::vector<ComponentEntry> componentList;
+    skin::Skin clockSkin;     // the component the instance places
+    std::wstring clockSkinId;  // its id; empty while the theme has no such instance
     std::vector<skin::Part> parts;
     std::wstring partKey;  // the element being adjusted
     std::vector<SkinView::Bound> previewBounds;
     SkinPreview previewer;
     Picture previewBackground, preview;
+    std::wstring previewSource;  // the picture behind the preview
     unsigned previewVersion = 0;
     D2D1_RECT_F previewRect{};
     bool previewShown = false;
@@ -231,7 +288,37 @@ struct Config : Window {
 
     void Reload() {
         set = LoadSettings(false);
-        library = ListVideos();
+        themes.clear();
+        for (const ThemeEntry &e : ListThemes()) {
+            theme::Theme t;
+            std::wstring detail;
+            if (LoadTheme(e.id, &t)) detail = WallpaperText(theme::Edited(t, set.OverridesFor(e.id)).wallpaper);
+            if (e.builtIn) detail = L"AnimeLogon 自带 · " + detail;
+            else if (!e.author.empty()) detail = L"作者：" + e.author + L" · " + detail;
+            themes.push_back({e, detail});
+        }
+    }
+
+    // The theme the logon screen shows: `theme`, or the built-in one when that is unset or
+    // does not load.
+    std::wstring CurrentTheme() const {
+        const std::wstring id = set.theme.value_or(kDefaultTheme);
+        for (const ThemeRow &r : themes)
+            if (r.entry.id == id) return id;
+        return kDefaultTheme;
+    }
+
+    const ThemeRow *Row(const std::wstring &id) const {
+        for (const ThemeRow &r : themes)
+            if (r.entry.id == id) return &r;
+        return nullptr;
+    }
+
+    // The theme as it is shown, with its overrides.
+    theme::Theme EditedTheme(const std::wstring &id) const {
+        theme::Theme t;
+        if (!LoadTheme(id, &t)) t = theme::Default();
+        return theme::Edited(t, set.OverridesFor(id));
     }
 
     const wchar_t *ClassName() const override { return L"AnimeLogonConfig"; }
@@ -250,9 +337,11 @@ struct Config : Window {
     }
 
     // Users may rewrite settings.ini but not create files beside it, so it is rewritten in
-    // place, held exclusively so that the overlay never reads half of it.
+    // place, held exclusively so that the overlay never reads half of it. From the first save on
+    // it names a theme, and none of the keys from before themes.
     void Save() {
-        const std::string text = ToUtf8(SerializeSettings(set));
+        if (!set.theme) set.theme = std::wstring(kDefaultTheme);
+        const std::string text = ToUtf8(SerializeThemeSettings(set));
         HANDLE h = INVALID_HANDLE_VALUE;
         for (int attempt = 0; attempt < 5; ++attempt) {
             h = CreateFileW(paths::SettingsPath().c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
@@ -278,6 +367,9 @@ struct Config : Window {
         Invalidate();
     }
 
+    // Something went wrong that needs more than a line to say.
+    void Problem(const std::wstring &text) { MessageBoxW(hwnd, text.c_str(), L"AnimeLogon", MB_OK | MB_ICONWARNING); }
+
     void GoTo(int p) {
         if (p != page) scroll = 0.0f;
         page = p;
@@ -300,35 +392,42 @@ struct Config : Window {
         Invalidate();
     }
 
-    // --- import ------------------------------------------------------------------------
-    void StartImport() {
+    // --- importing a theme -----------------------------------------------------------------
+    enum class ImportKind { Media, Package };
+
+    void StartImport(ImportKind kind) {
         if (importing.load()) return;
-        const std::wstring source = PickVideoFile(hwnd);
+        const std::wstring source = kind == ImportKind::Media ? PickMediaFile(hwnd) : PickPackageFile(hwnd, false, L"");
         if (source.empty()) return;
+        importTempDir = staging::NewImportDir();
+        if (importTempDir.empty()) {
+            Problem(L"无法创建临时目录 " + paths::UserDataDir() + L"\\import。");
+            return;
+        }
         importName = FileStem(source);
-        importTempDir = paths::UserDataDir() + L"\\import\\" + RandomHex(6);
+        importDetail = kind == ImportKind::Package       ? L"正在读取主题包，请稍候。"
+                       : staging::LooksLikePicture(source) ? L"正在处理图片，请稍候。"
+                                                           : L"正在转码，请稍候。";
         cancel = false;
         importing = true;
         importPermille = 0;
-        importError.clear();
-        importOk = false;
         Layout();
         Invalidate();
-        worker = std::thread([this, source] {
+        worker = std::thread([this, source, kind, dir = importTempDir] {
             const HRESULT co = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-            transcode::Result res;
+            auto progressed = [this](double f) {
+                importPermille = (int)(f * 1000);
+                PostMessageW(hwnd, kImportProgress, 0, 0);
+            };
+            staging::Result r;
             if (SUCCEEDED(co)) {
-                res = transcode::Run(source, importTempDir, importName, cancel, [this](double f) {
-                    importPermille = (int)(f * 1000);
-                    PostMessageW(hwnd, kImportProgress, 0, 0);
-                });
+                r = kind == ImportKind::Media ? staging::Media(source, dir, cancel, progressed)
+                                              : staging::Package(source, dir, cancel, progressed);
                 CoUninitialize();
             } else {
-                res.error = L"无法初始化 COM，无法转码。";
+                r.error = L"无法初始化 COM，无法导入。";
             }
-            importOk = res.ok;
-            importId = res.ok ? res.info.id : L"";
-            importError = res.error;
+            importResult = r;
             PostMessageW(hwnd, kImportDone, 0, 0);
         });
     }
@@ -336,43 +435,109 @@ struct Config : Window {
     void FinishImport() {
         if (worker.joinable()) worker.join();
         importing = false;
-        bool ok = false;
-        if (importOk) {
-            const int code = commit::RunElevated(hwnd, L"--commit-import " + importId + L" \"" + importTempDir + L"\"");
+        const staging::Result r = importResult;
+        if (r.ok) {
+            const std::set<std::wstring> before = InstalledThemeIds();
+            const int code = commit::RunElevated(hwnd, L"--commit-package " + commit::Quote(importTempDir));
             if (code == commit::kOk) {
-                ok = true;
-                if (set.video.empty()) set.video = importId;  // the first import becomes the default
-                Save();
+                // The new theme is the one entry that was not there before.
+                std::wstring added;
+                for (const std::wstring &id : InstalledThemeIds())
+                    if (!before.count(id)) added = id;
                 Reload();
-                Note(L"已导入「" + importName + L"」。");
+                // The first theme imported is put on the logon screen.
+                const bool apply = !added.empty() && CurrentTheme() == kDefaultTheme;
+                if (apply) set.theme = added;
+                Save();
+                Note(L"已导入主题「" + r.name + (apply ? L"」，并已开始使用。" : L"」。"));
             } else if (code == commit::kDeclined) {
                 Note(L"已取消，未导入。");
             } else {
-                Note(L"导入失败，无法将视频写入受保护目录。");
+                Problem(L"导入失败，无法将主题写入受保护的目录。详细原因记录在 " + paths::LogPath(L"config.log") + L"。");
             }
-        } else {
-            Note(importError.empty() ? L"转码失败。" : importError);
+        } else if (!cancel.load()) {
+            Problem(r.error.empty() ? std::wstring(L"导入失败。") : r.error);
         }
-        // Best effort; it holds only this import's transcoder output.
+        // Best effort; it holds only this import's staging.
         secure::RemoveTree(importTempDir);
-        (void)ok;
-        Layout();
-        Invalidate();
+        GoTo(page);
     }
 
-    void RemoveVideo(const std::wstring &id, const std::wstring &name) {
-        const int code = commit::RunElevated(hwnd, L"--commit-remove " + id);
+    // --- the library ---------------------------------------------------------------------
+    void ApplyTheme(const std::wstring &id) {
+        set.theme = id;
+        Save();
+        if (const ThemeRow *r = Row(id)) Note(L"已切换到主题「" + r->entry.name + L"」。");
+        GoTo(page);
+    }
+
+    void ExportTheme(const std::wstring &id, const std::wstring &name) {
+        const std::wstring path = PickPackageFile(hwnd, true, FileNameFor(name) + L".altheme");
+        if (path.empty()) return;
+        HCURSOR was = SetCursor(LoadCursorW(nullptr, IDC_WAIT));
+        std::wstring error;
+        const bool ok = exporter::Export(id, set, path, &error);
+        SetCursor(was);
+        if (ok) Note(L"已导出到 " + path);
+        else Problem(error);
+    }
+
+    // The wallpapers and components a theme names, in theme.xml and in its overrides.
+    void RefsOf(const std::wstring &id, std::set<std::wstring> *wallpapers, std::set<std::wstring> *components) const {
+        theme::Theme t;
+        if (LoadTheme(id, &t)) {
+            wallpapers->insert(t.wallpaper);
+            for (const theme::Instance &i : t.components) components->insert(i.ref);
+        }
+        const ThemeOverrides &o = set.OverridesFor(id);
+        if (o.wallpaper) wallpapers->insert(*o.wallpaper);
+        for (const auto &[instance, io] : o.instances)
+            if (io.ref) components->insert(*io.ref);
+    }
+
+    // The imported wallpapers and components only theme `id` uses.
+    void OnlyUsedBy(const std::wstring &id, std::vector<std::wstring> *wallpapers,
+                    std::vector<std::wstring> *components) const {
+        std::set<std::wstring> mineW, mineC, otherW, otherC;
+        RefsOf(id, &mineW, &mineC);
+        std::set<std::wstring> others;
+        for (const ThemeRow &r : themes) others.insert(r.entry.id);
+        for (const std::wstring &other : InstalledThemeIds()) others.insert(other);
+        for (const auto &[other, o] : set.themeOverrides) others.insert(other);
+        others.erase(id);
+        for (const std::wstring &other : others) RefsOf(other, &otherW, &otherC);
+        for (const std::wstring &w : mineW)
+            if (IsWallpaperId(w) && !otherW.count(w)) wallpapers->push_back(w);
+        for (const std::wstring &c : mineC)
+            if (IsImportedId(c) && !otherC.count(c)) components->push_back(c);
+    }
+
+    void RemoveTheme(const std::wstring &id, const std::wstring &name) {
+        std::vector<std::wstring> wallpapers, components;
+        OnlyUsedBy(id, &wallpapers, &components);
+        std::wstring question = L"要移除主题「" + name + L"」吗？";
+        if (!wallpapers.empty() || !components.empty())
+            question += L"\n\n它的壁纸和组件没有其他主题在用，会一起移除。";
+        if (MessageBoxW(hwnd, question.c_str(), L"AnimeLogon", MB_OKCANCEL | MB_ICONQUESTION | MB_DEFBUTTON2) != IDOK)
+            return;
+        // One prompt for all of it; the theme goes first, so nothing is left naming what goes after.
+        std::wstring args = L"--remove-theme " + id;
+        for (const std::wstring &w : wallpapers) args += L" --remove-wallpaper " + w;
+        for (const std::wstring &c : components) args += L" --remove-component " + c;
+        const int code = commit::RunElevated(hwnd, args);
         if (code == commit::kOk) {
-            if (set.video == id) set.video.clear();
+            set.themeOverrides.erase(id);
+            if (set.theme && *set.theme == id) set.theme = std::wstring(kDefaultTheme);
             for (auto it = set.screens.begin(); it != set.screens.end();)
-                it = (it->second == id) ? set.screens.erase(it) : std::next(it);
+                it = it->second == id ? set.screens.erase(it) : std::next(it);
             Save();
             Reload();
-            Note(L"已移除「" + name + L"」。");
+            Note(L"已移除主题「" + name + L"」。");
         } else if (code == commit::kDeclined) {
             Note(L"已取消。");
         } else {
-            Note(L"无法移除，该视频可能正被登录界面占用。");
+            Problem(L"无法移除这个主题，它的文件可能正被登录界面使用。请稍后再试。");
+            Reload();
         }
         GoTo(page);
     }
@@ -389,12 +554,20 @@ struct Config : Window {
         GoTo(page);
     }
 
-    // --- skins -------------------------------------------------------------------------
-    void LoadClockSkin() {
-        skins = ListSkins();
-        std::wstring why;
-        clockSkin = LoadSkin(set.clock.skin, &why);
-        clockSkinId = why.empty() ? set.clock.skin : L"default";
+    // --- the component instance on the clock page ------------------------------------------
+    void LoadInstance() {
+        componentList.clear();
+        for (const ComponentEntry &c : ListComponents())
+            if (!c.legacy) componentList.push_back(c);
+        editTheme = CurrentTheme();
+        if (!LoadTheme(editTheme, &editOwn)) editOwn = theme::Default();
+        const theme::Theme edited = theme::Edited(editOwn, set.OverridesFor(editTheme));
+        if (!edited.Find(instanceId))
+            instanceId = edited.Find(kClockComponent) || edited.components.empty() ? std::wstring(kClockComponent)
+                                                                                    : edited.components.front().id;
+        const theme::Instance *instance = edited.Find(instanceId);
+        clockSkinId = instance ? instance->ref : L"";
+        if (!instance || !LoadComponent(instance->ref, &clockSkin)) clockSkin = skin::Default();
         parts = skin::Parts(clockSkin);
         if (!PartNamed(partKey)) partKey = parts.empty() ? L"" : parts.front().key;
     }
@@ -405,12 +578,20 @@ struct Config : Window {
         return nullptr;
     }
 
-    skin::Values &ClockValues() { return set.clock.values[clockSkinId]; }
+    // What the person changed about the instance, kept in settings.ini.
+    InstanceOverrides &InstanceEdits() { return set.themeOverrides[editTheme].instances[instanceId]; }
 
-    // A setting of the skin's own. What was adjusted by hand on attributes that take their
+    // The instance's values as the logon screen takes them: the theme's own, then the edits.
+    skin::Values InstanceValues() const {
+        const theme::Theme edited = theme::Edited(editOwn, set.OverridesFor(editTheme));
+        const theme::Instance *instance = edited.Find(instanceId);
+        return instance ? instance->sets : skin::Values{};
+    }
+
+    // A setting of the component's own. What was adjusted by hand on attributes that take their
     // value from it goes, so the setting is seen to work. True if anything went.
     bool SetSkinSetting(const std::wstring &id, const std::wstring &value, bool save = true) {
-        skin::Values &v = ClockValues();
+        skin::Values &v = InstanceEdits().values;
         v[id] = value;
         bool cleared = false;
         for (const std::wstring &key : skin::AdjustmentsOf(clockSkin, id)) cleared = v.erase(key) > 0 || cleared;
@@ -421,7 +602,7 @@ struct Config : Window {
 
     void SetAdjustment(const std::wstring &key, const std::wstring &value, bool save = true) {
         if (!skin::IsAdjustmentValue(key, value)) return;
-        ClockValues()[key] = value;
+        InstanceEdits().values[key] = value;
         if (save) Save();
         RenderPreview();
     }
@@ -429,6 +610,17 @@ struct Config : Window {
     void SaveStyle() {
         Save();
         RenderPreview();
+    }
+
+    // Puts another component in the instance. The values were for the one it replaces.
+    void ChooseComponent(const std::wstring &ref) {
+        InstanceOverrides &o = InstanceEdits();
+        const theme::Instance *declared = editOwn.Find(instanceId);
+        if (declared && declared->ref == ref) o.ref.reset();
+        else o.ref = ref;
+        o.values.clear();
+        Save();
+        GoTo(page);
     }
 
     // Chooses the element under a point of the preview, in page DIPs.
@@ -464,6 +656,16 @@ struct Config : Window {
         return false;
     }
 
+    // The picture behind the preview: the theme's own when its wallpaper is a picture, otherwise
+    // the sign-in background the logon screen baked from it.
+    std::wstring PreviewSource() const {
+        const theme::Theme edited = theme::Edited(editOwn, set.OverridesFor(editTheme));
+        WallpaperInfo w;
+        if (IsWallpaperId(edited.wallpaper) && LoadWallpaper(edited.wallpaper, &w) && w.kind == WallpaperKind::Image)
+            return w.imagePath;
+        return paths::BackgroundPath();
+    }
+
     // Draws the preview at the size it is shown, in pixels.
     void RenderPreview() {
         if (!previewShown) return;
@@ -472,66 +674,83 @@ struct Config : Window {
         const UINT h = (UINT)std::lround((previewRect.bottom - previewRect.top) * scale);
         if (!w || !h) return;
         if (previewBackground.width != w &&
-            (!LoadPicture(paths::BackgroundPath(), w, &previewBackground) || previewBackground.width != w))
+            (!LoadPicture(previewSource, w, &previewBackground) || previewBackground.width != w))
             previewBackground = PlainBackground(w, h);
         SYSTEMTIME now{};
         GetLocalTime(&now);
-        if (previewer.Render(previewBackground, skin::Resolve(clockSkin, set.clock.ValuesFor(clockSkinId)),
-                             set.clock.style, UserFormat(), now, &preview, &previewBounds))
+        const skin::Values values = clockSkinId.empty() ? skin::Values{} : InstanceValues();
+        if (previewer.Render(previewBackground, skin::Resolve(clockSkin, values), set.clock.style, UserFormat(), now,
+                             &preview, &previewBounds))
             ++previewVersion;
         Invalidate();
     }
 
-    void ImportSkin() {
-        const std::wstring path = PickSkinFile(hwnd, false, L"");
+    void ImportComponent() {
+        const std::wstring path = PickComponentFile(hwnd, false, L"");
         if (path.empty()) return;
-        std::ifstream in(path, std::ios::binary);
-        std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-        skin::Skin parsed;
-        std::wstring error = text.size() > kMaxSkinFile ? L"文件太大" : L"";
-        if (!error.empty() || !skin::Parse(text, &parsed, &error)) {
-            Note(L"无法导入皮肤：" + error);
+        const std::wstring dir = staging::NewImportDir();
+        if (dir.empty()) {
+            Problem(L"无法创建临时目录 " + paths::UserDataDir() + L"\\import。");
             return;
         }
-        const std::wstring id = RandomHex(8), dir = paths::UserDataDir() + L"\\import\\" + RandomHex(6);
-        const std::string normal = skin::Normalize(parsed);
-        std::ofstream out;
-        if (paths::CreateDirectories(dir)) out.open(dir + L"\\skin.xml", std::ios::binary);
-        if (!out || !out.write(normal.data(), (std::streamsize)normal.size())) {
-            Note(L"无法导入皮肤：临时文件写入失败。");
+        const staging::Result r = staging::Component(path, dir);
+        if (!r.ok) {
+            secure::RemoveTree(dir);
+            Problem(L"无法导入组件：" + r.error);
             return;
         }
-        out.close();
-        const int code = commit::RunElevated(hwnd, L"--commit-skin " + id + L" \"" + dir + L"\"");
+        const std::wstring id = NewComponentId();
+        const int code = commit::RunElevated(hwnd, L"--commit-component " + id + L" " + commit::Quote(dir));
         secure::RemoveTree(dir);
         if (code == commit::kOk) {
-            set.clock.skin = id;
-            Save();
-            Note(L"已导入皮肤「" + parsed.name + L"」。");
-        } else {
-            Note(code == commit::kDeclined ? L"已取消，未导入。" : L"导入失败，无法将皮肤写入受保护目录。");
+            Note(L"已导入组件「" + r.name + L"」。");
+            ChooseComponent(id);
+            return;
         }
+        if (code == commit::kDeclined) Note(L"已取消，未导入。");
+        else Problem(L"导入失败，无法将组件写入受保护的目录。");
         GoTo(page);
     }
 
-    void ExportSkin() {
-        const std::wstring path = PickSkinFile(hwnd, true, clockSkin.name + L".xml");
+    void ExportComponent() {
+        const std::wstring path = PickComponentFile(hwnd, true, FileNameFor(clockSkin.name) + L".xml");
         if (path.empty()) return;
-        const std::string text = clockSkinId == L"default" ? skin::DefaultText() : skin::Normalize(clockSkin);
-        std::ofstream out(path, std::ios::binary | std::ios::trunc);
-        if (out && out.write(text.data(), (std::streamsize)text.size())) Note(L"已导出到 " + path);
-        else Note(L"无法写入 " + path);
+        const std::string text = clockSkinId == kClockComponent ? skin::DefaultText() : skin::Normalize(clockSkin);
+        HANDLE h = CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        DWORD wrote = 0;
+        const bool ok = h != INVALID_HANDLE_VALUE && WriteFile(h, text.data(), (DWORD)text.size(), &wrote, nullptr) &&
+                        wrote == text.size();
+        if (h != INVALID_HANDLE_VALUE) CloseHandle(h);
+        if (ok) Note(L"已导出到 " + path);
+        else Problem(L"无法写入 " + path + L"。");
     }
 
-    void RemoveSkin(const std::wstring &id, const std::wstring &name) {
-        const int code = commit::RunElevated(hwnd, L"--remove-skin " + id);
+    // Removes an imported component that no theme needs but this instance.
+    void RemoveComponent(const std::wstring &id, const std::wstring &name) {
+        std::set<std::wstring> components;
+        std::set<std::wstring> ids = InstalledThemeIds();
+        ids.insert(kDefaultTheme);
+        for (const auto &[other, o] : set.themeOverrides) ids.insert(other);
+        for (const std::wstring &t : ids) {
+            theme::Theme own;
+            if (LoadTheme(t, &own))
+                for (const theme::Instance &i : own.components) components.insert(i.ref);
+            for (const auto &[instance, io] : set.OverridesFor(t).instances)
+                if (io.ref && !(t == editTheme && instance == instanceId)) components.insert(*io.ref);
+        }
+        if (components.count(id)) {
+            Problem(L"组件「" + name + L"」还有主题在使用，不能移除。");
+            return;
+        }
+        const int code = commit::RunElevated(hwnd, L"--remove-component " + id);
         if (code == commit::kOk) {
-            if (set.clock.skin == id) set.clock.skin = L"default";
-            set.clock.values.erase(id);
+            InstanceOverrides &o = InstanceEdits();
+            o.ref.reset();
+            o.values.clear();
             Save();
-            Note(L"已移除皮肤「" + name + L"」。");
+            Note(L"已移除组件「" + name + L"」。");
         } else {
-            Note(code == commit::kDeclined ? L"已取消。" : L"无法移除该皮肤。");
+            Note(code == commit::kDeclined ? L"已取消。" : L"无法移除这个组件。");
         }
         GoTo(page);
     }
@@ -561,10 +780,13 @@ struct Config : Window {
     Painter measure;
     D2D1_RECT_F PushCard(const wchar_t *icon, std::wstring title, std::wstring detail, float controlW,
                          float height = kCardH);
-    void PushHeading(const wchar_t *text);
+    void PushHeading(const std::wstring &text);
     void AddVolumeSlider(int *volume, const wchar_t *icon, const wchar_t *title, const wchar_t *detail);
+    void LayoutThemes();
     void LayoutClock();
     void AddSkinSetting(const skin::Setting &s);
+    // Buttons side by side in a card's control slot, left to right.
+    void PlaceRow(const D2D1_RECT_F &slot, const std::vector<Button *> &buttons);
 
     // One adjustable value as a card: its control is chosen by its kind. `set` is called with
     // the new value, and `commit` false while a slider is still being dragged.
@@ -604,6 +826,15 @@ D2D1_RECT_F Config::PushCard(const wchar_t *icon, std::wstring title, std::wstri
     return D2D1_RECT_F{slot, cy - metric::kControlH / 2, layoutRight - kInset, cy + metric::kControlH / 2};
 }
 
+void Config::PlaceRow(const D2D1_RECT_F &slot, const std::vector<Button *> &buttons) {
+    float x = slot.left;
+    for (Button *b : buttons) {
+        const float bw = b->PreferredWidth(measure);
+        b->rect = {x, slot.top, x + bw, slot.bottom};
+        x += bw + 8;
+    }
+}
+
 // The readout follows the knob on its own card; the file is written once the gesture ends.
 void Config::AddVolumeSlider(int *volume, const wchar_t *icon, const wchar_t *title, const wchar_t *detail) {
     Slider *s = Add(new Slider((float)*volume, 0, 100, 5, nullptr));
@@ -618,22 +849,60 @@ void Config::AddVolumeSlider(int *volume, const wchar_t *icon, const wchar_t *ti
     s->onCommit = [this](float) { Save(); };
 }
 
+void Config::LayoutThemes() {
+    if (importing.load()) {
+        PushCard(glyph::kBusy, L"正在导入「" + importName + L"」", importDetail, 0, 96);
+        progress = Add(new ProgressBar());
+        progress->value = importPermille.load() / 1000.0f;
+        const D2D1_RECT_F &r = cards.back().r;
+        progress->rect = {r.left + 50, r.top + 56, r.right - kInset, r.top + 60};
+    } else {
+        Button *media = Add(new Button(L"导入…", ButtonStyle::Accent, [this] { StartImport(ImportKind::Media); }));
+        media->rect = PushCard(glyph::kAdd, L"导入视频或图片",
+                               L"用一个视频或一张图片新建主题，带默认时钟。视频会转码为登录界面使用的格式。",
+                               media->PreferredWidth(measure));
+        Button *pack = Add(new Button(L"导入…", ButtonStyle::Standard, [this] { StartImport(ImportKind::Package); }));
+        pack->rect = PushCard(glyph::kDownload, L"导入主题包", L"导入 .altheme 文件，包含壁纸和组件。",
+                              pack->PreferredWidth(measure));
+    }
+
+    PushHeading(L"主题库");
+    const std::wstring current = CurrentTheme();
+    for (const ThemeRow &row : themes) {
+        const ThemeEntry &e = row.entry;
+        const bool chosen = e.id == current;
+        std::vector<Button *> buttons;
+        buttons.push_back(Add(new Button(chosen ? L"正在使用" : L"使用", chosen ? ButtonStyle::Standard : ButtonStyle::Subtle,
+                                         [this, id = e.id] { ApplyTheme(id); })));
+        buttons.push_back(Add(new Button(L"导出…", ButtonStyle::Subtle,
+                                         [this, id = e.id, name = e.name] { ExportTheme(id, name); })));
+        if (!e.builtIn)
+            buttons.push_back(Add(new Button(L"移除", ButtonStyle::Subtle,
+                                             [this, id = e.id, name = e.name] { RemoveTheme(id, name); })));
+        float width = 0.0f;
+        for (Button *b : buttons) width += b->PreferredWidth(measure) + 8;
+        PlaceRow(PushCard(chosen ? glyph::kCheck : glyph::kColor, e.name, row.detail, width - 8), buttons);
+    }
+}
+
 void Config::LayoutClock() {
-    ClockSettings &c = set.clock;
     previewShown = false;
-    Add(new ToggleSwitch(L"", c.enabled, [this](bool on) {
-            set.clock.enabled = on;
+    Add(new ToggleSwitch(L"", set.components.value_or(true), [this](bool on) {
+            set.components = on;
             Save();
             GoTo(page);
         }))
-        ->rect = PushCard(glyph::kRecent, L"显示时钟", L"在视频上显示时间和日期，随视频一起淡出。", 40);
-    cards.back().aside = c.enabled ? L"开" : L"关";
-    if (!c.enabled) return;
-    LoadClockSkin();
+        ->rect = PushCard(glyph::kRecent, L"显示时钟", L"在壁纸上显示时钟等组件，对所有主题生效。", 40);
+    cards.back().aside = set.components.value_or(true) ? L"开" : L"关";
+    if (!set.components.value_or(true)) return;
+    LoadInstance();
 
     // The preview keeps the background's shape, as the sign-in screen shows it.
-    if (!previewBackground.width && !LoadPicture(paths::BackgroundPath(), 1280, &previewBackground))
-        previewBackground = PlainBackground(1280, 720);
+    const std::wstring source = PreviewSource();
+    if (source != previewSource || !previewBackground.width) {
+        previewSource = source;
+        if (!LoadPicture(previewSource, 1280, &previewBackground)) previewBackground = PlainBackground(1280, 720);
+    }
     const float aspect = previewBackground.width ? (float)previewBackground.height / previewBackground.width : 9.0f / 16.0f;
     const float pw = layoutRight - layoutLeft, ph = std::min(pw * aspect, kPreviewMaxH);
     const float left = layoutLeft + (pw - ph / aspect) / 2.0f;
@@ -645,26 +914,28 @@ void Config::LayoutClock() {
     picker->page = this;
     picker->rect = previewRect;
 
-    // --- what the clock says, whichever skin shows it ---
+    // --- what the clock says, whichever component shows it ---
     PushHeading(L"时钟");
-    Add(new DropDown({L"密码界面所在的显示器", L"主显示器", L"所有显示器"}, (int)c.displays, [this](int i) {
-            set.clock.displays = (ClockDisplays)i;
-            Save();
-        }))
-        ->rect = PushCard(glyph::kFullScreen, L"显示在", L"视频在每个屏幕上播放，时钟只在这里。", 220);
-    Add(new Segmented({L"跟随区域格式", L"12 小时制", L"24 小时制"}, (int)c.style.hours, [this](int i) {
+    Add(new DropDown({L"密码界面所在的显示器", L"主显示器", L"所有显示器"},
+                     (int)set.componentDisplays.value_or(ComponentDisplays::Auto), [this](int i) {
+                         set.componentDisplays = (ComponentDisplays)i;
+                         Save();
+                     }))
+        ->rect = PushCard(glyph::kFullScreen, L"显示在", L"壁纸在每个屏幕上显示，时钟只在这里。", 220);
+    ClockStyle &c = set.clock.style;
+    Add(new Segmented({L"跟随区域格式", L"12 小时制", L"24 小时制"}, (int)c.hours, [this](int i) {
             set.clock.style.hours = (ClockHours)i;
             SaveStyle();
         }))
         ->rect = PushCard(glyph::kRecent, L"时间制式", L"默认与任务栏一致。", 300);
-    Add(new ToggleSwitch(L"", c.style.ampm, [this](bool on) {
+    Add(new ToggleSwitch(L"", c.ampm, [this](bool on) {
             set.clock.style.ampm = on;
             SaveStyle();
             GoTo(page);
         }))
         ->rect = PushCard(glyph::kRecent, L"显示上午/下午", L"12 小时制时，以小字显示在时间旁边。", 40);
-    cards.back().aside = c.style.ampm ? L"开" : L"关";
-    Add(new Segmented({L"星期与月日", L"完整日期", L"不显示"}, (int)c.style.date, [this](int i) {
+    cards.back().aside = c.ampm ? L"开" : L"关";
+    Add(new Segmented({L"星期与月日", L"完整日期", L"不显示"}, (int)c.date, [this](int i) {
             set.clock.style.date = (ClockDate)i;
             SaveStyle();
         }))
@@ -674,7 +945,7 @@ void Config::LayoutClock() {
         int sel = 0;
         for (size_t i = 0; i < ARRAYSIZE(kClockLanguages); ++i) {
             names.push_back(kClockLanguages[i].label);
-            if (c.style.locale == kClockLanguages[i].value) sel = (int)i;
+            if (c.locale == kClockLanguages[i].value) sel = (int)i;
         }
         Add(new DropDown(names, sel, [this](int i) {
                 set.clock.style.locale = kClockLanguages[i].value;
@@ -683,37 +954,72 @@ void Config::LayoutClock() {
             ->rect = PushCard(glyph::kGlobe, L"语言", L"时间和日期的文字语言。", 200);
     }
 
-    // --- the skin: how it looks ---
-    PushHeading(L"皮肤");
+    // --- the component: how it looks, in the current theme ---
+    const ThemeRow *row = Row(editTheme);
+    PushHeading(L"组件（主题「" + (row ? row->entry.name : std::wstring(L"默认")) + L"」）");
+    const theme::Theme edited = theme::Edited(editOwn, set.OverridesFor(editTheme));
+    if (edited.components.size() > 1) {
+        std::vector<std::wstring> names;
+        int sel = 0;
+        for (size_t i = 0; i < edited.components.size(); ++i) {
+            const theme::Instance &in = edited.components[i];
+            std::wstring label = in.id;
+            for (const ComponentEntry &ce : componentList)
+                if (ce.id == in.ref) label = ce.name + L"（" + in.id + L"）";
+            names.push_back(label);
+            if (in.id == instanceId) sel = (int)i;
+        }
+        Add(new DropDown(names, sel, [this, edited](int i) {
+                instanceId = edited.components[(size_t)i].id;
+                partKey.clear();
+                GoTo(page);
+            }))
+            ->rect = PushCard(glyph::kMenu, L"调整哪一个", L"这个主题放了多个组件，选择要调整的那一个。", 220);
+    }
+    const theme::Instance *instance = edited.Find(instanceId);
+    if (instance && (edited.components.size() > 1 || !instance->visible)) {
+        Add(new ToggleSwitch(L"", instance->visible, [this](bool on) {
+                InstanceEdits().visible = on;
+                Save();
+                GoTo(page);
+            }))
+            ->rect = PushCard(glyph::kView, L"显示这个组件", L"只影响当前主题。", 40);
+        cards.back().aside = instance->visible ? L"开" : L"关";
+    }
+
     std::vector<std::wstring> names;
-    int selected = 0;
-    for (size_t i = 0; i < skins.size(); ++i) {
-        names.push_back(skins[i].name);
-        if (skins[i].id == clockSkinId) selected = (int)i;
+    int selected = -1;
+    for (size_t i = 0; i < componentList.size(); ++i) {
+        names.push_back(componentList[i].name);
+        if (componentList[i].id == clockSkinId) selected = (int)i;
+    }
+    if (selected < 0) {
+        names.push_back(clockSkinId.empty() ? L"（无）" : L"（无法读取的组件）");
+        selected = (int)names.size() - 1;
     }
     DropDown *pick = Add(new DropDown(names, selected, [this](int i) {
-        set.clock.skin = skins[(size_t)i].id;
-        Save();
-        GoTo(page);
+        if ((size_t)i < componentList.size()) ChooseComponent(componentList[(size_t)i].id);
     }));
-    const std::wstring by = clockSkin.author.empty() ? L"作为时钟显示的皮肤。" : L"作者：" + clockSkin.author;
-    if (clockSkinId == L"default") {
-        pick->rect = PushCard(glyph::kColor, L"皮肤", by, 200);
+    const std::wstring by = clockSkinId.empty()        ? std::wstring(L"选择一个组件放进当前主题。")
+                            : clockSkin.author.empty() ? std::wstring(L"当前主题里显示的组件。")
+                                                       : L"作者：" + clockSkin.author;
+    if (!IsImportedId(clockSkinId)) {
+        pick->rect = PushCard(glyph::kColor, L"组件", by, 200);
     } else {
         Button *del = Add(new Button(L"移除", ButtonStyle::Subtle,
-                                     [this, id = clockSkinId, name = clockSkin.name] { RemoveSkin(id, name); }));
+                                     [this, id = clockSkinId, name = clockSkin.name] { RemoveComponent(id, name); }));
         const float delW = del->PreferredWidth(measure);
-        const D2D1_RECT_F slot = PushCard(glyph::kColor, L"皮肤", by, 200 + 8 + delW);
+        const D2D1_RECT_F slot = PushCard(glyph::kColor, L"组件", by, 200 + 8 + delW);
         pick->rect = {slot.left, slot.top, slot.left + 200, slot.bottom};
         del->rect = {slot.right - delW, slot.top, slot.right, slot.bottom};
     }
-    Button *import = Add(new Button(L"导入…", ButtonStyle::Standard, [this] { ImportSkin(); }));
-    Button *exportButton = Add(new Button(L"导出…", ButtonStyle::Standard, [this] { ExportSkin(); }));
+    Button *import = Add(new Button(L"导入…", ButtonStyle::Standard, [this] { ImportComponent(); }));
+    Button *exportButton = Add(new Button(L"导出…", ButtonStyle::Standard, [this] { ExportComponent(); }));
     const float iw = import->PreferredWidth(measure), ew = exportButton->PreferredWidth(measure);
-    const D2D1_RECT_F files = PushCard(glyph::kDocument, L"皮肤文件",
-                                       L"导出为 XML 文件，修改后再导入。", iw + 8 + ew);
+    const D2D1_RECT_F files = PushCard(glyph::kDocument, L"组件文件", L"导出为 XML 文件，修改后再导入。", iw + 8 + ew);
     import->rect = {files.left, files.top, files.left + iw, files.bottom};
     exportButton->rect = {files.right - ew, files.top, files.right, files.bottom};
+    if (clockSkinId.empty()) return;
 
     if (!clockSkin.settings.empty()) {
         PushHeading(L"样式");
@@ -736,7 +1042,7 @@ void Config::LayoutClock() {
         }));
         Button *undo = Add(new Button(L"恢复此项", ButtonStyle::Subtle, [this, key = partKey] {
             if (const skin::Part *p = PartNamed(key))
-                for (const skin::Adjustment &a : p->adjustments) ClockValues().erase(a.key);
+                for (const skin::Adjustment &a : p->adjustments) InstanceEdits().values.erase(a.key);
             SaveStyle();
             GoTo(page);
         }));
@@ -744,6 +1050,7 @@ void Config::LayoutClock() {
         const D2D1_RECT_F slot = PushCard(glyph::kEdit, L"调整", L"也可以在预览里点选。", 160 + 8 + uw);
         which->rect = {slot.left, slot.top, slot.left + 160, slot.bottom};
         undo->rect = {slot.right - uw, slot.top, slot.right, slot.bottom};
+        const skin::Values values = InstanceValues();
         for (const skin::Adjustment &a : part->adjustments) {
             Field field;
             field.icon = glyph::kSettings;
@@ -754,19 +1061,20 @@ void Config::LayoutClock() {
             field.max = a.max;
             field.step = a.step;
             field.options = a.options;
-            field.value = skin::Effective(clockSkin, set.clock.ValuesFor(clockSkinId), a);
+            field.value = skin::Effective(clockSkin, values, a);
             field.valid = [key = a.key](const std::wstring &v) { return skin::IsAdjustmentValue(key, v); };
             field.set = [this, key = a.key](const std::wstring &v, bool commit) { SetAdjustment(key, v, commit); };
             AddField(field);
         }
     }
 
+    // Everything the person changed about this instance goes, the component chosen included.
     Button *reset = Add(new Button(L"恢复默认", ButtonStyle::Standard, [this] {
-        set.clock.values.erase(clockSkinId);
+        set.themeOverrides[editTheme].instances.erase(instanceId);
         Save();
         GoTo(page);
     }));
-    reset->rect = PushCard(glyph::kUndo, L"恢复默认", L"把这个皮肤的样式和逐项调整全部恢复为默认。",
+    reset->rect = PushCard(glyph::kUndo, L"恢复默认", L"把当前主题里这个组件的选择、样式和逐项调整全部恢复为主题自带的样子。",
                            reset->PreferredWidth(measure));
 }
 
@@ -862,7 +1170,7 @@ void Config::AddField(const Field &field) {
 }
 
 void Config::AddSkinSetting(const skin::Setting &s) {
-    const std::wstring value = skin::ValueOf(s, set.clock.ValuesFor(clockSkinId));
+    const std::wstring value = skin::ValueOf(s, InstanceValues());
     if (s.kind == skin::SettingKind::Toggle) {
         const bool on = value == L"on";
         Add(new ToggleSwitch(L"", on, [this, id = s.id](bool v) {
@@ -898,7 +1206,7 @@ void Config::AddSkinSetting(const skin::Setting &s) {
     AddField(field);
 }
 
-void Config::PushHeading(const wchar_t *text) {
+void Config::PushHeading(const std::wstring &text) {
     layoutY += 16;
     cards.push_back({{layoutLeft, layoutY, layoutRight, layoutY + 32}, nullptr, text, L"", 0, L""});
     layoutY += 32;
@@ -928,77 +1236,47 @@ void Config::Layout() {
     const size_t firstPageWidget = widgets.size();
 
     switch (page) {
-    case 0:  // 视频
-        if (importing.load()) {
-            PushCard(glyph::kBusy, L"正在导入「" + importName + L"」", L"正在转码，请稍候。", 0, 96);
-            progress = Add(new ProgressBar());
-            progress->value = importPermille.load() / 1000.0f;
-            const D2D1_RECT_F &r = cards.back().r;
-            progress->rect = {r.left + 50, r.top + 56, r.right - kInset, r.top + 60};
-        } else {
-            Button *add = Add(new Button(L"导入视频…", ButtonStyle::Accent, [this] { StartImport(); }));
-            add->rect = PushCard(glyph::kAdd, L"导入视频", L"导入后自动转码为登录界面使用的格式。",
-                                 add->PreferredWidth(measure));
-            if (library.empty()) {
-                PushCard(glyph::kPlay, L"还没有视频", L"导入一个视频后，它会显示在这里。", 0);
-            } else {
-                PushHeading(L"视频库");
-                for (const VideoInfo &v : library) {
-                    const bool chosen = set.video == v.id;
-                    Button *pick = Add(new Button(chosen ? L"正在使用" : L"使用",
-                                                  chosen ? ButtonStyle::Standard : ButtonStyle::Subtle,
-                                                  [this, id = v.id] {
-                                                      set.video = id;
-                                                      Save();
-                                                      GoTo(page);
-                                                  }));
-                    Button *del = Add(new Button(L"移除", ButtonStyle::Subtle,
-                                                 [this, id = v.id, name = v.name] { RemoveVideo(id, name); }));
-                    const float pickW = pick->PreferredWidth(measure), delW = del->PreferredWidth(measure);
-                    const std::wstring detail = Format(L"%d × %d · %s · %s", v.width, v.height,
-                                                       MegaBytes(v.bytes).c_str(), v.hasAudio ? L"有声音" : L"无声音");
-                    const D2D1_RECT_F slot = PushCard(glyph::kPlay, v.name, detail, pickW + 8 + delW);
-                    pick->rect = {slot.left, slot.top, slot.left + pickW, slot.bottom};
-                    del->rect = {slot.right - delW, slot.top, slot.right, slot.bottom};
-                }
-            }
-        }
+    case 0:  // 主题
+        LayoutThemes();
         break;
-    case 1:  // 显示与登录
+    case 1: {  // 显示与登录
         Add(new Segmented({L"每个屏幕相同", L"横跨所有屏幕", L"每个屏幕各自"}, (int)set.monitorMode,
                           [this](int i) {
                               set.monitorMode = (MonitorMode)i;
                               Save();
                               GoTo(page);
                           }))
-            ->rect = PushCard(glyph::kFullScreen, L"多显示器", L"视频在多个屏幕上的显示方式。", 340);
-        Add(new Segmented({L"填充", L"适应", L"拉伸"}, (int)set.scaling,
-                          [this](int i) {
-                              set.scaling = (Scaling)i;
+            ->rect = PushCard(glyph::kFullScreen, L"多显示器", L"主题在多个屏幕上的显示方式。", 340);
+        const std::wstring current = CurrentTheme();
+        Add(new Segmented({L"填充", L"适应", L"拉伸"}, (int)EditedTheme(current).fit,
+                          [this, current](int i) {
+                              set.themeOverrides[current].fit = (Scaling)i;
                               Save();
                           }))
-            ->rect = PushCard(glyph::kView, L"缩放方式", L"填充会裁剪边缘，适应会留出黑边。", 180);
+            ->rect = PushCard(glyph::kView, L"缩放方式", L"当前主题的壁纸如何铺满屏幕。填充会裁剪边缘，适应会留出黑边。", 180);
         if (set.monitorMode == MonitorMode::PerMonitor && monitors.size() > 1) {
             PushHeading(L"各显示器");
             for (const MonitorInfo &m : monitors) {
-                std::vector<std::wstring> options = {L"默认"};
+                std::vector<std::wstring> options = {L"跟随当前主题"};
                 int selected = 0;
-                for (size_t i = 0; i < library.size(); ++i) {
-                    options.push_back(library[i].name);
-                    if (set.screens.count(m.key) && set.screens[m.key] == library[i].id) selected = (int)i + 1;
+                const auto screen = set.screens.find(m.key);
+                for (size_t i = 0; i < themes.size(); ++i) {
+                    options.push_back(themes[i].entry.name);
+                    if (screen != set.screens.end() && screen->second == themes[i].entry.id) selected = (int)i + 1;
                 }
                 const std::wstring title = m.name.empty() ? m.gdiName : m.name;
                 const std::wstring detail = Format(L"%ld × %ld%s", m.rect.right - m.rect.left,
                                                    m.rect.bottom - m.rect.top, m.primary ? L"（主）" : L"");
                 Add(new DropDown(options, selected, [this, key = m.key](int i) {
                         if (i == 0) set.screens.erase(key);
-                        else set.screens[key] = library[i - 1].id;
+                        else set.screens[key] = themes[(size_t)i - 1].entry.id;
                         Save();
                     }))
                     ->rect = PushCard(glyph::kFullScreen, title, detail, 200);
             }
         }
         break;
+    }
     case 2:  // 时钟
         LayoutClock();
         break;
@@ -1029,7 +1307,7 @@ void Config::Layout() {
                     Save();
                     GoTo(page);
                 }))
-                ->rect = PushCard(glyph::kPlay, L"视频声音", L"播放视频自带的声音轨道。", 40);
+                ->rect = PushCard(glyph::kPlay, L"视频声音", L"播放视频壁纸自带的声音轨道。", 40);
             cards.back().aside = set.audio.videoTrack.enabled ? L"开" : L"关";
             if (set.audio.videoTrack.enabled)
                 AddVolumeSlider(&set.audio.videoTrack.volume, glyph::kPlay, L"视频声音音量", L"与总音量相互独立。");
@@ -1039,7 +1317,7 @@ void Config::Layout() {
     case 4: {  // 系统
         const bool on = machine::IsOn();
         Add(new ToggleSwitch(L"", on, [this, on](bool) { Switch(!on); }))
-            ->rect = PushCard(glyph::kLock, L"启用 AnimeLogon", L"关闭后登录界面恢复系统默认，设置与视频保留。", 40);
+            ->rect = PushCard(glyph::kLock, L"启用 AnimeLogon", L"关闭后登录界面恢复系统默认，设置与主题保留。", 40);
         cards.back().aside = on ? L"开" : L"关";
         Button *logs = Add(new Button(L"打开", ButtonStyle::Standard, [] {
             ShellExecuteW(nullptr, L"open", paths::LogDir().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
@@ -1142,27 +1420,14 @@ void Config::PaintPage(const Painter &p) {
         p.Text(toast, {left, ClientH() - 36.0f, w - 24, ClientH() - 12.0f}, p.font->body, c.accent);
 }
 
-// --- elevated child commands -----------------------------------------------------------
-int RunCommand(int argc, wchar_t **argv) {
-    // The elevated helper has no window; what goes wrong is in config.log.
-    log::Open(paths::LogPath(L"config.log"));
-    const std::wstring cmd = argv[1];
-    if (cmd == L"--commit-import" && argc >= 4) return commit::ImportInto(argv[2], argv[3]);
-    if (cmd == L"--commit-remove" && argc >= 3) return commit::Remove(argv[2]);
-    if (cmd == L"--commit-skin" && argc >= 4) return commit::ImportSkin(argv[2], argv[3]);
-    if (cmd == L"--remove-skin" && argc >= 3) return commit::RemoveSkin(argv[2]);
-    if (cmd == L"--switch-on") return commit::SwitchOn();
-    if (cmd == L"--switch-off") return commit::SwitchOff();
-    return commit::kBadArgs;
-}
-
 int wWinMain(HINSTANCE, HINSTANCE, wchar_t *, int) {
     int argc = 0;
     wchar_t **argv = CommandLineToArgvW(GetCommandLineW(), &argc);
     if (argv && argc >= 2 && argv[1][0] == L'-') {
-        const int code = RunCommand(argc, argv);
+        // The elevated child (commit.h).
+        const std::vector<std::wstring> args(argv + 1, argv + argc);
         LocalFree(argv);
-        return code;
+        return commit::Run(args);
     }
     if (argv) LocalFree(argv);
 
@@ -1178,6 +1443,8 @@ int wWinMain(HINSTANCE, HINSTANCE, wchar_t *, int) {
         CoUninitialize();
         return 0;
     }
+    // The window's own log, beside its import directories: what an import refused, and why.
+    if (paths::CreateDirectories(paths::UserDataDir())) log::Open(paths::UserDataDir() + L"\\config.log");
 
     int code = 1;
     {
