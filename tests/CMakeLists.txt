@@ -16,7 +16,11 @@ target_sources(animelogon_tests PRIVATE config_tests.cpp
     ${PROJECT_SOURCE_DIR}/config/src/exporter.cpp
     ${PROJECT_SOURCE_DIR}/config/src/transcode.cpp)
 target_include_directories(animelogon_tests PRIVATE ${PROJECT_SOURCE_DIR}/config/src)
-# The transcoder is linked but never called by the tests; delay-loading keeps them starting on
-# a machine without Media Foundation.
+# Only export_sound_tests.cpp calls into Media Foundation, and it checks first; delay-loading
+# keeps the tests starting on a machine without Media Foundation.
 target_link_libraries(animelogon_tests PRIVATE mfplat mfreadwrite mfuuid ole32 delayimp)
 target_link_options(animelogon_tests PRIVATE /DELAYLOAD:mfplat.dll /DELAYLOAD:mfreadwrite.dll)
+
+# Exporting a video wallpaper with its sound and importing it again, with Media Foundation for
+# real on a clip made by the test.
+target_sources(animelogon_tests PRIVATE export_sound_tests.cpp ${PROJECT_SOURCE_DIR}/config/src/remux.cpp)

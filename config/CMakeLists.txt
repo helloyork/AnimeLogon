@@ -5,6 +5,7 @@ animelogon_add_executable(config WIN32
         src/store.cpp
         src/staging.cpp
         src/exporter.cpp
+        src/remux.cpp
         src/transcode.cpp
         src/devices.cpp
         src/fonts.cpp

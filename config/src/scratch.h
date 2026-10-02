@@ -97,6 +97,7 @@ public:
         info->id = id;
         if (info->kind == WallpaperKind::Image) info->imagePath = store::In(t_, WallpaperImagePath(id));
         else info->videoPath = store::In(t_, WallpaperVideoPath(id));
+        if (info->kind == WallpaperKind::Video && info->hasAudio) info->audioPath = store::In(t_, WallpaperAudioPath(id));
         return true;
     }
     bool LoadComponent(const std::wstring &id, animelogon::skin::Skin *out, std::wstring *why) const override {
