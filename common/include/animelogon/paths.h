@@ -10,7 +10,6 @@ std::wstring DataDir();
 std::wstring LogDir();
 std::wstring LogPath(const wchar_t *name);
 std::wstring SettingsPath();
-std::wstring LibraryDir();
 std::wstring BackgroundPath();
 // Present while the logon screen video is switched off from the logon screen itself.
 std::wstring PausedMarkerPath();

@@ -8,6 +8,8 @@
 // - Span: the primary display's wallpaper is fitted to the bounds of all the displays; the
 //   components are still placed on each display by itself.
 // - Per-monitor: each display shows the theme `screen.<monitor>` names, or `theme`.
+//
+// Every display is covered: a theme that cannot be shown gives way to the built-in one.
 #pragma once
 
 #include <windows.h>
@@ -24,7 +26,7 @@ namespace plan {
 
 // What fills a display.
 enum class Source {
-    None,      // nothing: with a theme the display is black; in legacy mode it is left to Windows
+    None,      // nothing: the display is black
     Video,     // video.mp4, decoded as it plays
     Image,     // image.bmp, read once
     Gradient,  // the built-in wallpaper, drawn by AnimeLogon itself
@@ -51,13 +53,9 @@ struct Display {
     RECT rect{};    // the display, in desktop pixels
     RECT canvas{};  // what the wallpaper is fitted to: the display, or all of them when spanning
     bool primary = false;
-    bool legacy = false;   // transitional: built from the legacy keys (resolve.h)
-    std::wstring themeId;  // empty in legacy mode
+    std::wstring themeId;
     Wallpaper wallpaper;
     std::vector<Component> components;  // in the theme's order
-    // False leaves the display to Windows: in legacy mode, a display without a video, as before
-    // themes. With a theme every display is covered.
-    bool covered = true;
     // The components are drawn here. Auto starts on the primary display; the overlay moves
     // them to wherever Windows puts its password box.
     bool showComponents = false;
@@ -72,8 +70,8 @@ struct Plan {
 Plan Build(const animelogon::Settings &settings, const std::vector<animelogon::MonitorInfo> &monitors,
            const animelogon::ThemeStore &store);
 
-// One line for the log: the display, its theme (or "legacy"), the wallpaper's kind and id, and
-// how many components it has.
+// One line for the log: the display, its theme, the wallpaper's kind and id, and how many
+// components it has.
 std::wstring Describe(const Display &display);
 
 }  // namespace plan

@@ -5,11 +5,11 @@
 #include <cstring>
 
 #include "animelogon/background.h"
-#include "animelogon/library.h"
 #include "animelogon/paths.h"
 #include "animelogon/secure.h"
 #include "animelogon/settings.h"
 #include "animelogon/text.h"
+#include "animelogon/wallpaper.h"
 
 using namespace animelogon;
 
@@ -31,8 +31,7 @@ TEST(HashKeyIsStable) {
 TEST(SettingsRoundTrip) {
     Settings s;
     s.monitorMode = MonitorMode::PerMonitor;
-    s.scaling = Scaling::Fit;
-    s.video = L"0123456789abcdef";
+    s.theme = L"0123456789abcdef";
     s.screens[L"00000000000000aa"] = L"fedcba9876543210";
     s.audio.enabled = true;
     s.audio.device = L"{0.0.0.00000000}.{guid}";
@@ -43,57 +42,27 @@ TEST(SettingsRoundTrip) {
     const Settings t = ParseSettings(SerializeSettings(s), &problems);
     CHECK(problems.empty());
     CHECK(t.monitorMode == MonitorMode::PerMonitor);
-    CHECK(t.scaling == Scaling::Fit);
-    CHECK(t.video == s.video);
+    CHECK(t.theme == s.theme);
     CHECK(t.screens.size() == 1 && t.screens.at(L"00000000000000aa") == L"fedcba9876543210");
     CHECK(t.audio.enabled && t.audio.device == s.audio.device && t.audio.volume == 55);
     CHECK(!t.audio.videoTrack.enabled && t.audio.videoTrack.volume == 30);
-    CHECK(t.VideoFor(L"00000000000000aa") == L"fedcba9876543210");
-    CHECK(t.VideoFor(L"00000000000000bb") == s.video);
 }
 
 TEST(SettingsDefaultsAreConservative) {
     const Settings s = ParseSettings(L"");
     CHECK(!s.audio.enabled);
     CHECK(s.monitorMode == MonitorMode::Duplicate);
-    CHECK(s.scaling == Scaling::Fill);
-    CHECK(s.video.empty());
+    CHECK(s.theme == L"default" && s.screens.empty());
 }
 
 TEST(SettingsRejectBadValues) {
     std::vector<std::wstring> problems;
-    const Settings s = ParseSettings(L"audio = maybe\nvideo = ../../x\naudio_volume = 400\nscreen.zz = 1\nfoo = 1\n", &problems);
+    const Settings s =
+        ParseSettings(L"theme = default\naudio = maybe\nvideo = ../../x\naudio_volume = 400\nscreen.zz = 1\nfoo = 1\n", &problems);
     CHECK(problems.size() == 5);
     CHECK(!s.audio.enabled);
-    CHECK(s.video.empty());
     CHECK(s.audio.volume == 80);
     CHECK(s.screens.empty());
-}
-
-TEST(VideoInfoRoundTrip) {
-    VideoInfo v;
-    v.name = L"晚霞\r\nsecond line";
-    v.sourceName = L"clip.mkv";
-    v.importedAt = L"2026-09-30T12:00:00";
-    v.width = 1920;
-    v.height = 1080;
-    v.frameRateNum = 30000;
-    v.frameRateDen = 1001;
-    v.durationMs = 12345;
-    v.hasAudio = true;
-    VideoInfo w;
-    CHECK(ParseVideoInfo(SerializeVideoInfo(v), &w));
-    CHECK(w.name == L"晚霞  second line");
-    CHECK(w.width == 1920 && w.height == 1080 && w.frameRateNum == 30000 && w.frameRateDen == 1001);
-    CHECK(w.durationMs == 12345 && w.hasAudio);
-    VideoInfo broken;
-    CHECK(!ParseVideoInfo(L"name = x\nwidth = 0\n", &broken));
-}
-
-TEST(VideoIds) {
-    CHECK(IsVideoId(NewVideoId()));
-    CHECK(!IsVideoId(L"0123456789ABCDEF"));
-    CHECK(!IsVideoId(L"..\\..\\windows"));
 }
 
 // The sign-in background must be byte-identical across versions; see background.h.

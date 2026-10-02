@@ -3,8 +3,8 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <cstring>
 
-#include "animelogon/library.h"
 #include "animelogon/paths.h"
 #include "animelogon/secure.h"
 #include "animelogon/text.h"
@@ -72,35 +72,6 @@ bool LoadStored(const std::wstring &id, WallpaperInfo *info, std::wstring *why) 
             w.audioPath = WallpaperAudioPath(id);
             if (!TrustedPayload(w.audioPath, &w.bytes, why)) return false;
         }
-    }
-    *info = std::move(w);
-    return true;
-}
-
-// Transitional: a video of the old library, read the way the overlay reads it today.
-bool LoadLegacy(const std::wstring &id, WallpaperInfo *info, std::wstring *why) {
-    VideoInfo v;
-    if (!LoadVideo(id, &v)) return *why = L"no such wallpaper", false;
-    std::wstring reason;
-    if (!secure::IsTrusted(InfoFilePath(id), &reason)) return *why = L"info.ini " + reason, false;
-    WallpaperInfo w;
-    w.id = id;
-    w.kind = WallpaperKind::Video;
-    w.name = v.name;
-    w.sourceName = v.sourceName;
-    w.importedAt = v.importedAt;
-    w.width = v.width;
-    w.height = v.height;
-    w.frameRateNum = v.frameRateNum;
-    w.frameRateDen = v.frameRateDen;
-    w.durationMs = v.durationMs;
-    w.hasAudio = v.hasAudio;
-    w.legacy = true;
-    w.videoPath = VideoFilePath(id);
-    if (!TrustedPayload(w.videoPath, &w.bytes, why)) return false;
-    if (w.hasAudio) {
-        w.audioPath = AudioFilePath(id);
-        if (!TrustedPayload(w.audioPath, &w.bytes, why)) return false;
     }
     *info = std::move(w);
     return true;
@@ -207,6 +178,23 @@ bool ParseWallpaperInfo(const std::wstring &text, WallpaperInfo *info, std::wstr
     return true;
 }
 
+bool IsCanonicalWav(const uint8_t *h, size_t headerBytes, uint64_t fileBytes) {
+    if (!h || headerBytes < kWavHeaderBytes || fileBytes <= kWavHeaderBytes || fileBytes - 8 > 0xFFFFFFFFull)
+        return false;
+    const auto u16 = [&](size_t at) { return (uint32_t)h[at] | ((uint32_t)h[at + 1] << 8); };
+    const auto u32 = [&](size_t at) { return u16(at) | (u16(at + 2) << 16); };
+    const uint64_t data = fileBytes - kWavHeaderBytes;
+    return !memcmp(h, "RIFF", 4) && u32(4) == fileBytes - 8 && !memcmp(h + 8, "WAVEfmt ", 8) && u32(16) == 16 &&
+           u16(20) == 1 && u16(22) == 2 && u32(24) == 48000 && u32(28) == 48000 * 4 && u16(32) == 4 &&
+           u16(34) == 16 && !memcmp(h + 36, "data", 4) && u32(40) == data && data % 4 == 0;
+}
+
+bool LooksLikeMp4(const uint8_t *h, size_t n) {
+    if (!h || n < 12) return false;
+    const uint32_t size = ((uint32_t)h[0] << 24) | ((uint32_t)h[1] << 16) | ((uint32_t)h[2] << 8) | h[3];
+    return !memcmp(h + 4, "ftyp", 4) && size >= 12 && size <= 4096;
+}
+
 bool LoadWallpaper(const std::wstring &id, WallpaperInfo *info, std::wstring *why) {
     std::wstring reason;
     if (id == kDefaultWallpaper) {
@@ -214,7 +202,8 @@ bool LoadWallpaper(const std::wstring &id, WallpaperInfo *info, std::wstring *wh
         return true;
     }
     if (!IsWallpaperId(id)) reason = L"not a wallpaper id";
-    else if (IsDirectory(WallpaperDir(id)) ? LoadStored(id, info, &reason) : LoadLegacy(id, info, &reason)) return true;
+    else if (!IsDirectory(WallpaperDir(id))) reason = L"no such wallpaper";
+    else if (LoadStored(id, info, &reason)) return true;
     if (why) *why = reason;
     return false;
 }
@@ -236,13 +225,6 @@ std::vector<WallpaperInfo> ListWallpapers() {
         FindClose(find);
     }
     std::sort(out.begin() + 1, out.end(), byAge);
-    const size_t stored = out.size();
-    for (const VideoInfo &v : ListVideos()) {
-        WallpaperInfo w;
-        std::wstring why;
-        if (!IsDirectory(WallpaperDir(v.id)) && LoadLegacy(v.id, &w, &why)) out.push_back(std::move(w));
-    }
-    std::sort(out.begin() + (std::ptrdiff_t)stored, out.end(), byAge);
     return out;
 }
 

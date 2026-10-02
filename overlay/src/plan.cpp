@@ -54,9 +54,8 @@ Plan Build(const animelogon::Settings &settings, const std::vector<animelogon::M
         if (found != resolved.end()) return found->second;
         Resolution &r = resolved[alike];
         r.theme = animelogon::ResolveTheme(settings, m.key, store, &plan.problems);
-        const std::wstring owner = r.theme.legacy ? std::wstring(L"legacy") : L"theme " + r.theme.themeId;
         for (const animelogon::ResolvedComponent &c : r.theme.components)
-            r.components.push_back({owner + L"/" + c.instance, c.instance, c.component,
+            r.components.push_back({L"theme " + r.theme.themeId + L"/" + c.instance, c.instance, c.component,
                                     animelogon::skin::Resolve(c.skin, c.values)});
         return r;
     };
@@ -71,12 +70,10 @@ Plan Build(const animelogon::Settings &settings, const std::vector<animelogon::M
         d.monitorKey = m.key;
         d.rect = m.rect;
         d.primary = m.primary;
-        d.legacy = r.theme.legacy;
         d.themeId = r.theme.themeId;
         // Spanning shows one wallpaper across the wall: the primary display's.
         d.canvas = span ? bounds : m.rect;
         d.wallpaper = WallpaperOf(span ? first.theme : r.theme);
-        d.covered = !(d.legacy && d.wallpaper.source == Source::None);
         d.components = r.components;
         switch (plan.componentDisplays) {
         case animelogon::ComponentDisplays::Auto:
@@ -91,14 +88,14 @@ Plan Build(const animelogon::Settings &settings, const std::vector<animelogon::M
 std::wstring Describe(const Display &d) {
     std::wstring wallpaper;
     switch (d.wallpaper.source) {
-    case Source::None: wallpaper = d.covered ? L"no wallpaper (black)" : L"no wallpaper (left to Windows)"; break;
+    case Source::None: wallpaper = L"no wallpaper (black)"; break;
     case Source::Video: wallpaper = L"video " + d.wallpaper.id; break;
     case Source::Image: wallpaper = L"image " + d.wallpaper.id; break;
     case Source::Gradient: wallpaper = L"the built-in wallpaper"; break;
     }
-    return animelogon::Format(L"display %s%s %ldx%ld: %s, %s, %s, %zu component(s)%s", d.monitorKey.c_str(),
+    return animelogon::Format(L"display %s%s %ldx%ld: theme %s, %s, %s, %zu component(s)%s", d.monitorKey.c_str(),
                               d.primary ? L" (primary)" : L"", d.rect.right - d.rect.left, d.rect.bottom - d.rect.top,
-                              d.legacy ? L"legacy" : (L"theme " + d.themeId).c_str(), wallpaper.c_str(),
+                              d.themeId.c_str(), wallpaper.c_str(),
                               animelogon::ToString(d.wallpaper.fit), d.components.size(),
                               d.components.empty() ? L"" : d.showComponents ? L", drawn here" : L", not drawn here");
 }

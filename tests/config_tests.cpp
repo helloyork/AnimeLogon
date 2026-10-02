@@ -15,7 +15,6 @@
 #include "animelogon/bitmap.h"
 #include "animelogon/components.h"
 #include "animelogon/image.h"
-#include "animelogon/library.h"
 #include "animelogon/package.h"
 #include "animelogon/paths.h"
 #include "animelogon/resolve.h"
@@ -787,21 +786,20 @@ TEST(PngEncodingIsStable) {
 
 // --- settings -------------------------------------------------------------------------------------
 
-TEST(SettingsAppWritesThemeMode) {
-    Settings s;  // as a machine in legacy mode reads it
-    s.video = L"1111111111111111";
-    s.scaling = Scaling::Fit;
-    s.clock.enabled = false;
-    s.clock.skin = L"2222222222222222";
-    s.clock.values[L"default"][L"color"] = L"#123456";
-    s.clock.style.hours = ClockHours::H24;
-    s.audio.volume = 35;
-    const std::wstring first = SerializeThemeSettings(s);
+TEST(SettingsAppWritesEveryGlobalKey) {
+    // What a settings.ini from before themes reads as: its old keys gone, its other keys kept.
+    std::vector<std::wstring> problems;
+    Settings s = ParseSettings(L"video = 1111111111111111\r\nscaling = fit\r\nclock = false\r\n"
+                               L"skin = 2222222222222222\r\nskin.default.color = #123456\r\n"
+                               L"clock_hours = 24\r\naudio_volume = 35\r\n",
+                               &problems);
+    CHECK(problems.size() == 6);  // five old keys, and no theme
+    const std::wstring first = SerializeSettings(s);
     CHECK(first.find(L"theme = default\r\n") != std::wstring::npos);
     CHECK(first.find(L"components = true\r\n") != std::wstring::npos &&
           first.find(L"component_displays = auto\r\n") != std::wstring::npos);
-    for (const wchar_t *legacy : {L"\nvideo =", L"\nscaling =", L"\nskin =", L"\nskin.", L"\nclock =", L"\nclock_displays ="})
-        CHECK(first.find(legacy) == std::wstring::npos);
+    for (const wchar_t *old : {L"\nvideo =", L"\nscaling =", L"\nskin =", L"\nskin.", L"\nclock =", L"\nclock_displays ="})
+        CHECK(first.find(old) == std::wstring::npos);
     CHECK(first.find(L"clock_hours = 24\r\n") != std::wstring::npos && first.find(L"audio_volume = 35\r\n") != std::wstring::npos);
 
     s.theme = L"0123456789abcdef";
@@ -812,17 +810,14 @@ TEST(SettingsAppWritesThemeMode) {
     s.themeOverrides[L"0123456789abcdef"].fit = Scaling::Stretch;
     s.themeOverrides[L"0123456789abcdef"].instances[L"clock"].ref = L"3333333333333333";
     s.themeOverrides[L"0123456789abcdef"].instances[L"clock"].values[L"p1.offset-x"] = L"4.5";
-    std::vector<std::wstring> problems;
-    const Settings back = ParseSettings(SerializeThemeSettings(s), &problems);
+    problems.clear();
+    const Settings back = ParseSettings(SerializeSettings(s), &problems);
     CHECK(problems.empty());
-    CHECK(back.theme && *back.theme == L"0123456789abcdef" && back.components && !*back.components);
-    CHECK(back.componentDisplays && *back.componentDisplays == ComponentDisplays::All);
+    CHECK(back.theme == L"0123456789abcdef" && !back.components && back.componentDisplays == ComponentDisplays::All);
     CHECK(back.monitorMode == MonitorMode::PerMonitor && back.screens.at(L"aaaaaaaaaaaaaaaa") == L"fedcba9876543210");
     const ThemeOverrides &o = back.OverridesFor(L"0123456789abcdef");
     CHECK(o.fit && *o.fit == Scaling::Stretch && o.instances.at(L"clock").ref == std::wstring(L"3333333333333333") &&
           o.instances.at(L"clock").values.at(L"p1.offset-x") == L"4.5");
-    // Nothing of the legacy keys comes back: what the old app wrote is gone at the first save.
-    CHECK(back.video.empty() && back.scaling == Scaling::Fill && back.clock.enabled && back.clock.skin == L"default" &&
-          back.clock.values.empty() && back.clock.style.hours == ClockHours::H24 && back.audio.volume == 35);
-    CHECK(SerializeThemeSettings(back) == SerializeThemeSettings(s));
+    CHECK(back.clock.hours == ClockHours::H24 && back.audio.volume == 35);
+    CHECK(SerializeSettings(back) == SerializeSettings(s));
 }

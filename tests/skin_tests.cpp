@@ -18,7 +18,7 @@ bool ParsesXml(const char *text, std::wstring *error = nullptr) {
 }
 
 std::string Wrap(const std::string &panel, const std::string &settings = {}) {
-    return "<skin format=\"1\" name=\"t\">" + settings + panel + "</skin>";
+    return "<component format=\"1\" name=\"t\">" + settings + panel + "</component>";
 }
 
 bool ParsesSkin(const std::string &text, std::wstring *error = nullptr) {
@@ -171,8 +171,8 @@ TEST(SkinOffersItsParts) {
 TEST(SkinRefusesBadStructure) {
     const std::string line = "<line><text value=\"{time}\"/></line>";
     CHECK(ParsesSkin(Wrap("<panel>" + line + "</panel>")));
-    CHECK(!ParsesSkin("<skin format=\"2\" name=\"t\"><panel>" + line + "</panel></skin>"));
-    CHECK(!ParsesSkin("<skin format=\"1\"><panel>" + line + "</panel></skin>"));
+    CHECK(!ParsesSkin("<component format=\"2\" name=\"t\"><panel>" + line + "</panel></component>"));
+    CHECK(!ParsesSkin("<component format=\"1\"><panel>" + line + "</panel></component>"));
     CHECK(!ParsesSkin(Wrap("")));
     CHECK(!ParsesSkin(Wrap("<panel></panel>")));
     CHECK(!ParsesSkin(Wrap("<panel script=\"x\">" + line + "</panel>")));
@@ -216,6 +216,5 @@ TEST(SkinSettingValues) {
     skin::Setting color;
     color.kind = skin::SettingKind::Color;
     CHECK(skin::IsValue(color, L"#12AB34") && skin::IsValue(color, L"#12AB3480") && !skin::IsValue(color, L"#12AB3"));
-    CHECK(skin::IsSkinId(L"default") && skin::IsSkinId(L"0123456789abcdef") && !skin::IsSkinId(L"../x"));
     CHECK(skin::IsSettingId(L"date-style") && !skin::IsSettingId(L"Date") && !skin::IsSettingId(L"a.b"));
 }

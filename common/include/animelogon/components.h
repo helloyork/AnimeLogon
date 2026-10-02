@@ -26,19 +26,13 @@ std::wstring ComponentFilePath(const std::wstring &id);  // component.xml
 
 // The component `id` names: a built-in one, or an entry of components\ that is an
 // administrators-only file (secure::IsTrusted) and parses. `why` says what was wrong.
-//
-// Transitional, until the overlay and the settings app use themes: "default", the old name of
-// the clock, gives the clock, and an id that is not in components\ but is in the old skins\
-// store loads from there.
 bool LoadComponent(const std::wstring &id, skin::Skin *component, std::wstring *why = nullptr);
 
 struct ComponentEntry {
     std::wstring id, name, author;
     bool builtIn = false;
-    bool legacy = false;  // transitional: from the skins\ store
 };
-// The built-in components first, then the entries of components\ that load, then
-// (transitional) those of skins\.
+// The built-in components first, then the entries of components\ that load.
 std::vector<ComponentEntry> ListComponents();
 
 }  // namespace animelogon

@@ -41,7 +41,6 @@ public:
     std::map<std::wstring, WallpaperInfo> wallpapers;
     mutable int themeLoads = 0;
 
-    bool ThemeExists(const std::wstring &id) const override { return id == kDefaultTheme || themes.count(id); }
     bool LoadTheme(const std::wstring &id, theme::Theme *t, std::wstring *why) const override {
         ++themeLoads;
         if (id == kDefaultTheme) return ::animelogon::LoadTheme(id, t, why);
@@ -57,7 +56,7 @@ public:
         return true;
     }
     bool LoadComponent(const std::wstring &id, skin::Skin *component, std::wstring *why) const override {
-        if (id == kClockComponent || id == L"default") return ::animelogon::LoadComponent(id, component, why);
+        if (id == kClockComponent) return ::animelogon::LoadComponent(id, component, why);
         return *why = L"no such component", false;
     }
 };
@@ -159,48 +158,38 @@ std::vector<uint8_t> RenderRows() {
 
 }  // namespace
 
-TEST(PlanLegacyIsTheOldPlan) {
+TEST(PlanCoversEveryDisplayWithoutATheme) {
     const FakeStore store = Store();
-    Settings s;
-    s.video = kVideoX;
-    s.scaling = Scaling::Fit;
-    plan::Plan p = plan::Build(s, Monitors(), store);
-    CHECK(p.displays.size() == 2 && p.componentDisplays == ComponentDisplays::Auto);
-    for (const plan::Display &d : p.displays) {
-        CHECK(d.legacy && d.themeId.empty() && d.covered);
-        CHECK(d.wallpaper.source == plan::Source::Video && d.wallpaper.id == kVideoX);
-        CHECK(d.wallpaper.path == store.wallpapers.at(kVideoX).videoPath);
-        CHECK(d.wallpaper.audioPath == store.wallpapers.at(kVideoX).audioPath && !d.wallpaper.audioPath.empty());
-        CHECK(d.wallpaper.fit == Scaling::Fit && Same(d.canvas, d.rect));
-        CHECK(d.components.size() == 1 && d.components[0].key == L"legacy/clock");
+    // No usable theme: every display shows the built-in theme, the gradient and the clock.
+    for (const std::wstring &text : {std::wstring(L""), std::wstring(L"theme = zzzz\r\n"),
+                                     std::wstring(L"theme = dddddddddddddddd\r\n"),
+                                     std::wstring(L"video = 1111111111111111\r\nclock = false\r\n")}) {
+        const plan::Plan p = plan::Build(ParseSettings(text), Monitors(), store);
+        CHECK(p.displays.size() == 2 && p.componentDisplays == ComponentDisplays::Auto);
+        for (const plan::Display &d : p.displays) {
+            CHECK(d.themeId == L"default" && d.wallpaper.source == plan::Source::Gradient && Same(d.canvas, d.rect));
+            CHECK(d.components.size() == 1 && d.components[0].key == L"theme default/clock");
+        }
+        CHECK(p.displays[0].primary && p.displays[0].showComponents && !p.displays[1].showComponents);
     }
-    // The clock starts on the primary display only (Auto), as before.
-    CHECK(p.displays[0].primary && p.displays[0].showComponents && !p.displays[1].showComponents);
-    s.clock.displays = ClockDisplays::All;
-    p = plan::Build(s, Monitors(), store);
-    CHECK(p.componentDisplays == ComponentDisplays::All && p.displays[1].showComponents);
-    s.clock.enabled = false;
-    CHECK(plan::Build(s, Monitors(), store).displays[0].components.empty());
-
-    // Each display its own video; spanning puts the primary's across both.
+    // A theme that is not installed is reported once, however many displays show it.
+    Settings s;
+    s.theme = L"dddddddddddddddd";
+    plan::Plan p = plan::Build(s, Monitors(3), store);
+    CHECK(p.problems.size() == 1);
+    // Per-monitor, a display naming a theme that is not there shows the built-in one; spanning
+    // puts the primary display's wallpaper across the wall.
+    s.theme = kThemeV;
     s.monitorMode = MonitorMode::PerMonitor;
-    s.screens[L"00000000000000bb"] = kVideoY;
+    s.screens[L"00000000000000bb"] = L"dddddddddddddddd";
     p = plan::Build(s, Monitors(), store);
-    CHECK(p.displays[0].wallpaper.id == kVideoX && p.displays[1].wallpaper.id == kVideoY);
-    CHECK(p.displays[1].wallpaper.audioPath.empty());
+    CHECK(p.displays[0].themeId == kThemeV && p.displays[0].wallpaper.source == plan::Source::Video);
+    CHECK(p.displays[1].themeId == L"default" && p.displays[1].wallpaper.source == plan::Source::Gradient);
+    CHECK(p.problems.size() == 1);
     s.monitorMode = MonitorMode::Span;
     p = plan::Build(s, Monitors(), store);
     const RECT wall{0, 0, 3840, 1080};
-    for (const plan::Display &d : p.displays) CHECK(d.wallpaper.id == kVideoX && Same(d.canvas, wall));
-
-    // Without a video, or with one that does not load, the displays are left to Windows.
-    s.monitorMode = MonitorMode::Duplicate;
-    s.video.clear();
-    p = plan::Build(s, Monitors(), store);
-    for (const plan::Display &d : p.displays) CHECK(!d.covered && d.wallpaper.source == plan::Source::None);
-    s.video = L"7777777777777777";
-    p = plan::Build(s, Monitors(), store);
-    CHECK(!p.displays[0].covered && p.problems.size() == 1);
+    for (const plan::Display &d : p.displays) CHECK(d.wallpaper.id == kVideoY && Same(d.canvas, wall));
     CHECK(plan::Build(s, {}, store).displays.empty());
 }
 
@@ -211,7 +200,7 @@ TEST(PlanThemeWallpapers) {
     plan::Plan p = plan::Build(s, Monitors(), store);
     CHECK(p.displays.size() == 2);
     for (const plan::Display &d : p.displays) {
-        CHECK(!d.legacy && d.themeId == kThemeT && d.covered);
+        CHECK(d.themeId == kThemeT);
         CHECK(d.wallpaper.source == plan::Source::Image && d.wallpaper.id == kImage);
         CHECK(d.wallpaper.path == store.wallpapers.at(kImage).imagePath && d.wallpaper.fit == Scaling::Fit);
         CHECK(d.components.size() == 1 && d.components[0].key == L"theme " + kThemeT + L"/clock");
@@ -219,10 +208,10 @@ TEST(PlanThemeWallpapers) {
         CHECK(d.components.size() == 1 && d.components[0].drawing.panels.size() == 1 &&
               d.components[0].drawing.panels[0].anchor == 6);
     }
-    // "none": still covered, black, and nothing to draw over it.
+    // "none": black, and nothing to draw over it.
     s.theme = kThemeU;
     p = plan::Build(s, Monitors(), store);
-    CHECK(p.displays[0].covered && p.displays[0].wallpaper.source == plan::Source::None);
+    CHECK(p.displays.size() == 2 && p.displays[0].wallpaper.source == plan::Source::None);
     CHECK(p.displays[0].components.empty() && p.displays[0].wallpaper.fit == Scaling::Stretch);
     // The built-in theme: the gradient.
     s.theme = L"default";
@@ -244,6 +233,13 @@ TEST(PlanThemeWallpapers) {
     s.themeOverrides[kThemeV].instances[L"corner"].visible = false;
     p = plan::Build(s, Monitors(), store);
     CHECK(p.displays[0].components.size() == 1 && p.displays[0].components[0].instance == L"clock");
+    // A video with sound brings its audio.wav; one without has none.
+    CHECK(p.displays[0].wallpaper.audioPath.empty());
+    s.themeOverrides[kThemeV].wallpaper = kVideoX;
+    p = plan::Build(s, Monitors(), store);
+    CHECK(p.displays[0].wallpaper.id == kVideoX && p.displays[0].wallpaper.path == store.wallpapers.at(kVideoX).videoPath);
+    CHECK(p.displays[0].wallpaper.audioPath == store.wallpapers.at(kVideoX).audioPath &&
+          !p.displays[0].wallpaper.audioPath.empty());
 }
 
 TEST(PlanComponentDisplays) {
@@ -259,14 +255,10 @@ TEST(PlanComponentDisplays) {
     s.componentDisplays = ComponentDisplays::Primary;
     p = plan::Build(s, Monitors(3), store);
     CHECK(p.displays[0].showComponents && !p.displays[2].showComponents);
-    // The legacy clock keys mean nothing with a theme.
-    s.clock.displays = ClockDisplays::All;
-    s.clock.enabled = false;
-    p = plan::Build(s, Monitors(3), store);
-    CHECK(!p.displays[1].showComponents && p.displays[1].components.size() == 2);
     s.components = false;
     p = plan::Build(s, Monitors(3), store);
-    for (const plan::Display &d : p.displays) CHECK(d.components.empty() && d.covered);
+    CHECK(p.displays.size() == 3);
+    for (const plan::Display &d : p.displays) CHECK(d.components.empty() && d.wallpaper.source == plan::Source::Video);
 }
 
 TEST(PlanMonitorModes) {
@@ -299,20 +291,15 @@ TEST(PlanMonitorModes) {
     CHECK(p.displays[1].themeId == kThemeV && p.displays[1].wallpaper.id == kVideoY);
     CHECK(p.displays[2].themeId == kThemeU && Same(p.displays[2].canvas, p.displays[2].rect));
     CHECK(p.displays[1].components.size() == 2 && p.displays[1].components[0].key == L"theme " + kThemeV + L"/clock");
-    // A display with no screen of its own shows `theme`; without `theme`, it stays legacy.
+    // A display with no screen of its own shows `theme`.
     s.screens.erase(L"00000000000000cc");
     p = plan::Build(s, Monitors(3), store);
     CHECK(p.displays[2].themeId == kThemeT && p.displays[2].wallpaper.source == plan::Source::Image);
-    s.theme.reset();
-    s.video = kVideoX;
-    p = plan::Build(s, Monitors(3), store);
-    CHECK(p.displays[2].legacy && p.displays[2].wallpaper.id == kVideoX && p.displays[2].components[0].key == L"legacy/clock");
-    CHECK(!p.displays[0].legacy && p.displays[0].covered);
     // The log line names the theme, the wallpaper and the components.
     CHECK(plan::Describe(p.displays[1]).find(L"theme " + kThemeV) != std::wstring::npos);
     CHECK(plan::Describe(p.displays[1]).find(L"video " + kVideoY) != std::wstring::npos);
     CHECK(plan::Describe(p.displays[1]).find(L"2 component(s)") != std::wstring::npos);
-    CHECK(plan::Describe(p.displays[2]).find(L"legacy") != std::wstring::npos);
+    CHECK(plan::Describe(p.displays[0]).find(L"no wallpaper (black)") != std::wstring::npos);
 }
 
 TEST(GradientIsTheInstalledBackground) {

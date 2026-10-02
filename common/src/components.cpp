@@ -4,7 +4,6 @@
 
 #include "animelogon/paths.h"
 #include "animelogon/secure.h"
-#include "animelogon/skins.h"
 #include "animelogon/text.h"
 
 namespace animelogon {
@@ -37,16 +36,6 @@ bool LoadStored(const std::wstring &id, skin::Skin *component, std::wstring *why
     return true;
 }
 
-// Transitional: a skin of the old skins\ store, with the checks LoadSkin applies.
-bool LoadLegacy(const std::wstring &id, skin::Skin *component, std::wstring *why) {
-    if (!IsDirectory(SkinDir(id))) return *why = L"no such component", false;
-    std::wstring reason;
-    skin::Skin s = LoadSkin(id, &reason);
-    if (!reason.empty()) return *why = reason, false;
-    *component = std::move(s);
-    return true;
-}
-
 }  // namespace
 
 bool IsComponentId(const std::wstring &id) { return id == kClockComponent || IsHexId(id); }
@@ -58,15 +47,14 @@ std::wstring ComponentDir(const std::wstring &id) { return ComponentsDir() + L"\
 std::wstring ComponentFilePath(const std::wstring &id) { return ComponentDir(id) + L"\\component.xml"; }
 
 bool LoadComponent(const std::wstring &id, skin::Skin *component, std::wstring *why) {
-    // "default" is the clock's name from before components.
-    if (id == kClockComponent || id == L"default") {
+    if (id == kClockComponent) {
         *component = skin::Default();
         return true;
     }
     std::wstring reason;
     if (!IsHexId(id)) reason = L"not a component id";
-    else if (IsDirectory(ComponentDir(id)) ? LoadStored(id, component, &reason) : LoadLegacy(id, component, &reason))
-        return true;
+    else if (!IsDirectory(ComponentDir(id))) reason = L"no such component";
+    else if (LoadStored(id, component, &reason)) return true;
     if (why) *why = reason;
     return false;
 }
@@ -74,25 +62,20 @@ bool LoadComponent(const std::wstring &id, skin::Skin *component, std::wstring *
 std::vector<ComponentEntry> ListComponents() {
     std::vector<ComponentEntry> out;
     const skin::Skin &clock = skin::Default();
-    out.push_back({kClockComponent, clock.name, clock.author, true, false});
-    auto scan = [&](const std::wstring &dir, bool legacy) {
-        WIN32_FIND_DATAW fd;
-        HANDLE find = FindFirstFileW((dir + L"\\*").c_str(), &fd);
-        if (find == INVALID_HANDLE_VALUE) return;
-        do {
-            const std::wstring id = fd.cFileName;
-            if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || (fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) ||
-                !IsHexId(id) || (legacy && IsDirectory(ComponentDir(id))))
-                continue;
-            skin::Skin s;
-            std::wstring why;
-            if (legacy ? LoadLegacy(id, &s, &why) : LoadStored(id, &s, &why))
-                out.push_back({id, s.name, s.author, false, legacy});
-        } while (FindNextFileW(find, &fd));
-        FindClose(find);
-    };
-    scan(ComponentsDir(), false);
-    scan(SkinsDir(), true);
+    out.push_back({kClockComponent, clock.name, clock.author, true});
+    WIN32_FIND_DATAW fd;
+    HANDLE find = FindFirstFileW((ComponentsDir() + L"\\*").c_str(), &fd);
+    if (find == INVALID_HANDLE_VALUE) return out;
+    do {
+        const std::wstring id = fd.cFileName;
+        if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || (fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) ||
+            !IsHexId(id))
+            continue;
+        skin::Skin s;
+        std::wstring why;
+        if (LoadStored(id, &s, &why)) out.push_back({id, s.name, s.author, false});
+    } while (FindNextFileW(find, &fd));
+    FindClose(find);
     return out;
 }
 

@@ -1,4 +1,4 @@
-# Code shared by every program: paths, logs, settings, the video library and machine state.
+# Code shared by every program: paths, logs, settings, themes and their stores, and machine state.
 add_library(animelogon_common STATIC
     src/background.cpp
     src/bitmap.cpp
@@ -6,7 +6,6 @@ add_library(animelogon_common STATIC
     src/components.cpp
     src/image.cpp
     src/instance.cpp
-    src/library.cpp
     src/log.cpp
     src/machine.cpp
     src/monitors.cpp
@@ -17,7 +16,6 @@ add_library(animelogon_common STATIC
     src/settings.cpp
     src/sha256.cpp
     src/skin.cpp
-    src/skins.cpp
     src/text.cpp
     src/theme.cpp
     src/wallpaper.cpp

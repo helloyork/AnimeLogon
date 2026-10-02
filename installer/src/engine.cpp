@@ -14,7 +14,6 @@
 #include "animelogon/paths.h"
 #include "animelogon/secure.h"
 #include "animelogon/settings.h"
-#include "animelogon/skins.h"
 #include "animelogon/text.h"
 #include "animelogon/theme.h"
 #include "animelogon/wallpaper.h"
@@ -138,10 +137,10 @@ DWORD PrepareDataDir() {
     return ERROR_SUCCESS;
 }
 
-// The stores from before themes, videos\ and skins\. Nothing reads them once themes are in use,
-// and nothing in them carries over: themes replaced them without a migration.
+// The stores from before themes, videos\ and skins\. Nothing reads them, and nothing in them
+// carries over: themes replaced them without a migration.
 void RemoveOldStores() {
-    for (const std::wstring &dir : {paths::LibraryDir(), SkinsDir()}) {
+    for (const std::wstring &dir : {paths::DataDir() + L"\\videos", paths::DataDir() + L"\\skins"}) {
         const DWORD e = secure::RemoveTree(dir);
         if (e != ERROR_SUCCESS) ALOG(L"%s cannot be removed (%lu)", dir.c_str(), e);
     }
@@ -153,7 +152,7 @@ bool SettingsNameATheme() {
     std::vector<uint8_t> bytes;
     if (!secure::ReadFileBytes(paths::SettingsPath(), &bytes, kMaxSettingsBytes)) return false;
     const size_t skip = (bytes.size() >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF) ? 3 : 0;
-    return ParseSettings(FromUtf8(std::string_view((const char *)bytes.data() + skip, bytes.size() - skip))).theme.has_value();
+    return NamesATheme(FromUtf8(std::string_view((const char *)bytes.data() + skip, bytes.size() - skip)));
 }
 
 // Deletes an installed file now, or queues it for the next restart if it is in use.
@@ -265,9 +264,7 @@ Report Install(const std::wstring &targetDir) {
     if (defaults) ALOG(L"install: settings.ini %s -- writing defaults", why.c_str());
     else if ((defaults = !SettingsNameATheme())) ALOG(L"install: settings.ini names no theme -- writing defaults");
     if (defaults) {
-        Settings fresh;
-        fresh.theme = std::wstring(kDefaultTheme);
-        const std::string text = ToUtf8(SerializeThemeSettings(fresh));
+        const std::string text = ToUtf8(SerializeSettings(Settings{}));
         e = secure::WriteBytes(paths::SettingsPath(), text.data(), text.size());
         if (e != ERROR_SUCCESS) return fail(WithError(L"无法写入默认设置", e));
     }

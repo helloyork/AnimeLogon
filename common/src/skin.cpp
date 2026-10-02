@@ -172,9 +172,7 @@ public:
 
     bool Run() {
         const xml::Element &root = skin_->document;
-        // <skin> is the root's name from before components; transitional, until the overlay and
-        // the settings app use themes. Normalize always writes <component>.
-        if (root.name != L"component" && root.name != L"skin") return Fail(root, L"the root element must be <component>");
+        if (root.name != L"component") return Fail(root, L"the root element must be <component>");
         for (const auto &[name, value] : root.attributes) {
             if (name == L"format") {
                 if (value != L"1") return Fail(root, L"unsupported format " + value);
@@ -510,14 +508,6 @@ bool IsSettingId(const std::wstring &id) {
     if (id.empty() || id.size() > 32) return false;
     for (wchar_t c : id)
         if (!((c >= L'a' && c <= L'z') || (c >= L'0' && c <= L'9') || c == L'-')) return false;
-    return true;
-}
-
-bool IsSkinId(const std::wstring &id) {
-    if (id == L"default") return true;
-    if (id.size() != 16) return false;
-    for (wchar_t c : id)
-        if (!((c >= L'0' && c <= L'9') || (c >= L'a' && c <= L'f'))) return false;
     return true;
 }
 

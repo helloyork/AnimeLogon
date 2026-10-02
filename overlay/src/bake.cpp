@@ -208,8 +208,8 @@ bool Refresh(const std::wstring &preview) {
     if (windowW <= 0 || windowH <= 0) return false;
 
     // With a theme whose wallpaper is "none" there is nothing to follow: the background stays
-    // as it is. In legacy mode a display without a video has the installed gradient, as before.
-    if (wallpaper.source == plan::Source::None && !primary.legacy) return false;
+    // as it is.
+    if (wallpaper.source == plan::Source::None) return false;
     const bool video = wallpaper.source == plan::Source::Video, image = wallpaper.source == plan::Source::Image;
     // Where the wallpaper sits on the primary display, as it is drawn there.
     const std::wstring placed =

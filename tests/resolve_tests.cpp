@@ -26,8 +26,8 @@ const std::string kImageText = "3333333333333333";
 const std::wstring kThemeT = L"aaaaaaaaaaaaaaaa";
 const std::wstring kThemeU = L"bbbbbbbbbbbbbbbb";
 const std::wstring kBroken = L"cccccccccccccccc";
+const std::wstring kMissing = L"dddddddddddddddd";  // a theme id that is not installed
 const std::wstring kBattery = L"0a7b0a7b0a7b0a7b";
-const std::wstring kSkin = L"5555555555555555";
 
 // The stores, in memory. Built-ins come from the real functions, which never touch the disk.
 class FakeStore : public ThemeStore {
@@ -36,7 +36,6 @@ public:
     std::map<std::wstring, WallpaperInfo> wallpapers;
     std::map<std::wstring, std::string> components;  // component.xml
 
-    bool ThemeExists(const std::wstring &id) const override { return id == kDefaultTheme || themes.count(id); }
     bool LoadTheme(const std::wstring &id, theme::Theme *t, std::wstring *why) const override {
         if (id == kDefaultTheme) return ::animelogon::LoadTheme(id, t, why);
         const auto it = themes.find(id);
@@ -51,7 +50,7 @@ public:
         return true;
     }
     bool LoadComponent(const std::wstring &id, skin::Skin *component, std::wstring *why) const override {
-        if (id == kClockComponent || id == L"default") return ::animelogon::LoadComponent(id, component, why);
+        if (id == kClockComponent) return ::animelogon::LoadComponent(id, component, why);
         const auto it = components.find(id);
         if (it == components.end()) return *why = L"no such component", false;
         return skin::Parse(it->second, component, why);
@@ -64,8 +63,7 @@ WallpaperInfo Video(const std::wstring &id) {
     w.kind = WallpaperKind::Video;
     w.width = 1920;
     w.height = 1080;
-    w.legacy = true;
-    w.videoPath = L"C:\\ProgramData\\AnimeLogon\\videos\\" + id + L"\\video.mp4";
+    w.videoPath = L"C:\\ProgramData\\AnimeLogon\\wallpapers\\" + id + L"\\video.mp4";
     return w;
 }
 
@@ -94,7 +92,6 @@ FakeStore Store() {
     store.wallpapers[kVideoY] = Video(kVideoY);
     store.wallpapers[kImage] = Image(kImage);
     store.components[kBattery] = Battery();
-    store.components[kSkin] = skin::DefaultText();
     store.themes[kThemeT] =
         "<theme format=\"1\" name=\"T\"><wallpaper ref=\"" + kImageText +
         "\" fit=\"fit\"/><component id=\"clock\" ref=\"clock\"><set key=\"color\" value=\"#111111\"/>"
@@ -132,14 +129,10 @@ bool SameDrawing(const skin::Resolved &a, const skin::Resolved &b) {
     return true;
 }
 
-// The clock the overlay drew before themes (overlay.cpp): the skin `skin` names, or the default
-// skin when that is refused, with the values kept for whichever was used.
-skin::Resolved OldClock(const Settings &s, const FakeStore &store) {
-    skin::Skin skin;
-    std::wstring refused;
-    if (!store.LoadComponent(s.clock.skin, &skin, &refused)) skin = skin::Default();
-    const std::wstring &id = refused.empty() ? s.clock.skin : std::wstring(L"default");
-    return skin::Resolve(skin, s.clock.ValuesFor(id));
+// The built-in theme as it comes: the built-in wallpaper and the clock.
+bool IsBuiltInTheme(const ResolvedTheme &r) {
+    return r.themeId == L"default" && r.wallpaper && r.wallpaper->builtIn && r.fit == Scaling::Fill &&
+           r.components.size() == 1 && r.components[0].instance == L"clock" && r.components[0].component == L"clock";
 }
 
 }  // namespace
@@ -162,21 +155,12 @@ TEST(SettingsThemeKeysRoundTrip) {
     o.instances[L"battery"].visible = true;
     s.themeOverrides[L"default"].instances[L"clock"].values[L"font"] = L"Microsoft YaHei UI";
     s.themeOverrides[L"default"].wallpaper = kImage;
-    // The legacy keys go on being written alongside.
-    s.video = kVideoX;
-    s.scaling = Scaling::Fit;
-    s.clock.enabled = false;
-    s.clock.displays = ClockDisplays::Primary;
-    s.clock.skin = kSkin;
-    s.clock.values[L"default"][L"color"] = L"#12ABEF";
-    s.clock.style.hours = ClockHours::H24;
+    s.clock.hours = ClockHours::H24;
 
     std::vector<std::wstring> problems;
     const Settings t = ParseSettings(SerializeSettings(s), &problems);
     CHECK(problems.empty());
-    CHECK(t.theme && *t.theme == kThemeT);
-    CHECK(t.components && !*t.components);
-    CHECK(t.componentDisplays && *t.componentDisplays == ComponentDisplays::All);
+    CHECK(t.theme == kThemeT && !t.components && t.componentDisplays == ComponentDisplays::All);
     CHECK(t.screens.size() == 2 && t.screens.at(kMonitorA) == L"default" && t.screens.at(kMonitorB) == kThemeU);
     CHECK(t.themeOverrides.size() == 2);
     const ThemeOverrides &p = t.OverridesFor(kThemeT);
@@ -191,29 +175,38 @@ TEST(SettingsThemeKeysRoundTrip) {
     CHECK(d.wallpaper && *d.wallpaper == kImage && !d.fit);
     CHECK(d.instances.at(L"clock").values.at(L"font") == L"Microsoft YaHei UI");
     CHECK(t.OverridesFor(kThemeU).instances.empty() && !t.OverridesFor(kThemeU).wallpaper);
-    CHECK(t.video == kVideoX && t.scaling == Scaling::Fit && !t.clock.enabled);
-    CHECK(t.clock.displays == ClockDisplays::Primary && t.clock.skin == kSkin);
-    CHECK(t.clock.ValuesFor(L"default").at(L"color") == L"#12ABEF" && t.clock.style.hours == ClockHours::H24);
+    CHECK(t.clock.hours == ClockHours::H24);
     CHECK(SerializeSettings(t) == SerializeSettings(s));
 }
 
-TEST(SettingsWithoutThemeKeysStayLegacy) {
-    // What the old settings app writes has no theme keys, read or written.
-    const std::wstring legacy = SerializeSettings(Settings{});
-    CHECK(legacy.find(L"theme") == std::wstring::npos);
-    CHECK(legacy.find(L"components") == std::wstring::npos && legacy.find(L"component_displays") == std::wstring::npos);
-    Settings s = ParseSettings(L"video = 1111111111111111\r\nskin.default.color = #FFFFFF\r\nclock = false\r\n");
-    CHECK(!s.theme && !s.components && !s.componentDisplays && s.themeOverrides.empty());
-    s.video = kVideoY;  // the old app changes something and saves
-    CHECK(SerializeSettings(s).find(L"theme") == std::wstring::npos);
-    // Each theme key is kept once it was read.
-    const Settings themed = ParseSettings(L"theme = default\r\n");
-    CHECK(themed.theme && *themed.theme == L"default" && !themed.components);
-    const std::wstring written = SerializeSettings(themed);
-    CHECK(written.find(L"theme = default\r\n") != std::wstring::npos && written.find(L"components") == std::wstring::npos);
-    const Settings shown = ParseSettings(L"components = true\r\n");
-    CHECK(!shown.theme && shown.components && *shown.components);
-    CHECK(SerializeSettings(shown).find(L"components = true\r\n") != std::wstring::npos);
+TEST(SettingsThemeKeysHaveDefaults) {
+    // Missing, each global key has its default, and every one is written.
+    const Settings d;
+    CHECK(d.theme == L"default" && d.components && d.componentDisplays == ComponentDisplays::Auto);
+    const std::wstring written = SerializeSettings(d);
+    CHECK(written.find(L"\r\ntheme = default\r\n") != std::wstring::npos);
+    CHECK(written.find(L"\r\ncomponents = true\r\n") != std::wstring::npos);
+    CHECK(written.find(L"\r\ncomponent_displays = auto\r\n") != std::wstring::npos);
+    std::vector<std::wstring> problems;
+    CHECK(ParseSettings(written, &problems).theme == L"default" && problems.empty());
+
+    // The keys from before themes are unknown keys now: reported, ignored, never written back.
+    const std::wstring old = L"video = 1111111111111111\r\nscaling = fit\r\nskin = 0123456789abcdef\r\n"
+                             L"skin.default.color = #FFFFFF\r\nclock = false\r\nclock_displays = all\r\n"
+                             L"clock_hours = 24\r\n";
+    problems.clear();
+    const Settings s = ParseSettings(old, &problems);
+    CHECK(problems.size() == 7);  // six unknown keys, and no theme
+    CHECK(s.theme == L"default" && s.components && s.componentDisplays == ComponentDisplays::Auto);
+    CHECK(s.clock.hours == ClockHours::H24 && s.themeOverrides.empty());
+    const std::wstring again = SerializeSettings(s);
+    for (const wchar_t *gone : {L"\nvideo =", L"\nscaling =", L"\nskin", L"\nclock =", L"\nclock_displays ="})
+        CHECK(again.find(gone) == std::wstring::npos);
+
+    // What the installer asks of a settings.ini it finds.
+    CHECK(!NamesATheme(old) && !NamesATheme(L"") && !NamesATheme(L"theme = zzzz\r\n"));
+    CHECK(NamesATheme(L"theme = default\r\n") && NamesATheme(L"monitor_mode = span\r\ntheme = 0123456789abcdef\r\n"));
+    CHECK(NamesATheme(written));
 }
 
 TEST(SettingsRefuseBadThemeKeys) {
@@ -243,8 +236,8 @@ TEST(SettingsRefuseBadThemeKeys) {
         L"themes = 1\r\n"
         L"theme.default.clock.color = #FFFFFF\r\n",
         &problems);
-    CHECK(problems.size() == 22);
-    CHECK(!s.theme && !s.components && !s.componentDisplays && s.screens.empty());
+    CHECK(problems.size() == 23);  // every line but the last, and no valid theme
+    CHECK(s.theme == L"default" && s.components && s.componentDisplays == ComponentDisplays::Auto && s.screens.empty());
     // Only the last line was good.
     CHECK(s.themeOverrides.size() == 1);
     const ThemeOverrides &d = s.OverridesFor(L"default");
@@ -253,68 +246,56 @@ TEST(SettingsRefuseBadThemeKeys) {
     CHECK(!clock.ref && !clock.visible && clock.values.size() == 1 && clock.values.at(L"color") == L"#FFFFFF");
 }
 
-TEST(ResolveLegacyMatchesTheOldOverlay) {
+TEST(ResolveFallsBackToTheDefaultTheme) {
     const FakeStore store = Store();
-    Settings s;
-    s.video = kVideoX;
-    s.scaling = Scaling::Fit;
-    s.clock.displays = ClockDisplays::All;
-    s.clock.values[L"default"][L"color"] = L"#12ABEF";
-    s.clock.values[L"default"][L"p1.l1.t1.weight"] = L"350";
-    s.clock.values[L"default"][L"size"] = L"99";  // out of range: the old overlay ignored it too
-    s.clock.values[kSkin][L"color"] = L"#000000";
-    std::vector<std::wstring> problems;
-    ResolvedTheme r = ResolveTheme(s, kMonitorA, store, &problems);
-    CHECK(r.legacy && r.themeId.empty());
-    CHECK(r.wallpaper && r.wallpaper->id == kVideoX && r.wallpaper->kind == WallpaperKind::Video);
-    CHECK(r.wallpaper && r.wallpaper->videoPath == store.wallpapers.at(kVideoX).videoPath);
-    CHECK(r.fit == Scaling::Fit && r.componentDisplays == ComponentDisplays::All);
-    CHECK(r.components.size() == 1);
-    if (r.components.size() == 1) {
-        CHECK(r.components[0].instance == L"clock" && r.components[0].component == L"clock");
-        CHECK(r.components[0].values.size() == 2 && !r.components[0].values.count(L"size"));
-        CHECK(SameDrawing(skin::Resolve(r.components[0].skin, r.components[0].values), OldClock(s, store)));
-    }
-    CHECK(problems.size() == 1);
+    std::vector<std::wstring> parsed, resolved;
 
-    // An imported skin, with its own values.
-    s.clock.skin = kSkin;
-    r = ResolveTheme(s, kMonitorA, store);
-    CHECK(r.components.size() == 1 && r.components[0].component == kSkin);
-    CHECK(r.components.size() == 1 && r.components[0].values.at(L"color") == L"#000000");
-    CHECK(r.components.size() == 1 && SameDrawing(skin::Resolve(r.components[0].skin, r.components[0].values), OldClock(s, store)));
-    // A skin that does not load: the default skin, with the default skin's values.
-    s.clock.skin = L"6666666666666666";
-    problems.clear();
-    r = ResolveTheme(s, kMonitorA, store, &problems);
-    CHECK(r.components.size() == 1 && r.components[0].component == L"clock");
-    CHECK(r.components.size() == 1 && r.components[0].values.at(L"color") == L"#12ABEF");
-    CHECK(r.components.size() == 1 && SameDrawing(skin::Resolve(r.components[0].skin, r.components[0].values), OldClock(s, store)));
-    CHECK(problems.size() == 2);
-    // The clock switched off.
-    s.clock.enabled = false;
-    CHECK(ResolveTheme(s, kMonitorA, store).components.empty());
-    // No video: nothing behind the clock, and the old overlay left that display alone.
-    s.video.clear();
-    CHECK(!ResolveTheme(s, kMonitorA, store).wallpaper);
-    // A video that does not load is not shown either.
-    s.video = L"7777777777777777";
-    problems.clear();
-    CHECK(!ResolveTheme(s, kMonitorA, store, &problems).wallpaper && problems.size() == 1);
+    // No theme at all, as in a settings.ini from before themes: the built-in theme, whatever the
+    // old keys said.
+    Settings s = ParseSettings(L"video = 1111111111111111\r\nclock = false\r\n", &parsed);
+    CHECK(parsed.size() == 3 && parsed.back().find(L"no valid theme") != std::wstring::npos);
+    ResolvedTheme r = ResolveTheme(s, kMonitorA, store, &resolved);
+    CHECK(IsBuiltInTheme(r) && resolved.empty());
 
-    // Each display its own video, as Settings::VideoFor gives; spanning or duplicating ignores them.
-    s.video = kVideoX;
+    // A malformed theme.
+    parsed.clear();
+    s = ParseSettings(L"theme = zzzz\r\n", &parsed);
+    CHECK(parsed.size() == 2 && s.theme == L"default");
+    CHECK(IsBuiltInTheme(ResolveTheme(s, kMonitorA, store)));
+
+    // A well-formed id of a theme that is not installed.
+    parsed.clear();
+    s = ParseSettings(L"theme = " + kMissing + L"\r\n", &parsed);
+    CHECK(parsed.empty() && s.theme == kMissing);
+    resolved.clear();
+    r = ResolveTheme(s, kMonitorA, store, &resolved);
+    CHECK(IsBuiltInTheme(r) && resolved.size() == 1 && resolved[0].find(kMissing) != std::wstring::npos);
+
+    // A theme that is installed but does not load.
+    s.theme = kBroken;
+    resolved.clear();
+    r = ResolveTheme(s, kMonitorA, store, &resolved);
+    CHECK(IsBuiltInTheme(r) && resolved.size() == 1 && resolved[0].find(kBroken) != std::wstring::npos);
+
+    // Per-monitor: a display naming a theme that is not there, or does not load, shows the
+    // built-in theme too; the others keep theirs.
+    s.theme = kThemeT;
     s.monitorMode = MonitorMode::PerMonitor;
-    s.screens[kMonitorA] = kVideoY;
+    s.screens[kMonitorA] = kMissing;
+    s.screens[kMonitorB] = kBroken;
+    s.screens[kMonitorC] = kThemeU;
     for (const std::wstring &m : {kMonitorA, kMonitorB}) {
-        r = ResolveTheme(s, m, store);
-        CHECK(r.legacy && r.wallpaper && r.wallpaper->id == s.VideoFor(m));
+        resolved.clear();
+        CHECK(IsBuiltInTheme(ResolveTheme(s, m, store, &resolved)) && resolved.size() == 1);
     }
-    CHECK(ResolveTheme(s, kMonitorA, store).wallpaper->id == kVideoY);
-    for (MonitorMode mode : {MonitorMode::Span, MonitorMode::Duplicate}) {
-        s.monitorMode = mode;
-        CHECK(ResolveTheme(s, kMonitorA, store).wallpaper->id == kVideoX);
-    }
+    CHECK(ResolveTheme(s, kMonitorC, store).themeId == kThemeU);
+    CHECK(ResolveTheme(s, kMonitorD, store).themeId == kThemeT);
+    // A malformed screen line is dropped as it is read, and that display shows `theme`.
+    parsed.clear();
+    s = ParseSettings(L"theme = " + kThemeU + L"\r\nmonitor_mode = per-monitor\r\nscreen." + kMonitorA + L" = zzzz\r\n",
+                      &parsed);
+    CHECK(parsed.size() == 1 && s.screens.empty());
+    CHECK(ResolveTheme(s, kMonitorA, store).themeId == kThemeU);
 }
 
 TEST(ResolveOverridePrecedence) {
@@ -323,7 +304,7 @@ TEST(ResolveOverridePrecedence) {
     s.theme = kThemeT;
     std::vector<std::wstring> problems;
     ResolvedTheme r = ResolveTheme(s, kMonitorA, store, &problems);
-    CHECK(!r.legacy && r.themeId == kThemeT);
+    CHECK(r.themeId == kThemeT);
     CHECK(r.wallpaper && r.wallpaper->id == kImage && r.wallpaper->kind == WallpaperKind::Image);
     CHECK(r.fit == Scaling::Fit && r.components.size() == 1);
     CHECK(problems.size() == 1);  // the theme's own `bogus` set
@@ -414,30 +395,22 @@ TEST(ResolveInstances) {
     s.componentDisplays = ComponentDisplays::Primary;
     r = ResolveTheme(s, kMonitorA, store);
     CHECK(r.components.empty() && r.componentDisplays == ComponentDisplays::Primary && r.wallpaper);
-    // The legacy keys mean nothing once there is a theme.
-    s.components = true;
-    s.clock.enabled = false;
-    s.clock.displays = ClockDisplays::All;
-    s.scaling = Scaling::Stretch;
-    r = ResolveTheme(s, kMonitorA, store);
-    CHECK(r.components.size() == 1 && r.componentDisplays == ComponentDisplays::Primary && r.fit == Scaling::Fit);
 }
 
 TEST(ResolvePerMonitorSelection) {
     FakeStore store = Store();
     Settings s;
     s.theme = kThemeT;
-    s.video = kVideoX;
     s.monitorMode = MonitorMode::PerMonitor;
     s.screens[kMonitorA] = kThemeU;
     s.screens[kMonitorB] = L"default";
-    s.screens[kMonitorC] = kVideoY;  // a legacy video id names no theme
+    s.screens[kMonitorC] = kVideoY;  // well-formed, but no theme has this id
     std::vector<std::wstring> problems;
     CHECK(ResolveTheme(s, kMonitorA, store).themeId == kThemeU);
     CHECK(!ResolveTheme(s, kMonitorA, store).wallpaper && ResolveTheme(s, kMonitorA, store).fit == Scaling::Stretch);
     CHECK(ResolveTheme(s, kMonitorB, store).themeId == L"default");
-    // Reported: the screen naming no theme, and theme T's own bad set.
-    CHECK(ResolveTheme(s, kMonitorC, store, &problems).themeId == kThemeT && problems.size() == 2);
+    // Reported, and the built-in theme in its place.
+    CHECK(ResolveTheme(s, kMonitorC, store, &problems).themeId == L"default" && problems.size() == 1);
     CHECK(ResolveTheme(s, kMonitorD, store).themeId == kThemeT);
     // Duplicating and spanning use `theme` everywhere.
     for (MonitorMode mode : {MonitorMode::Duplicate, MonitorMode::Span}) {
@@ -445,21 +418,13 @@ TEST(ResolvePerMonitorSelection) {
         for (const std::wstring &m : {kMonitorA, kMonitorB, kMonitorC, kMonitorD})
             CHECK(ResolveTheme(s, m, store).themeId == kThemeT);
     }
-    // Without `theme`, a display whose screen names a theme shows it and the others stay legacy.
-    s.theme.reset();
+    // The built-in theme in place of one that does not load keeps the built-in theme's overrides.
     s.monitorMode = MonitorMode::PerMonitor;
-    CHECK(ResolveTheme(s, kMonitorA, store).themeId == kThemeU && !ResolveTheme(s, kMonitorA, store).legacy);
-    CHECK(ResolveTheme(s, kMonitorB, store).themeId == L"default");
-    ResolvedTheme r = ResolveTheme(s, kMonitorC, store);
-    CHECK(r.legacy && r.wallpaper && r.wallpaper->id == kVideoY);
-    r = ResolveTheme(s, kMonitorD, store);
-    CHECK(r.legacy && r.wallpaper && r.wallpaper->id == kVideoX);
-    // A theme that is there but does not load gives the built-in one, with its overrides.
     s.screens[kMonitorD] = kBroken;
     s.themeOverrides[L"default"].fit = Scaling::Fit;
     problems.clear();
-    r = ResolveTheme(s, kMonitorD, store, &problems);
-    CHECK(!r.legacy && r.themeId == L"default" && r.fit == Scaling::Fit && problems.size() == 1);
+    const ResolvedTheme r = ResolveTheme(s, kMonitorD, store, &problems);
+    CHECK(r.themeId == L"default" && r.fit == Scaling::Fit && problems.size() == 1);
 }
 
 TEST(ResolveDefaultTheme) {
@@ -469,7 +434,7 @@ TEST(ResolveDefaultTheme) {
     std::vector<std::wstring> problems;
     ResolvedTheme r = ResolveTheme(s, kMonitorA, store, &problems);
     CHECK(problems.empty());
-    CHECK(!r.legacy && r.themeId == L"default" && r.fit == Scaling::Fill);
+    CHECK(r.themeId == L"default" && r.fit == Scaling::Fill);
     CHECK(r.wallpaper && r.wallpaper->builtIn && r.wallpaper->kind == WallpaperKind::Image);
     CHECK(r.components.size() == 1 && r.components[0].instance == L"clock" && r.components[0].component == L"clock");
     CHECK(r.components.size() == 1 && r.components[0].values.empty());
@@ -478,9 +443,8 @@ TEST(ResolveDefaultTheme) {
     s.themeOverrides[L"default"].instances[L"clock"].values[L"color"] = L"#12ABEF";
     r = ResolveTheme(s, kMonitorA, store);
     CHECK(r.components.size() == 1 && r.components[0].values.at(L"color") == L"#12ABEF");
-    // A theme id that names nothing: the built-in theme.
-    s.theme = L"dddddddddddddddd";
-    problems.clear();
-    r = ResolveTheme(s, kMonitorA, store, &problems);
-    CHECK(r.themeId == L"default" && problems.size() == 1);
+    // The built-in theme's own wallpaper may be changed, and "none" is black, not uncovered.
+    s.themeOverrides[L"default"].wallpaper = L"none";
+    r = ResolveTheme(s, kMonitorA, store);
+    CHECK(r.themeId == L"default" && !r.wallpaper && r.components.size() == 1);
 }

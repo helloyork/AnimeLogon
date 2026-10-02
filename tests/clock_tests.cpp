@@ -47,41 +47,27 @@ TEST(ClockRegionalFormatRoundTrip) {
 
 TEST(ClockSettingsRoundTrip) {
     Settings s;
-    s.clock.enabled = false;
-    s.clock.displays = ClockDisplays::Primary;
-    s.clock.skin = L"0123456789abcdef";
-    s.clock.values[L"default"][L"color"] = L"#12ABEF";
-    s.clock.values[L"default"][L"p1.l1.t1.weight"] = L"350";
-    s.clock.values[L"0123456789abcdef"][L"font"] = L"Microsoft YaHei UI";
-    s.clock.style.hours = ClockHours::H24;
-    s.clock.style.ampm = false;
-    s.clock.style.date = ClockDate::None;
-    s.clock.style.locale = L"ja-JP";
+    s.clock.hours = ClockHours::H24;
+    s.clock.ampm = false;
+    s.clock.date = ClockDate::None;
+    s.clock.locale = L"ja-JP";
     std::vector<std::wstring> problems;
     const Settings t = ParseSettings(SerializeSettings(s), &problems);
     CHECK(problems.empty());
-    CHECK(!t.clock.enabled && t.clock.displays == ClockDisplays::Primary && t.clock.skin == L"0123456789abcdef");
-    CHECK(t.clock.style.hours == ClockHours::H24 && !t.clock.style.ampm && t.clock.style.date == ClockDate::None);
-    CHECK(t.clock.style.locale == L"ja-JP");
-    CHECK(t.clock.ValuesFor(L"default").at(L"color") == L"#12ABEF");
-    CHECK(t.clock.ValuesFor(L"default").at(L"p1.l1.t1.weight") == L"350");
-    CHECK(t.clock.ValuesFor(L"0123456789abcdef").at(L"font") == L"Microsoft YaHei UI");
-    CHECK(t.clock.ValuesFor(L"fedcba9876543210").empty());
+    CHECK(t.clock.hours == ClockHours::H24 && !t.clock.ampm && t.clock.date == ClockDate::None);
+    CHECK(t.clock.locale == L"ja-JP");
 }
 
 TEST(ClockSettingsDefaultsAndBadValues) {
     const Settings d;
-    CHECK(d.clock.enabled && d.clock.displays == ClockDisplays::Auto && d.clock.skin == L"default");
-    CHECK(d.clock.style.hours == ClockHours::Auto && d.clock.style.ampm && d.clock.style.date == ClockDate::Short);
-    CHECK(d.clock.style.locale.empty());
+    CHECK(d.clock.hours == ClockHours::Auto && d.clock.ampm && d.clock.date == ClockDate::Short);
+    CHECK(d.clock.locale.empty());
     std::vector<std::wstring> problems;
-    const Settings t = ParseSettings(L"skin = ../x\r\nskin.default = 1\r\nskin.default.Color = #FFFFFF\r\n"
-                                     L"skin.nothex.color = #FFFFFF\r\nskin.default.color = a\x01\r\n"
-                                     L"skin.default.p1.l1.t1.value = x\r\nclock_hours = 13\r\nclock_date = soon\r\n"
-                                     L"clock_language = xx-YY\r\n",
+    const Settings t = ParseSettings(L"theme = default\r\nclock_hours = 13\r\nclock_date = soon\r\n"
+                                     L"clock_language = xx-YY\r\nclock_ampm = maybe\r\n",
                                      &problems);
-    CHECK(problems.size() == 9);
-    CHECK(t.clock.skin == L"default" && t.clock.values.empty());
+    CHECK(problems.size() == 4);
+    CHECK(t.clock.hours == ClockHours::Auto && t.clock.ampm && t.clock.date == ClockDate::Short && t.clock.locale.empty());
 }
 
 TEST(ClockTimePictures) {

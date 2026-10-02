@@ -3,21 +3,15 @@
 // per display.
 //
 // Which theme:
-// - In PerMonitor mode, the theme `screen.<monitor>` names, when it names one; otherwise, and in
-//   the other modes, the theme `theme` names.
-// - A theme that does not load is replaced by the built-in "default" (with its own overrides).
+// - In PerMonitor mode, the theme the display's `screen.<monitor>` names, when it has one;
+//   otherwise, and in the other modes, the theme `theme` names (ParseSettings leaves "default"
+//   there when the file has no valid one).
+// - A theme that is not installed or does not load is replaced by the built-in "default" (with
+//   its own overrides). So every display has a theme, and the overlay covers every display.
 //
-// Legacy mode (transitional, until the overlay and the settings app use themes): with no
-// `theme` key, and no theme named by the display's `screen.<monitor>`, the result is the theme
-// the overlay showed before themes:
-// - the wallpaper is the video Settings::VideoFor gives, or none when that is empty or does not
-//   load (the overlay then left that display alone);
-// - the fit is `scaling`;
-// - one instance, "clock", of the skin `skin` (the clock when that skin does not load) with its
-//   `skin.<id>.*` values, shown when `clock` is true, on the displays `clock_displays` says.
-//
-// With a theme:
-// - a wallpaper that does not load is replaced by the built-in "default"; "none" gives none;
+// Within the theme:
+// - a wallpaper that does not load is replaced by the built-in "default"; "none" gives none,
+//   which the overlay draws as black;
 // - a component that does not load leaves its instance out;
 // - `components = false` leaves every instance out;
 // - an instance's values are its sets in theme.xml, then its overrides in settings.ini; values
@@ -44,8 +38,7 @@ struct ResolvedComponent {
 };
 
 struct ResolvedTheme {
-    std::wstring themeId;  // the theme shown; empty in legacy mode
-    bool legacy = false;   // transitional: built from the legacy keys
+    std::wstring themeId;  // the theme shown: the one named, or "default" in its place
     std::optional<WallpaperInfo> wallpaper;  // with its file paths; none: nothing behind the components
     Scaling fit = Scaling::Fill;
     std::vector<ResolvedComponent> components;  // the visible instances, in the theme's order
@@ -58,7 +51,6 @@ struct ResolvedTheme {
 class ThemeStore {
 public:
     virtual ~ThemeStore() = default;
-    virtual bool ThemeExists(const std::wstring &id) const = 0;
     virtual bool LoadTheme(const std::wstring &id, theme::Theme *theme, std::wstring *why) const = 0;
     virtual bool LoadWallpaper(const std::wstring &id, WallpaperInfo *info, std::wstring *why) const = 0;
     virtual bool LoadComponent(const std::wstring &id, skin::Skin *component, std::wstring *why) const = 0;

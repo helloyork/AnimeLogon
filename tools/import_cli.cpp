@@ -105,8 +105,8 @@ int wmain(int argc, wchar_t **argv) {
     } else if (what == L"export-from" && argc >= 5) {
         const scratch::PlainTarget target(argv[2]);
         const std::wstring id = argv[3];
-        // The overrides as settings.ini would carry them for this theme.
-        std::wstring text;
+        // The overrides as settings.ini would carry them for this theme, chosen as the current one.
+        std::wstring text = L"theme = " + id + L"\r\n";
         for (int i = 5; i < argc; ++i) {
             const std::wstring set = argv[i];
             const size_t eq = set.find(L'=');

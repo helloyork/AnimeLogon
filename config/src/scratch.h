@@ -85,10 +85,6 @@ private:
 class ScratchStore : public animelogon::ThemeStore {
 public:
     explicit ScratchStore(const store::Target &t) : t_(t) {}
-    bool ThemeExists(const std::wstring &id) const override {
-        return id == animelogon::kDefaultTheme ||
-               GetFileAttributesW(store::In(t_, animelogon::ThemeDir(id)).c_str()) != INVALID_FILE_ATTRIBUTES;
-    }
     bool LoadTheme(const std::wstring &id, animelogon::theme::Theme *out, std::wstring *why) const override {
         using namespace animelogon;
         if (id == kDefaultTheme) return *out = theme::Default(), true;

@@ -329,15 +329,16 @@ TEST(ThemeDefaultIsBuiltIn) {
     // The built-in wallpaper has no files; "none" is not a wallpaper.
     WallpaperInfo w;
     CHECK(LoadWallpaper(L"default", &w) && w.builtIn && w.kind == WallpaperKind::Image && w.id == L"default");
-    CHECK(w.videoPath.empty() && w.audioPath.empty() && w.imagePath.empty() && !w.legacy);
+    CHECK(w.videoPath.empty() && w.audioPath.empty() && w.imagePath.empty());
     CHECK(!LoadWallpaper(L"none", &w) && !LoadWallpaper(L"../x", &w));
     const std::vector<WallpaperInfo> wallpapers = ListWallpapers();
     CHECK(!wallpapers.empty() && wallpapers[0].builtIn);
 
-    // The built-in component is the clock; "default" is its old name.
+    // The built-in component is the clock; "default", its name from before themes, names nothing.
     skin::Skin clock;
     CHECK(LoadComponent(L"clock", &clock) && clock.name == skin::Default().name);
-    CHECK(LoadComponent(L"default", &clock) && skin::Normalize(clock) == skin::Normalize(skin::Default()));
+    std::wstring why;
+    CHECK(!LoadComponent(L"default", &clock, &why) && !why.empty());
     CHECK(!LoadComponent(L"Clock", &clock) && !LoadComponent(L"..\\x", &clock));
     CHECK(IsComponentId(L"clock") && IsComponentId(L"0123456789abcdef") && IsComponentId(NewComponentId()));
     CHECK(!IsComponentId(L"default") && !IsComponentId(L"Clock") && !IsComponentId(L""));
@@ -349,13 +350,13 @@ TEST(ComponentRootIsRenamed) {
     CHECK(skin::DefaultText().find("<component ") != std::string::npos);
     CHECK(skin::DefaultText().find("<skin") == std::string::npos);
     CHECK(ParsesComponent("<component format=\"1\" name=\"t\">" + kPanel + "</component>"));
-    CHECK(ParsesComponent("<skin format=\"1\" name=\"t\">" + kPanel + "</skin>"));  // transitional
+    // <skin>, the root's name from before themes, is refused like any other.
+    CHECK(!ParsesComponent("<skin format=\"1\" name=\"t\">" + kPanel + "</skin>"));
     CHECK(!ParsesComponent("<widget format=\"1\" name=\"t\">" + kPanel + "</widget>"));
     CHECK(!ParsesComponent("<component format=\"1\">" + kPanel + "</component>"));
-    // Normalising writes the new name, whatever was read.
-    skin::Skin old;
-    CHECK(skin::Parse("<skin format=\"1\" name=\"t\">" + kPanel + "</skin>", &old, nullptr));
-    const std::string normal = skin::Normalize(old);
+    skin::Skin read;
+    CHECK(skin::Parse("<component format=\"1\" name=\"t\">" + kPanel + "</component>", &read, nullptr));
+    const std::string normal = skin::Normalize(read);
     CHECK(normal.find("<component ") != std::string::npos && normal.find("</component>") != std::string::npos);
     CHECK(normal.find("skin") == std::string::npos);
     CHECK(ParsesComponent(normal));
@@ -406,7 +407,7 @@ TEST(WallpaperInfoRoundTrip) {
     CHECK(w.importedAt == v.importedAt && w.width == 1920 && w.height == 1080);
     CHECK(w.frameRateNum == 30000 && w.frameRateDen == 1001 && w.durationMs == 12345 && w.hasAudio);
     CHECK(w.sha256 == v.sha256);
-    CHECK(w.videoPath.empty() && w.bytes == 0 && !w.builtIn && !w.legacy);
+    CHECK(w.videoPath.empty() && w.bytes == 0 && !w.builtIn);
 
     WallpaperInfo image;
     image.kind = WallpaperKind::Image;

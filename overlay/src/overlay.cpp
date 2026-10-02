@@ -22,7 +22,6 @@
 #include <vector>
 
 #include "animelogon/instance.h"
-#include "animelogon/library.h"
 #include "animelogon/log.h"
 #include "animelogon/machine.h"
 #include "animelogon/monitors.h"
@@ -281,23 +280,13 @@ double RefreshSeconds() {
     return 1.0 / 60.0;
 }
 
-// Development: the primary display's theme, in a window on the ordinary desktop. In legacy
-// mode without a video it plays the library's first video, trusted or not, as before themes.
+// Development: the primary display's theme, in a window on the ordinary desktop.
 plan::Plan WindowedPlan(plan::Plan plan) {
     if (plan.displays.empty()) return plan;
     plan::Display d = plan.displays.front();
     d.rect = {d.rect.left + 80, d.rect.top + 80, d.rect.left + 80 + 960, d.rect.top + 80 + 540};
     d.canvas = d.rect;
-    d.covered = true;
     d.showComponents = true;
-    if (d.legacy && d.wallpaper.source == plan::Source::None) {
-        const std::vector<animelogon::VideoInfo> videos = animelogon::ListVideos();
-        if (!videos.empty()) {
-            d.wallpaper.source = plan::Source::Video;
-            d.wallpaper.id = videos.front().id;
-            d.wallpaper.path = animelogon::VideoFilePath(d.wallpaper.id);
-        }
-    }
     plan.displays = {d};
     return plan;
 }
@@ -336,11 +325,10 @@ LiveEnd GoLiveOnce(Presenter &presenter, const Options &opt, HINSTANCE instance)
     for (const std::wstring &p : plan.problems) ALOG(L"theme: %s", p.c_str());
     for (const plan::Display &d : plan.displays) ALOG(L"theme: %s", plan::Describe(d).c_str());
 
-    // One window per covered display. `shown[i]` is what targets[i] came from.
+    // One window per display. `shown[i]` is what targets[i] came from.
     std::vector<Presenter::Target> targets;
     std::vector<const plan::Display *> shown;
     for (const plan::Display &d : plan.displays) {
-        if (!d.covered) continue;
         Presenter::Target t;
         t.rect = d.rect;
         t.canvas = d.canvas;
@@ -351,7 +339,7 @@ LiveEnd GoLiveOnce(Presenter &presenter, const Options &opt, HINSTANCE instance)
     }
 
     // A theme's wallpaper that cannot be shown after all gives way to the built-in one, as
-    // ResolveTheme does for one that does not load. Legacy displays keep their old behaviour.
+    // ResolveTheme does for one that does not load.
     auto fallBack = [&](size_t i, const std::wstring &reason) {
         ALOG(L"overlay: wallpaper %s cannot be shown (%s) -- showing the built-in wallpaper",
              targets[i].wallpaper.id.c_str(), reason.c_str());
@@ -377,6 +365,12 @@ LiveEnd GoLiveOnce(Presenter &presenter, const Options &opt, HINSTANCE instance)
                 ALOG(L"overlay: %s could not be opened", w.id.c_str());
                 unplayable.insert(w.id);
             }
+        }
+    };
+    auto replaceUnplayable = [&] {
+        for (size_t i = 0; i < targets.size(); ++i) {
+            const plan::Wallpaper &w = targets[i].wallpaper;
+            if (w.source == plan::Source::Video && !players.count(w.id)) fallBack(i, L"it could not be opened");
         }
     };
 
@@ -406,30 +400,15 @@ LiveEnd GoLiveOnce(Presenter &presenter, const Options &opt, HINSTANCE instance)
     const bool cover = !opt.windowed && !targets.empty() && (allReady || still);
     if (!cover) {
         openPlayers();
-        if (!opt.windowed) {
-            // A display whose video cannot be opened is left to Windows, as before themes, or
-            // with a theme gets the built-in wallpaper.
-            std::vector<Presenter::Target> keptTargets;
-            std::vector<const plan::Display *> keptShown;
-            for (size_t i = 0; i < targets.size(); ++i) {
-                const plan::Wallpaper &w = targets[i].wallpaper;
-                if (w.source == plan::Source::Video && !players.count(w.id)) {
-                    if (shown[i]->legacy) continue;
-                    fallBack(i, L"it could not be opened");
-                }
-                keptTargets.push_back(targets[i]);
-                keptShown.push_back(shown[i]);
-            }
-            targets.swap(keptTargets);
-            shown.swap(keptShown);
-        }
+        // A display whose video cannot be opened gets the built-in wallpaper.
+        if (!opt.windowed) replaceUnplayable();
     }
     if (presenter.DeviceLost()) {
         ALOG(L"overlay: the graphics device was lost -- exiting so a fresh one starts");
         return LiveEnd::Leave;
     }
     if (targets.empty()) {
-        ALOG(L"overlay: no video to show -- leaving the screen to Windows");
+        ALOG(L"overlay: no displays to cover -- leaving the screen to Windows");
         return LiveEnd::Dismissed;  // park until the screen is used
     }
 
@@ -520,7 +499,7 @@ LiveEnd GoLiveOnce(Presenter &presenter, const Options &opt, HINSTANCE instance)
                     auto it = byKey.find(c.key);
                     if (it == byKey.end()) {
                         size_t index = kNone;
-                        if (!layer.Add(c.drawing, settings.clock.style, format, &index)) {
+                        if (!layer.Add(c.drawing, settings.clock, format, &index)) {
                             ALOG(L"components: %s could not be set up -- left out", c.key.c_str());
                             index = kNone;
                         }
@@ -570,25 +549,13 @@ LiveEnd GoLiveOnce(Presenter &presenter, const Options &opt, HINSTANCE instance)
 
     if (cover) {
         openPlayers();
-        for (size_t i = 0; i < targets.size(); ++i) {
-            const plan::Wallpaper &w = targets[i].wallpaper;
-            if (w.source == plan::Source::Video && !players.count(w.id) && !shown[i]->legacy)
-                fallBack(i, L"it could not be opened");
-        }
+        replaceUnplayable();
     }
-    // Only legacy displays can be left with nothing to show: a video that could not be opened.
-    bool anything = opt.windowed;
-    for (const Presenter::Target &t : targets)
-        anything = anything || t.wallpaper.source != plan::Source::Video || players.count(t.wallpaper.id) != 0;
     bool done = false;
     LiveEnd end = LiveEnd::Leave;
     if (presenter.DeviceLost()) {
         ALOG(L"overlay: the graphics device was lost -- exiting so a fresh one starts");
         done = true;
-    } else if (!anything) {
-        ALOG(L"overlay: no video to show -- leaving the screen to Windows");
-        done = true;
-        end = LiveEnd::Dismissed;
     }
 
     // The audio configuration is global (the audio system's own); the only source a theme has

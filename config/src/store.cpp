@@ -6,7 +6,6 @@
 
 #include "animelogon/bitmap.h"
 #include "animelogon/components.h"
-#include "animelogon/library.h"
 #include "animelogon/log.h"
 #include "animelogon/paths.h"
 #include "animelogon/secure.h"

@@ -29,7 +29,6 @@ std::wstring DataDir() {
 std::wstring LogDir() { return DataDir() + L"\\logs"; }
 std::wstring LogPath(const wchar_t *name) { return LogDir() + L"\\" + name; }
 std::wstring SettingsPath() { return DataDir() + L"\\settings.ini"; }
-std::wstring LibraryDir() { return DataDir() + L"\\videos"; }
 std::wstring BackgroundPath() { return DataDir() + L"\\background.png"; }
 std::wstring PausedMarkerPath() { return DataDir() + L"\\paused"; }
 

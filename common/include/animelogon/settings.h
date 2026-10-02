@@ -24,7 +24,7 @@ enum class MonitorMode {
     PerMonitor, // each display shows its own theme
 };
 
-// How a wallpaper fills its display: a theme's fit (and the legacy `scaling`).
+// How a wallpaper fills its display: a theme's fit.
 enum class Scaling {
     Fill,     // cover the display, cropping the edges
     Fit,      // show the whole wallpaper, with bars
@@ -32,7 +32,7 @@ enum class Scaling {
 };
 
 // Which displays components are drawn on. Auto is the display Windows puts its password box on.
-using ComponentDisplays = ClockDisplays;
+enum class ComponentDisplays { Auto, Primary, All };
 
 struct AudioSource {
     bool enabled = true;
@@ -61,49 +61,37 @@ struct ThemeOverrides {
     std::map<std::wstring, InstanceOverrides> instances;  // by instance id
 };
 
+// Every global key has a value; a key that is missing or malformed in the file keeps the
+// default given here.
 struct Settings {
     // --- Global --------------------------------------------------------------------------
+    std::wstring theme = L"default";  // `theme`: a theme id, or the built-in "default"
     MonitorMode monitorMode = MonitorMode::Duplicate;
-    // Monitor key -> the theme that display shows in PerMonitor mode. Transitional: the value may
-    // be a legacy video id instead; ResolveTheme tells them apart.
+    // `screen.<monitor>`: monitor key -> the theme that display shows in PerMonitor mode. A
+    // display without one shows `theme`.
     std::map<std::wstring, std::wstring> screens;
+    bool components = true;  // `components`: false hides every component of every theme
+    ComponentDisplays componentDisplays = ComponentDisplays::Auto;  // `component_displays`
+    // `clock_hours`, `clock_ampm`, `clock_date`, `clock_language`: what the clock says,
+    // whichever theme and component show it.
+    ClockStyle clock;
     AudioSettings audio;
-    // clock.style (clock_hours, clock_ampm, clock_date, clock_language) is global. The rest of
-    // ClockSettings is legacy; see below.
-    ClockSettings clock;
 
     // --- Themes --------------------------------------------------------------------------
-    // Each of these is written back only when it was read or set, so a settings app that knows
-    // nothing of themes leaves the machine in legacy mode.
-    std::optional<std::wstring> theme;                   // `theme`: a theme id, or "default"
-    std::optional<bool> components;                      // `components`: false hides them all; default true
-    std::optional<ComponentDisplays> componentDisplays;  // `component_displays`; default Auto
     std::map<std::wstring, ThemeOverrides> themeOverrides;  // by theme id
 
     // Empty when the theme has none.
     const ThemeOverrides &OverridesFor(const std::wstring &themeId) const;
-
-    // --- Legacy --------------------------------------------------------------------------
-    // Read and written until the overlay and the settings app use themes, then removed. Without
-    // a `theme` key ResolveTheme builds, from these, the theme the overlay showed before themes.
-    // Also legacy: clock.enabled (`clock`, now `components`), clock.displays (`clock_displays`,
-    // now `component_displays`), clock.skin (`skin`) and clock.values (`skin.<id>.*`, now a
-    // theme's overrides).
-    Scaling scaling = Scaling::Fill;  // `scaling`, now a theme's fit
-    std::wstring video;               // `video`: library id; used unless a display has its own
-
-    // The video a display should play, or empty for none.
-    std::wstring VideoFor(const std::wstring &monitorKey) const;
 };
 
-// Parses the file's text. Malformed lines are reported in `problems` and ignored.
+// Parses the file's text. Malformed lines are reported in `problems` and ignored, and so is a
+// file with no well-formed `theme` line: it shows the built-in theme.
 Settings ParseSettings(const std::wstring &text, std::vector<std::wstring> *problems = nullptr);
+// Every global key, then the overrides.
 std::wstring SerializeSettings(const Settings &settings);
-// What the settings app and the installer write once themes are in use: every global key, with
-// `theme` ("default" when unset), `components` and `component_displays` always present, then the
-// overrides; none of the legacy keys (`video`, `scaling`, `skin`, `skin.<id>.*`, `clock`,
-// `clock_displays`). ParseSettings reads it back to the same theme settings.
-std::wstring SerializeThemeSettings(const Settings &settings);
+// Whether the text has a well-formed `theme` line. A settings.ini from before themes has none;
+// the installer replaces such a file with the defaults.
+bool NamesATheme(const std::wstring &text);
 
 // Reads settings.ini. Returns defaults if it is missing, and refuses a file that is not
 // administrators-only when `requireTrusted` is set.
@@ -116,5 +104,7 @@ bool IsTypedValueText(std::wstring_view value);
 const wchar_t *ToString(MonitorMode mode);
 const wchar_t *ToString(Scaling scaling);
 bool Parse(std::wstring_view text, Scaling *out);  // fill, fit or stretch
+const wchar_t *ToString(ComponentDisplays displays);
+bool Parse(std::wstring_view text, ComponentDisplays *out);  // auto, primary or all
 
 }  // namespace animelogon

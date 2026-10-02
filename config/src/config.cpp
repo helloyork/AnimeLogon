@@ -299,12 +299,10 @@ struct Config : Window {
         }
     }
 
-    // The theme the logon screen shows: `theme`, or the built-in one when that is unset or
-    // does not load.
+    // The theme the logon screen shows: `theme`, or the built-in one when that does not load.
     std::wstring CurrentTheme() const {
-        const std::wstring id = set.theme.value_or(kDefaultTheme);
         for (const ThemeRow &r : themes)
-            if (r.entry.id == id) return id;
+            if (r.entry.id == set.theme) return set.theme;
         return kDefaultTheme;
     }
 
@@ -337,11 +335,9 @@ struct Config : Window {
     }
 
     // Users may rewrite settings.ini but not create files beside it, so it is rewritten in
-    // place, held exclusively so that the overlay never reads half of it. From the first save on
-    // it names a theme, and none of the keys from before themes.
+    // place, held exclusively so that the overlay never reads half of it.
     void Save() {
-        if (!set.theme) set.theme = std::wstring(kDefaultTheme);
-        const std::string text = ToUtf8(SerializeThemeSettings(set));
+        const std::string text = ToUtf8(SerializeSettings(set));
         HANDLE h = INVALID_HANDLE_VALUE;
         for (int attempt = 0; attempt < 5; ++attempt) {
             h = CreateFileW(paths::SettingsPath().c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
@@ -528,7 +524,7 @@ struct Config : Window {
         const bool gone = code != commit::kDeclined && !ThemeExists(id);
         if (gone) {
             set.themeOverrides.erase(id);
-            if (set.theme && *set.theme == id) set.theme = std::wstring(kDefaultTheme);
+            if (set.theme == id) set.theme = kDefaultTheme;
             for (auto it = set.screens.begin(); it != set.screens.end();)
                 it = it->second == id ? set.screens.erase(it) : std::next(it);
             Save();
@@ -555,9 +551,7 @@ struct Config : Window {
 
     // --- the component instance on the clock page ------------------------------------------
     void LoadInstance() {
-        componentList.clear();
-        for (const ComponentEntry &c : ListComponents())
-            if (!c.legacy) componentList.push_back(c);
+        componentList = ListComponents();
         editTheme = CurrentTheme();
         if (!LoadTheme(editTheme, &editOwn)) editOwn = theme::Default();
         const theme::Theme edited = theme::Edited(editOwn, set.OverridesFor(editTheme));
@@ -678,7 +672,7 @@ struct Config : Window {
         SYSTEMTIME now{};
         GetLocalTime(&now);
         const skin::Values values = clockSkinId.empty() ? skin::Values{} : InstanceValues();
-        if (previewer.Render(previewBackground, skin::Resolve(clockSkin, values), set.clock.style, UserFormat(), now,
+        if (previewer.Render(previewBackground, skin::Resolve(clockSkin, values), set.clock, UserFormat(), now,
                              &preview, &previewBounds))
             ++previewVersion;
         Invalidate();
@@ -886,14 +880,14 @@ void Config::LayoutThemes() {
 
 void Config::LayoutClock() {
     previewShown = false;
-    Add(new ToggleSwitch(L"", set.components.value_or(true), [this](bool on) {
+    Add(new ToggleSwitch(L"", set.components, [this](bool on) {
             set.components = on;
             Save();
             GoTo(page);
         }))
         ->rect = PushCard(glyph::kRecent, L"显示时钟", L"在壁纸上显示时钟等组件，对所有主题生效。", 40);
-    cards.back().aside = set.components.value_or(true) ? L"开" : L"关";
-    if (!set.components.value_or(true)) return;
+    cards.back().aside = set.components ? L"开" : L"关";
+    if (!set.components) return;
     LoadInstance();
 
     // The preview keeps the background's shape, as the sign-in screen shows it.
@@ -916,26 +910,26 @@ void Config::LayoutClock() {
     // --- what the clock says, whichever component shows it ---
     PushHeading(L"时钟");
     Add(new DropDown({L"密码界面所在的显示器", L"主显示器", L"所有显示器"},
-                     (int)set.componentDisplays.value_or(ComponentDisplays::Auto), [this](int i) {
+                     (int)set.componentDisplays, [this](int i) {
                          set.componentDisplays = (ComponentDisplays)i;
                          Save();
                      }))
         ->rect = PushCard(glyph::kFullScreen, L"显示在", L"壁纸在每个屏幕上显示，时钟只在这里。", 220);
-    ClockStyle &c = set.clock.style;
+    ClockStyle &c = set.clock;
     Add(new Segmented({L"跟随区域格式", L"12 小时制", L"24 小时制"}, (int)c.hours, [this](int i) {
-            set.clock.style.hours = (ClockHours)i;
+            set.clock.hours = (ClockHours)i;
             SaveStyle();
         }))
         ->rect = PushCard(glyph::kRecent, L"时间制式", L"默认与任务栏一致。", 300);
     Add(new ToggleSwitch(L"", c.ampm, [this](bool on) {
-            set.clock.style.ampm = on;
+            set.clock.ampm = on;
             SaveStyle();
             GoTo(page);
         }))
         ->rect = PushCard(glyph::kRecent, L"显示上午/下午", L"12 小时制时，以小字显示在时间旁边。", 40);
     cards.back().aside = c.ampm ? L"开" : L"关";
     Add(new Segmented({L"星期与月日", L"完整日期", L"不显示"}, (int)c.date, [this](int i) {
-            set.clock.style.date = (ClockDate)i;
+            set.clock.date = (ClockDate)i;
             SaveStyle();
         }))
         ->rect = PushCard(glyph::kCalendar, L"日期", L"完整日期带年份。", 280);
@@ -947,7 +941,7 @@ void Config::LayoutClock() {
             if (c.locale == kClockLanguages[i].value) sel = (int)i;
         }
         Add(new DropDown(names, sel, [this](int i) {
-                set.clock.style.locale = kClockLanguages[i].value;
+                set.clock.locale = kClockLanguages[i].value;
                 SaveStyle();
             }))
             ->rect = PushCard(glyph::kGlobe, L"语言", L"时间和日期的文字语言。", 200);

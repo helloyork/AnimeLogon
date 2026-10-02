@@ -1,8 +1,7 @@
 // The component format: what is drawn over the wallpaper, declared in a small XML file whose
-// root element is <component> (<skin>, its name from before themes, is still read for now).
-// The code calls a component a skin. A component is structure (elements and their attributes)
-// plus settings the person can adjust; the settings' values come from a theme and from
-// settings.ini. Nothing in a component computes: an attribute is either a literal, or "$id"
+// root element is <component>. The code calls a component a skin. A component is structure
+// (elements and their attributes) plus settings the person can adjust; the settings' values
+// come from a theme and from settings.ini. Nothing in a component computes: an attribute is either a literal, or "$id"
 // for the value of one of its settings, and text may name data such as {time}. Beyond the
 // component's own settings, any attribute that shapes how an element looks can be adjusted by
 // hand, element by element; those values come from the same places.
@@ -58,9 +57,6 @@ std::wstring ValueOf(const Setting &setting, const Values &values);
 // The shape of a setting id. "ref" and "visible" have this shape but no component may use
 // them: settings.ini gives them to the component instance itself.
 bool IsSettingId(const std::wstring &id);
-// "default" or 16 lowercase hex digits. Legacy: the ids of the skins\ store and the `skin`
-// key; components have their own ids (components.h).
-bool IsSkinId(const std::wstring &id);
 
 // --- adjusting one attribute of one element ----------------------------------------------
 //

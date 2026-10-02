@@ -19,7 +19,6 @@ bool ParseName(const std::wstring &text, const wchar_t *const (&names)[N], E *ou
     return false;
 }
 
-const wchar_t *const kDisplays[] = {L"auto", L"primary", L"all"};
 const wchar_t *const kHours[] = {L"auto", L"12", L"24"};
 const wchar_t *const kDates[] = {L"weekday", L"long", L"none"};
 
@@ -268,14 +267,6 @@ std::wstring FillText(const std::wstring &text, const RegionalFormat &format, co
     return out;
 }
 
-const skin::Values &ClockSettings::ValuesFor(const std::wstring &skinId) const {
-    static const skin::Values none;
-    const auto it = values.find(skinId);
-    return it == values.end() ? none : it->second;
-}
-
-const wchar_t *ToString(ClockDisplays displays) { return kDisplays[(int)displays]; }
-bool Parse(const std::wstring &text, ClockDisplays *out) { return ParseName(text, kDisplays, out); }
 const wchar_t *ToString(ClockHours hours) { return kHours[(int)hours]; }
 bool Parse(const std::wstring &text, ClockHours *out) { return ParseName(text, kHours, out); }
 const wchar_t *ToString(ClockDate date) { return kDates[(int)date]; }

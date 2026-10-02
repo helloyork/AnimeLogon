@@ -40,7 +40,6 @@ struct WallpaperInfo {
     std::wstring videoPath, audioPath, imagePath;  // empty where the wallpaper has no such file
     uint64_t bytes = 0;                            // the payload on disk
     bool builtIn = false;                          // "default": no files, drawn by AnimeLogon
-    bool legacy = false;                           // transitional: read from the videos\ library
 };
 
 constexpr const wchar_t *kDefaultWallpaper = L"default";
@@ -61,23 +60,24 @@ std::wstring WallpaperVideoPath(const std::wstring &id);  // video.mp4
 std::wstring WallpaperAudioPath(const std::wstring &id);  // audio.wav
 std::wstring WallpaperImagePath(const std::wstring &id);  // image.bmp
 
-// wallpaper.ini, in the style of the video library's info.ini: one `key = value` per line,
-// unknown keys ignored. `type`, `width` and `height` are required, and for a video also
-// `frame_rate` and `duration_ms`. `why` says what was wrong.
+// wallpaper.ini: one `key = value` per line, unknown keys ignored. `type`, `width` and `height`
+// are required, and for a video also `frame_rate` and `duration_ms`. `why` says what was wrong.
 std::wstring SerializeWallpaperInfo(const WallpaperInfo &info);
 bool ParseWallpaperInfo(const std::wstring &text, WallpaperInfo *info, std::wstring *why = nullptr);
+
+// audio.wav as the transcoder writes it: a 44-byte header (PCM, 48 kHz, 16-bit, stereo)
+// followed by exactly the data it declares, and nothing else.
+constexpr size_t kWavHeaderBytes = 44;
+bool IsCanonicalWav(const uint8_t *header, size_t headerBytes, uint64_t fileBytes);
+// video.mp4 starts with an ftyp box.
+bool LooksLikeMp4(const uint8_t *head, size_t headBytes);
 
 // The wallpaper `id` names, with its file paths filled in: the built-in "default", or an entry
 // of wallpapers\ whose wallpaper.ini parses and whose files are administrators-only
 // (secure::IsTrusted).
-//
-// Transitional, until the settings app imports into wallpapers\: a wallpaper id that is not in
-// wallpapers\ but is in the videos\ library loads from there as a video wallpaper (`legacy`),
-// with the same checks.
 bool LoadWallpaper(const std::wstring &id, WallpaperInfo *info, std::wstring *why = nullptr);
 
-// The built-in wallpaper first, then the entries of wallpapers\ that load, oldest first, then
-// (transitional) the videos\ library's, oldest first.
+// The built-in wallpaper first, then the entries of wallpapers\ that load, oldest first.
 std::vector<WallpaperInfo> ListWallpapers();
 
 }  // namespace animelogon

@@ -7,7 +7,7 @@
 //   - metadata is parsed and written afresh, never copied; a component or theme is written in
 //     its normalised form;
 //   - payloads are checked for the one shape the logon screen reads: an MP4, canonical WAV
-//     (library.h), a canonical bitmap of the size wallpaper.ini declares (bitmap.h);
+//     (wallpaper.h), a canonical bitmap of the size wallpaper.ini declares (bitmap.h);
 //   - a wallpaper's sha256 is computed here from its payload, never taken from the staging;
 //   - an id is never reused: a command that would write over an existing entry fails;
 //   - on any failure everything the command wrote is removed again.
