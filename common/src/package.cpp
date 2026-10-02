@@ -5,10 +5,12 @@
 
 #include "animelogon/image.h"
 #include "animelogon/text.h"
+#include "animelogon/theme.h"
 
 namespace animelogon::package {
 
 static_assert(kMaxPictureBytes == image::kMaxSourceBytes, "a packed picture must be one the importer accepts");
+static_assert(kMaxXmlBytes == theme::kMaxBytes, "a packed theme.xml must be one the parser accepts");
 
 namespace {
 
@@ -82,8 +84,6 @@ std::wstring Shown(std::string_view name) {
     }
     return out + (name.size() > 80 ? L"...\"" : L"\"");
 }
-
-bool IsComponentChar(char c) { return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-'; }
 
 bool SameNoCase(std::string_view a, std::string_view b) {
     if (a.size() != b.size()) return false;
@@ -433,23 +433,19 @@ bool WriteArchive(const std::vector<Item> &items, Sink &sink, std::wstring *why)
 }  // namespace
 
 bool Classify(std::string_view name, Kind *kind) {
+    // Every allowed name is printable ASCII, so widening byte by byte is exact, and the
+    // wallpaper and component names are checked by the same functions that check theme.xml's
+    // refs: an entry is allowed exactly when a package theme could name it.
+    if (name.empty() || name.size() > 64) return false;
+    for (char c : name)
+        if ((unsigned char)c < 32 || (unsigned char)c > 126) return false;
+    const std::wstring wide(name.begin(), name.end());
     Kind k = Kind::Theme;
-    if (name == "theme.xml") {
-        k = Kind::Theme;
-    } else if (name == "wallpaper.mp4" || name == "wallpaper.png" || name == "wallpaper.jpg" ||
-               name == "wallpaper.webp") {
-        k = Kind::Wallpaper;
-    } else if (name == "preview.png") {
-        k = Kind::Preview;
-    } else {
-        constexpr std::string_view dir = "components/", ext = ".xml";
-        if (name.size() <= dir.size() + ext.size() || name.substr(0, dir.size()) != dir ||
-            name.substr(name.size() - ext.size()) != ext)
-            return false;
-        const std::string_view stem = name.substr(dir.size(), name.size() - dir.size() - ext.size());
-        if (stem.size() > 32 || !std::all_of(stem.begin(), stem.end(), IsComponentChar)) return false;
-        k = Kind::Component;
-    }
+    if (wide == L"theme.xml") k = Kind::Theme;
+    else if (theme::IsPackageWallpaperRef(wide)) k = Kind::Wallpaper;
+    else if (wide == L"preview.png") k = Kind::Preview;
+    else if (theme::IsPackageComponentRef(wide)) k = Kind::Component;
+    else return false;
     if (kind) *kind = k;
     return true;
 }

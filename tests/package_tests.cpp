@@ -233,6 +233,9 @@ TEST(PackageNames) {
     CHECK(package::Classify("components/" + std::string(32, 'a') + ".xml", nullptr));
     CHECK(!package::Classify("components/" + std::string(33, 'a') + ".xml", nullptr));
     CHECK(!package::Classify("components/.xml", nullptr));
+    CHECK(!package::Classify("components/-a.xml", nullptr));
+    CHECK(!package::Classify("components/_a.xml", nullptr));
+    CHECK(!package::Classify("components/caf\xc3\xa9.xml", nullptr));
     CHECK(!package::Classify("components/Clock.xml", nullptr));
     CHECK(!package::Classify("components/a.b.xml", nullptr));
     CHECK(!package::Classify("components/sub/a.xml", nullptr));

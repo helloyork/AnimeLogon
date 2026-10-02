@@ -13,8 +13,10 @@
 //                                   kMaxPictureBytes, a video up to the archive's limit.
 //                                   Whether theme.xml and the entries agree is the
 //                                   importer's check, not the reader's.
-//   components/<name>.xml           0 to kMaxComponents, <name> matching [a-z0-9_-]{1,32};
-//                                   each at most kMaxXmlBytes
+//   components/<name>.xml           0 to kMaxComponents, <name> matching
+//                                   [a-z0-9][a-z0-9_-]{0,31}; each at most kMaxXmlBytes
+//   (The wallpaper and component names are checked by theme::IsPackageWallpaperRef and
+//   theme::IsPackageComponentRef, so an entry is allowed exactly when theme.xml could name it.)
 //   preview.png                     optional; at most kMaxPreviewBytes
 //
 // The reader refuses, saying why in one line for the log:
