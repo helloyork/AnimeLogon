@@ -172,7 +172,9 @@ public:
 
     bool Run() {
         const xml::Element &root = skin_->document;
-        if (root.name != L"skin") return Fail(root, L"the root element must be <skin>");
+        // <skin> is the root's name from before components; transitional, until the overlay and
+        // the settings app use themes. Normalize always writes <component>.
+        if (root.name != L"component" && root.name != L"skin") return Fail(root, L"the root element must be <component>");
         for (const auto &[name, value] : root.attributes) {
             if (name == L"format") {
                 if (value != L"1") return Fail(root, L"unsupported format " + value);
@@ -184,7 +186,7 @@ public:
                 return Fail(root, L"unknown attribute " + name);
             }
         }
-        if (!root.Find(L"format") || skin_->name.empty()) return Fail(root, L"<skin> needs format and name");
+        if (!root.Find(L"format") || skin_->name.empty()) return Fail(root, L"<" + root.name + L"> needs format and name");
         size_t panels = 0;
         bool settingsSeen = false;
         for (const xml::Element &e : root.children) {
@@ -237,6 +239,9 @@ private:
                 else return Fail(e, L"unknown attribute " + name);
             }
             if (!IsSettingId(s.id)) return Fail(e, L"a bad setting id");
+            // settings.ini keeps a theme's edits to one of its components under
+            // theme.<theme>.<instance>.<key>, where "ref" and "visible" are the instance's own.
+            if (s.id == L"ref" || s.id == L"visible") return Fail(e, L"setting id " + s.id + L" is reserved");
             if (skin_->Find(s.id)) return Fail(e, L"setting " + s.id + L" is repeated");
             if (!IsLabel(s.label)) return Fail(e, L"setting " + s.id + L" needs a label");
             if (!s.detail.empty() && !IsLabel(s.detail, kMaxDetail)) return Fail(e, L"setting " + s.id + L" has a bad detail");
@@ -639,6 +644,15 @@ bool IsAdjustmentValue(const std::wstring &key, const std::wstring &value) {
     return spec && Check(*spec, value);
 }
 
+bool Accepts(const Skin &skin, const std::wstring &key, const std::wstring &value) {
+    // Setting ids never contain a dot and adjustment keys always do.
+    if (const Setting *setting = skin.Find(key)) return IsValue(*setting, value);
+    std::wstring element, attribute;
+    if (!KeyShape(key, &element, &attribute)) return false;
+    const xml::Element *e = ElementAt(skin, key.substr(0, key.rfind(L'.')));
+    return e && e->name == element && IsAdjustmentValue(key, value);
+}
+
 std::vector<std::wstring> AdjustmentsOf(const Skin &skin, const std::wstring &setting) {
     std::vector<std::wstring> keys;
     for (const Part &part : Parts(skin))
@@ -663,7 +677,11 @@ bool Parse(std::string_view utf8, Skin *skin, std::wstring *error) {
     return true;
 }
 
-std::string Normalize(const Skin &skin) { return xml::Write(skin.document); }
+std::string Normalize(const Skin &skin) {
+    xml::Element root = skin.document;
+    root.name = L"component";
+    return xml::Write(root);
+}
 
 Resolved Resolve(const Skin &skin, const Values &values) {
     Resolved out;
@@ -731,8 +749,8 @@ Resolved Resolve(const Skin &skin, const Values &values) {
 
 std::string DefaultText() {
     return R"(<?xml version="1.0" encoding="utf-8"?>
-<!-- The clock that comes with AnimeLogon. Export it from the settings app to start a skin of your own. -->
-<skin format="1" name="时钟" author="AnimeLogon">
+<!-- The clock that comes with AnimeLogon. Export it from the settings app to start a component of your own. -->
+<component format="1" name="时钟" author="AnimeLogon">
   <settings>
     <choice id="position" label="位置" detail="边距随分辨率自动调整。" default="top">
       <option value="top-left" label="左上"/>
@@ -761,7 +779,7 @@ std::string DefaultText() {
     <shadow label="阴影" blur="0.08" opacity="0" y="0.02"/>
     <backdrop opacity="$shade"/>
   </panel>
-</skin>
+</component>
 )";
 }
 

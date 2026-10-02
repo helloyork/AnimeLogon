@@ -27,9 +27,13 @@ struct ClockStyle {
 };
 
 struct ClockSettings {
+    // Legacy, until the overlay and the settings app use themes (see settings.h): `clock`,
+    // `clock_displays`, `skin` and `skin.<id>.*`.
     bool enabled = true;
     ClockDisplays displays = ClockDisplays::Auto;
+    // Global, whatever the theme: `clock_hours`, `clock_ampm`, `clock_date`, `clock_language`.
     ClockStyle style;
+    // Legacy, as above.
     std::wstring skin = L"default";               // "default" or a skin's library id
     std::map<std::wstring, skin::Values> values;  // by skin id
 

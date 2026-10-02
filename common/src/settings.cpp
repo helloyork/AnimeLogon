@@ -5,11 +5,14 @@
 
 #include <windows.h>
 
+#include "animelogon/components.h"
 #include "animelogon/library.h"
 #include "animelogon/log.h"
 #include "animelogon/paths.h"
 #include "animelogon/secure.h"
 #include "animelogon/text.h"
+#include "animelogon/theme.h"
+#include "animelogon/wallpaper.h"
 
 namespace animelogon {
 namespace {
@@ -19,6 +22,7 @@ constexpr int kReadAttempts = 5;
 constexpr DWORD kRetryMs = 50;
 constexpr const wchar_t *kScreenPrefix = L"screen.";
 constexpr const wchar_t *kSkinPrefix = L"skin.";
+constexpr const wchar_t *kThemePrefix = L"theme.";
 
 bool ParseBool(std::wstring_view v, bool *out) {
     if (EqualsNoCase(v, L"true") || v == L"1") return *out = true, true;
@@ -33,10 +37,42 @@ bool ParseVolume(std::wstring_view v, int *out) {
     return true;
 }
 
-bool IsValueText(std::wstring_view value) {
-    if (value.size() > 128) return false;
-    for (wchar_t c : value)
-        if (c < 0x20 || c == 0x7F) return false;
+// theme.<theme id>.wallpaper, .fit, .<instance>.ref, .<instance>.visible, .<instance>.<setting
+// id> or .<instance>.<element>.<attribute>, `rest` being what follows "theme.". Values for a
+// component are checked against it when the theme is resolved.
+bool ParseThemeOverride(std::wstring_view rest, std::wstring_view value, Settings *s) {
+    const size_t dot = rest.find(L'.');
+    if (dot == std::wstring_view::npos) return false;
+    const std::wstring themeId(rest.substr(0, dot));
+    const std::wstring_view what = rest.substr(dot + 1);
+    if (!IsThemeId(themeId)) return false;
+    if (what == L"wallpaper") {
+        if (!IsWallpaperRef(value)) return false;
+        s->themeOverrides[themeId].wallpaper = std::wstring(value);
+        return true;
+    }
+    if (what == L"fit") {
+        Scaling fit = Scaling::Fill;
+        if (!Parse(value, &fit)) return false;
+        s->themeOverrides[themeId].fit = fit;
+        return true;
+    }
+    const size_t inner = what.find(L'.');
+    if (inner == std::wstring_view::npos) return false;
+    const std::wstring instance(what.substr(0, inner));
+    const std::wstring name(what.substr(inner + 1));
+    if (!theme::IsInstanceId(instance)) return false;
+    if (name == L"ref") {
+        if (!IsComponentId(std::wstring(value))) return false;
+        s->themeOverrides[themeId].instances[instance].ref = std::wstring(value);
+    } else if (name == L"visible") {
+        bool visible = true;
+        if (!ParseBool(value, &visible)) return false;
+        s->themeOverrides[themeId].instances[instance].visible = visible;
+    } else {
+        if (!theme::IsSetKey(name) || !IsTypedValueText(value)) return false;
+        s->themeOverrides[themeId].instances[instance].values[name] = value;
+    }
     return true;
 }
 
@@ -63,6 +99,27 @@ const wchar_t *ToString(Scaling scaling) {
     case Scaling::Stretch: return L"stretch";
     default: return L"fill";
     }
+}
+
+bool Parse(std::wstring_view text, Scaling *out) {
+    if (text == L"fill") *out = Scaling::Fill;
+    else if (text == L"fit") *out = Scaling::Fit;
+    else if (text == L"stretch") *out = Scaling::Stretch;
+    else return false;
+    return true;
+}
+
+bool IsTypedValueText(std::wstring_view value) {
+    if (value.size() > 128) return false;
+    for (wchar_t c : value)
+        if (c < 0x20 || c == 0x7F) return false;
+    return true;
+}
+
+const ThemeOverrides &Settings::OverridesFor(const std::wstring &themeId) const {
+    static const ThemeOverrides none;
+    const auto it = themeOverrides.find(themeId);
+    return it == themeOverrides.end() ? none : it->second;
 }
 
 std::wstring Settings::VideoFor(const std::wstring &monitorKey) const {
@@ -106,9 +163,23 @@ Settings ParseSettings(const std::wstring &text, std::vector<std::wstring> *prob
             ok = value.empty() || IsVideoId(value);
             if (ok) s.video = value;
         } else if (key.substr(0, wcslen(kScreenPrefix)) == kScreenPrefix) {
+            // A theme id, or (transitional) a legacy video id, which has the same shape.
             const std::wstring_view monitor = key.substr(wcslen(kScreenPrefix));
-            ok = IsMonitorKey(monitor) && (value.empty() || IsVideoId(value));
+            ok = IsMonitorKey(monitor) && (value.empty() || IsThemeId(std::wstring(value)));
             if (ok && !value.empty()) s.screens[std::wstring(monitor)] = value;
+        } else if (key == L"theme") {
+            ok = IsThemeId(std::wstring(value));
+            if (ok) s.theme = std::wstring(value);
+        } else if (key == L"components") {
+            bool on = true;
+            ok = ParseBool(value, &on);
+            if (ok) s.components = on;
+        } else if (key == L"component_displays") {
+            ComponentDisplays displays = ComponentDisplays::Auto;
+            ok = Parse(std::wstring(value), &displays);
+            if (ok) s.componentDisplays = displays;
+        } else if (key.substr(0, wcslen(kThemePrefix)) == kThemePrefix) {
+            ok = ParseThemeOverride(key.substr(wcslen(kThemePrefix)), value, &s);
         } else if (key == L"audio") {
             ok = ParseBool(value, &s.audio.enabled);
         } else if (key == L"audio_device") {
@@ -143,7 +214,7 @@ Settings ParseSettings(const std::wstring &text, std::vector<std::wstring> *prob
             const size_t dot = rest.find(L'.');
             const std::wstring name = dot == std::wstring_view::npos ? L"" : std::wstring(rest.substr(dot + 1));
             ok = dot != std::wstring_view::npos && skin::IsSkinId(std::wstring(rest.substr(0, dot))) &&
-                 (skin::IsSettingId(name) || skin::IsAdjustmentKey(name)) && IsValueText(value);
+                 (skin::IsSettingId(name) || skin::IsAdjustmentKey(name)) && IsTypedValueText(value);
             if (ok) s.clock.values[std::wstring(rest.substr(0, dot))][std::wstring(rest.substr(dot + 1))] = value;
         } else {
             if (problems) problems->push_back(Format(L"line %zu: unknown key '%.*s'", lineNo, (int)key.size(), key.data()));
@@ -158,6 +229,11 @@ Settings ParseSettings(const std::wstring &text, std::vector<std::wstring> *prob
 std::wstring SerializeSettings(const Settings &s) {
     std::wstring out = L"# AnimeLogon settings. Edit through the AnimeLogon settings app.\r\n";
     out += L"monitor_mode = " + std::wstring(ToString(s.monitorMode)) + L"\r\n";
+    // The theme keys only when they were read or set, so that a settings app that knows nothing
+    // of themes keeps the machine in legacy mode.
+    if (s.theme) out += L"theme = " + *s.theme + L"\r\n";
+    if (s.components) out += L"components = " + std::wstring(*s.components ? L"true" : L"false") + L"\r\n";
+    if (s.componentDisplays) out += L"component_displays = " + std::wstring(ToString(*s.componentDisplays)) + L"\r\n";
     out += L"scaling = " + std::wstring(ToString(s.scaling)) + L"\r\n";
     out += L"video = " + s.video + L"\r\n";
     for (const auto &[monitor, id] : s.screens) out += kScreenPrefix + monitor + L" = " + id + L"\r\n";
@@ -176,6 +252,16 @@ std::wstring SerializeSettings(const Settings &s) {
     out += L"skin = " + c.skin + L"\r\n";
     for (const auto &[id, values] : c.values)
         for (const auto &[setting, value] : values) out += kSkinPrefix + id + L"." + setting + L" = " + value + L"\r\n";
+    for (const auto &[themeId, o] : s.themeOverrides) {
+        const std::wstring prefix = kThemePrefix + themeId + L".";
+        if (o.wallpaper) out += prefix + L"wallpaper = " + *o.wallpaper + L"\r\n";
+        if (o.fit) out += prefix + L"fit = " + ToString(*o.fit) + L"\r\n";
+        for (const auto &[instance, io] : o.instances) {
+            if (io.ref) out += prefix + instance + L".ref = " + *io.ref + L"\r\n";
+            if (io.visible) out += prefix + instance + L".visible = " + (*io.visible ? L"true" : L"false") + L"\r\n";
+            for (const auto &[key, value] : io.values) out += prefix + instance + L"." + key + L" = " + value + L"\r\n";
+        }
+    }
     return out;
 }
 
