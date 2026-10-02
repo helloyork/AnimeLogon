@@ -1,11 +1,13 @@
-// Skins: what is drawn over the video, declared in a small XML file. A skin is structure
-// (elements and their attributes) plus settings the person can adjust; the settings' values
-// live in settings.ini. Nothing in a skin computes: an attribute is either a literal, or
-// "$id" for the value of one of the skin's settings, and text may name data such as {time}.
-// Beyond the skin's own settings, any attribute that shapes how an element looks can be
-// adjusted by hand, element by element; those values live in settings.ini too.
+// The component format: what is drawn over the wallpaper, declared in a small XML file whose
+// root element is <component> (<skin>, its name from before themes, is still read for now).
+// The code calls a component a skin. A component is structure (elements and their attributes)
+// plus settings the person can adjust; the settings' values come from a theme and from
+// settings.ini. Nothing in a component computes: an attribute is either a literal, or "$id"
+// for the value of one of its settings, and text may name data such as {time}. Beyond the
+// component's own settings, any attribute that shapes how an element looks can be adjusted by
+// hand, element by element; those values come from the same places.
 //
-// A skin's structure can put any words on the screen, so it is only read from where
+// A component's structure can put any words on the screen, so it is only read from where
 // administrators alone can write. Setting values and adjustments carry no free text: a
 // colour, a number in range, a font, or one of a fixed set of words.
 #pragma once
@@ -44,7 +46,8 @@ struct Skin {
 using Values = std::map<std::wstring, std::wstring>;
 
 bool Parse(std::string_view utf8, Skin *skin, std::wstring *error);
-// The skin as it is stored: parsed and written again, so nothing unchecked survives.
+// The skin as it is stored: parsed and written again, so nothing unchecked survives. The root
+// element is always written as <component>.
 std::string Normalize(const Skin &skin);
 // The skin that comes with AnimeLogon.
 const Skin &Default();
@@ -52,8 +55,12 @@ std::string DefaultText();
 
 bool IsValue(const Setting &setting, const std::wstring &value);
 std::wstring ValueOf(const Setting &setting, const Values &values);
+// The shape of a setting id. "ref" and "visible" have this shape but no component may use
+// them: settings.ini gives them to the component instance itself.
 bool IsSettingId(const std::wstring &id);
-bool IsSkinId(const std::wstring &id);  // "default" or 16 lowercase hex digits
+// "default" or 16 lowercase hex digits. Legacy: the ids of the skins\ store and the `skin`
+// key; components have their own ids (components.h).
+bool IsSkinId(const std::wstring &id);
 
 // --- adjusting one attribute of one element ----------------------------------------------
 //
@@ -84,6 +91,10 @@ std::vector<Part> Parts(const Skin &skin);
 std::wstring Effective(const Skin &skin, const Values &values, const Adjustment &adjustment);
 bool IsAdjustmentKey(const std::wstring &key);
 bool IsAdjustmentValue(const std::wstring &key, const std::wstring &value);
+// Whether `value` may be given for `key` in this skin: one of its settings with a value that
+// setting can take, or an adjustment of an element the skin has with a value its attribute
+// takes.
+bool Accepts(const Skin &skin, const std::wstring &key, const std::wstring &value);
 // The adjustments of attributes that take their value from `setting`.
 std::vector<std::wstring> AdjustmentsOf(const Skin &skin, const std::wstring &setting);
 

@@ -1,5 +1,8 @@
 // Imported skins: %ProgramData%\AnimeLogon\skins\<id>\skin.xml, as the settings app normalised
 // it. Like the videos, they are written only by its elevated helper.
+//
+// Legacy: components\ (components.h) takes the place of this store. It is still read until the
+// overlay and the settings app use themes.
 #pragma once
 
 #include <string>
