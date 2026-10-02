@@ -858,7 +858,7 @@ void Config::LayoutThemes() {
     } else {
         Button *media = Add(new Button(L"导入…", ButtonStyle::Accent, [this] { StartImport(ImportKind::Media); }));
         media->rect = PushCard(glyph::kAdd, L"导入视频或图片",
-                               L"用一个视频或一张图片新建主题，带默认时钟。视频会转码为登录界面使用的格式。",
+                               L"用视频或图片新建主题，带默认时钟。视频会自动转码。",
                                media->PreferredWidth(measure));
         Button *pack = Add(new Button(L"导入…", ButtonStyle::Standard, [this] { StartImport(ImportKind::Package); }));
         pack->rect = PushCard(glyph::kDownload, L"导入主题包", L"导入 .altheme 文件，包含壁纸和组件。",
@@ -1252,7 +1252,7 @@ void Config::Layout() {
                               set.themeOverrides[current].fit = (Scaling)i;
                               Save();
                           }))
-            ->rect = PushCard(glyph::kView, L"缩放方式", L"当前主题的壁纸如何铺满屏幕。填充会裁剪边缘，适应会留出黑边。", 180);
+            ->rect = PushCard(glyph::kView, L"当前主题的缩放方式", L"填充会裁剪边缘，适应会留出黑边。", 180);
         if (set.monitorMode == MonitorMode::PerMonitor && monitors.size() > 1) {
             PushHeading(L"各显示器");
             for (const MonitorInfo &m : monitors) {
