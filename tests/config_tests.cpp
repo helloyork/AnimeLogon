@@ -734,8 +734,8 @@ TEST(ExportBakesOverridesAndIsDeterministic) {
     o.instances[L"small"].visible = false;
     std::vector<package::Item> items, again;
     std::wstring error;
-    CHECK(exporter::Build(r.themeId, s, disk, &items, &error));
-    CHECK(exporter::Build(r.themeId, s, disk, &again, &error));
+    CHECK(exporter::Build(r.themeId, s, disk, scratch, &items, &error));
+    CHECK(exporter::Build(r.themeId, s, disk, scratch, &again, &error));
     std::vector<uint8_t> one, two;
     CHECK(package::WriteToMemory(items, &one, nullptr) && package::WriteToMemory(again, &two, nullptr) && one == two);
 
@@ -769,10 +769,10 @@ TEST(ExportBakesOverridesAndIsDeterministic) {
     CHECK(back2.wallpaperReused && back2.wallpaperId == r.wallpaperId && back2.componentsReused.size() == 2);
 
     // The built-in theme packs no files.
-    CHECK(exporter::Build(L"default", Settings{}, disk, &items, &error) && items.size() == 1 && items[0].name == "theme.xml");
+    CHECK(exporter::Build(L"default", Settings{}, disk, scratch, &items, &error) && items.size() == 1 && items[0].name == "theme.xml");
     // A theme whose wallpaper is gone says so.
     s.themeOverrides[r.themeId].wallpaper = L"5555555555555555";
-    CHECK(!exporter::Build(r.themeId, s, disk, &items, &error) && !error.empty());
+    CHECK(!exporter::Build(r.themeId, s, disk, scratch, &items, &error) && !error.empty());
     secure::RemoveTree(scratch);
 }
 

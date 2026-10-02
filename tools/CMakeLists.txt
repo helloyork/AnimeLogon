@@ -5,6 +5,7 @@ target_link_libraries(transcode_cli PRIVATE animelogon_common mfplat mfreadwrite
 # The settings app's importer and exporter without its window, for testing them on a machine.
 add_executable(import_cli import_cli.cpp
     ${PROJECT_SOURCE_DIR}/config/src/exporter.cpp
+    ${PROJECT_SOURCE_DIR}/config/src/remux.cpp
     ${PROJECT_SOURCE_DIR}/config/src/staging.cpp
     ${PROJECT_SOURCE_DIR}/config/src/store.cpp
     ${PROJECT_SOURCE_DIR}/config/src/transcode.cpp)

@@ -1,5 +1,7 @@
 #include "exporter.h"
 
+#include <windows.h>
+
 #include <map>
 
 #include "animelogon/bitmap.h"
@@ -11,6 +13,8 @@
 #include "animelogon/text.h"
 #include "animelogon/theme.h"
 #include "animelogon/wallpaper.h"
+
+#include "remux.h"
 
 using namespace animelogon;
 
@@ -38,9 +42,26 @@ bool PngOf(const WallpaperInfo &w, std::vector<uint8_t> *png, std::wstring *why)
     return image::EncodePng(width, height, bmp.data() + bitmap::kHeaderBytes, bmp.size() - bitmap::kHeaderBytes, png, why);
 }
 
+// A video wallpaper's MP4: video.mp4 as it is when it has no sound, else a new one in `workDir`
+// that carries the sound too.
+bool VideoOf(const WallpaperInfo &w, const std::wstring &workDir, std::wstring *file, std::wstring *error) {
+    if (!w.hasAudio || w.audioPath.empty()) return *file = w.videoPath, true;
+    const std::wstring mp4 = workDir + L"\\wallpaper.mp4";
+    std::wstring why;
+    switch (remux::WithSound(w.videoPath, w.audioPath, mp4, &why)) {
+    case remux::Status::Ok: return *file = mp4, true;
+    case remux::Status::NoMediaFoundation:
+        return Fail(error, L"此系统缺少 Media Foundation 或其中的 AAC 编码器，无法导出视频壁纸的声音。",
+                    L"wallpaper " + w.id + L": " + why);
+    case remux::Status::TooLarge:
+        return Fail(error, L"这个主题的视频壁纸加上声音太大，无法导出。", L"wallpaper " + w.id + L": " + why);
+    default: return Fail(error, L"无法把视频壁纸的声音写进主题包。", L"wallpaper " + w.id + L": " + why);
+    }
+}
+
 }  // namespace
 
-bool Build(const std::wstring &themeId, const Settings &settings, const ThemeStore &store,
+bool Build(const std::wstring &themeId, const Settings &settings, const ThemeStore &store, const std::wstring &workDir,
            std::vector<package::Item> *items, std::wstring *error) {
     items->clear();
     theme::Theme own;
@@ -72,7 +93,7 @@ bool Build(const std::wstring &themeId, const Settings &settings, const ThemeSto
             return Fail(error, L"这个主题的壁纸已不存在或无法读取，无法导出。", L"wallpaper " + t.wallpaper + L": " + why);
         if (w.kind == WallpaperKind::Video) {
             wallpaperFile = L"wallpaper.mp4";
-            wallpaper.file = w.videoPath;
+            if (!VideoOf(w, workDir, &wallpaper.file, error)) return false;
         } else {
             wallpaperFile = L"wallpaper.png";
             if (!PngOf(w, &wallpaper.bytes, &why))
@@ -95,12 +116,27 @@ bool Build(const std::wstring &themeId, const Settings &settings, const ThemeSto
     return true;
 }
 
+std::wstring NewWorkDir() {
+    wchar_t temp[MAX_PATH + 1];
+    const DWORD n = GetTempPathW(ARRAYSIZE(temp), temp);
+    if (!n || n >= ARRAYSIZE(temp)) return L"";
+    for (int attempt = 0; attempt < 8; ++attempt) {
+        const std::wstring dir = std::wstring(temp) + L"AnimeLogon-export-" + RandomHex(6);
+        if (CreateDirectoryW(dir.c_str(), nullptr)) return dir;
+    }
+    return L"";
+}
+
 bool Export(const std::wstring &themeId, const Settings &settings, const std::wstring &path, std::wstring *error) {
+    // Where a video with its sound is put together; gone once the archive is written.
+    const std::wstring work = NewWorkDir();
+    if (work.empty()) return Fail(error, L"无法创建临时目录。", L"no directory under %TEMP%");
     std::vector<package::Item> items;
-    if (!Build(themeId, settings, DiskStore(), &items, error)) return false;
     std::wstring why;
-    if (!package::Write(items, path, &why)) return Fail(error, L"无法写入 " + path + L"。", why);
-    return true;
+    bool ok = Build(themeId, settings, DiskStore(), work, &items, error);
+    if (ok && !package::Write(items, path, &why)) ok = Fail(error, L"无法写入 " + path + L"。", why);
+    secure::RemoveTree(work);
+    return ok;
 }
 
 }  // namespace exporter

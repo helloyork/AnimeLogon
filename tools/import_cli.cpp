@@ -10,7 +10,8 @@
 //       --commit-component <id> <dir>).
 //   import_cli export <theme id> <out.altheme>
 //       Exports an installed theme with this machine's settings.ini overrides, as the settings
-//       window does.
+//       window does. A video wallpaper with sound goes in as one MP4 with its H.264 track and
+//       the sound encoded as AAC; one without, as its video.mp4.
 //   import_cli commit <import dir> <data dir>
 //       Installs a staged theme package into a scratch copy of the stores under <data dir>
 //       (no elevation, no ACLs) and prints the new theme's id.
@@ -119,7 +120,10 @@ int wmain(int argc, wchar_t **argv) {
         if (!problems.empty()) return 2;
         std::vector<package::Item> items;
         std::wstring error;
-        if (!exporter::Build(id, settings, scratch::ScratchStore(target), &items, &error)) {
+        const std::wstring work = exporter::NewWorkDir();
+        if (work.empty()) {
+            code = Refused(L"no directory under %TEMP%");
+        } else if (!exporter::Build(id, settings, scratch::ScratchStore(target), work, &items, &error)) {
             code = Refused(error);
         } else if (!package::Write(items, argv[4], &error)) {
             code = Refused(error);
@@ -127,6 +131,7 @@ int wmain(int argc, wchar_t **argv) {
             std::wprintf(L"exported %s to %s\n", id.c_str(), argv[4]);
             code = 0;
         }
+        if (!work.empty()) secure::RemoveTree(work);
     } else {
         code = Usage();
     }
