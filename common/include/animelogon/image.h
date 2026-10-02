@@ -60,4 +60,10 @@ Status Normalize(const std::wstring &path, Picture *out, std::wstring *why);
 // The same for a file already in memory.
 Status NormalizeBytes(const uint8_t *bytes, size_t size, Picture *out, std::wstring *why);
 
+// A PNG of opaque pixels (`bgra` as Picture holds them; the fourth byte is ignored), written
+// as 8-bit RGB without interlacing, for exporting an image wallpaper. The same pixels give the
+// same bytes. Normalize reads it back to exactly these pixels.
+bool EncodePng(int width, int height, const uint8_t *bgra, size_t bgraBytes, std::vector<uint8_t> *png,
+               std::wstring *why);
+
 }  // namespace animelogon::image

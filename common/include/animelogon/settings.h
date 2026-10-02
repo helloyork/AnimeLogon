@@ -99,6 +99,11 @@ struct Settings {
 // Parses the file's text. Malformed lines are reported in `problems` and ignored.
 Settings ParseSettings(const std::wstring &text, std::vector<std::wstring> *problems = nullptr);
 std::wstring SerializeSettings(const Settings &settings);
+// What the settings app and the installer write once themes are in use: every global key, with
+// `theme` ("default" when unset), `components` and `component_displays` always present, then the
+// overrides; none of the legacy keys (`video`, `scaling`, `skin`, `skin.<id>.*`, `clock`,
+// `clock_displays`). ParseSettings reads it back to the same theme settings.
+std::wstring SerializeThemeSettings(const Settings &settings);
 
 // Reads settings.ini. Returns defaults if it is missing, and refuses a file that is not
 // administrators-only when `requireTrusted` is set.

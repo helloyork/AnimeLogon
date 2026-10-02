@@ -15,6 +15,7 @@ add_library(animelogon_common STATIC
     src/resolve.cpp
     src/secure.cpp
     src/settings.cpp
+    src/sha256.cpp
     src/skin.cpp
     src/skins.cpp
     src/text.cpp

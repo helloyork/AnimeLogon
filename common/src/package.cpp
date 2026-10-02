@@ -476,6 +476,7 @@ void Reader::Close() {
 
 bool Reader::Open(const std::wstring &path, std::wstring *why) {
     Close();
+    compressed_ = false;
     std::wstring local;
     if (!why) why = &local;
     // Others may read it too, but no one may change it while it is open.
@@ -548,6 +549,7 @@ bool Reader::CrcOf(const Entry &entry, uint32_t *crc) const {
 
 bool Reader::Check(std::wstring *why) {
     entries_.clear();
+    compressed_ = false;
     if (size_ > kMaxArchiveBytes) {
         *why = Format(L"is %llu bytes, more than allowed", size_);
         return false;
@@ -638,6 +640,7 @@ bool Reader::Check(std::wstring *why) {
         }
         if (method != 0) {
             *why = who + Format(L" is compressed (method %u); entries must be stored", (unsigned)method);
+            compressed_ = true;
             return false;
         }
         if (packed == 0xFFFFFFFF || unpacked == 0xFFFFFFFF || local == 0xFFFFFFFF || diskStart == 0xFFFF) {

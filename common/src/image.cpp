@@ -310,4 +310,74 @@ Status NormalizeBytes(const uint8_t *bytes, size_t size, Picture *out, std::wstr
     return Decode(wic.Get(), decoder.Get(), out, why);
 }
 
+bool EncodePng(int width, int height, const uint8_t *bgra, size_t bgraBytes, std::vector<uint8_t> *png,
+               std::wstring *why) {
+    std::wstring local;
+    if (!why) why = &local;
+    png->clear();
+    if (!bgra || width < 1 || height < 1 || width > (int)kMaxSourceSide || height > (int)kMaxSourceSide ||
+        bgraBytes != (size_t)width * (size_t)height * 4) {
+        *why = L"has no pixels of the size it says";
+        return false;
+    }
+    // Three bytes a pixel: the pictures are opaque, so the fourth would only make the file larger.
+    const size_t rowBytes = (size_t)width * 3;
+    std::vector<uint8_t> bgr(rowBytes * (size_t)height);
+    for (size_t i = 0, o = 0; i < bgraBytes; i += 4, o += 3) {
+        bgr[o] = bgra[i];
+        bgr[o + 1] = bgra[i + 1];
+        bgr[o + 2] = bgra[i + 2];
+    }
+    ComScope com;
+    const ComPtr<IWICImagingFactory> wic = Factory(why);
+    if (!wic) return false;
+    ComPtr<IStream> stream;
+    ComPtr<IWICBitmapEncoder> encoder;
+    ComPtr<IWICBitmapFrameEncode> frame;
+    ComPtr<IPropertyBag2> options;
+    WICPixelFormatGUID format = GUID_WICPixelFormat24bppBGR;
+    if (FAILED(CreateStreamOnHGlobal(nullptr, TRUE, &stream)) ||
+        FAILED(wic->CreateEncoder(GUID_ContainerFormatPng, nullptr, &encoder)) ||
+        FAILED(encoder->Initialize(stream.Get(), WICBitmapEncoderNoCache)) ||
+        FAILED(encoder->CreateNewFrame(&frame, &options))) {
+        *why = L"PNG encoder unavailable";
+        return false;
+    }
+    // Interlacing off and a fixed filter, so nothing about the output is left to the encoder's choice.
+    PROPBAG2 names[2] = {};
+    VARIANT values[2];
+    names[0].pstrName = const_cast<LPOLESTR>(L"InterlaceOption");
+    VariantInit(&values[0]);
+    values[0].vt = VT_BOOL;
+    values[0].boolVal = VARIANT_FALSE;
+    names[1].pstrName = const_cast<LPOLESTR>(L"FilterOption");
+    VariantInit(&values[1]);
+    values[1].vt = VT_UI1;
+    values[1].bVal = WICPngFilterAdaptive;
+    if (options) options->Write(2, names, values);
+    const bool ok = SUCCEEDED(frame->Initialize(options.Get())) && SUCCEEDED(frame->SetSize((UINT)width, (UINT)height)) &&
+                    SUCCEEDED(frame->SetPixelFormat(&format)) && format == GUID_WICPixelFormat24bppBGR &&
+                    SUCCEEDED(frame->WritePixels((UINT)height, (UINT)rowBytes, (UINT)bgr.size(), bgr.data())) &&
+                    SUCCEEDED(frame->Commit()) && SUCCEEDED(encoder->Commit());
+    if (!ok) {
+        *why = L"could not be encoded as PNG";
+        return false;
+    }
+    STATSTG stat{};
+    LARGE_INTEGER zero{};
+    if (FAILED(stream->Stat(&stat, STATFLAG_NONAME)) || stat.cbSize.QuadPart > 0x7FFFFFFF ||
+        FAILED(stream->Seek(zero, STREAM_SEEK_SET, nullptr))) {
+        *why = L"could not be encoded as PNG";
+        return false;
+    }
+    std::vector<uint8_t> bytes((size_t)stat.cbSize.QuadPart);
+    ULONG got = 0;
+    if (FAILED(stream->Read(bytes.data(), (ULONG)bytes.size(), &got)) || got != bytes.size()) {
+        *why = L"could not be encoded as PNG";
+        return false;
+    }
+    *png = std::move(bytes);
+    return true;
+}
+
 }  // namespace animelogon::image

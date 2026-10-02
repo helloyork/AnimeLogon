@@ -89,6 +89,9 @@ public:
     // The same for an archive already in memory.
     bool OpenBytes(std::vector<uint8_t> bytes, std::wstring *why);
     void Close();
+    // After a refused Open: true when the reason was an entry that is compressed, which is what
+    // a zip tool makes unless it is told to store, so the settings app can say how to fix it.
+    bool Compressed() const { return compressed_; }
 
     // In central directory order.
     const std::vector<Entry> &Entries() const { return entries_; }
@@ -115,6 +118,7 @@ private:
     std::vector<uint8_t> memory_;
     uint64_t size_ = 0;
     std::vector<Entry> entries_;
+    bool compressed_ = false;
 };
 
 // One entry for the writer: its archive name, and its bytes, read from `file` when that is

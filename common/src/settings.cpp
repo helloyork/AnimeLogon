@@ -226,6 +226,46 @@ Settings ParseSettings(const std::wstring &text, std::vector<std::wstring> *prob
     return s;
 }
 
+namespace {
+
+// theme.<theme id>.* for every theme, in id order.
+void AppendOverrides(const Settings &s, std::wstring *out) {
+    for (const auto &[themeId, o] : s.themeOverrides) {
+        const std::wstring prefix = kThemePrefix + themeId + L".";
+        if (o.wallpaper) *out += prefix + L"wallpaper = " + *o.wallpaper + L"\r\n";
+        if (o.fit) *out += prefix + L"fit = " + ToString(*o.fit) + L"\r\n";
+        for (const auto &[instance, io] : o.instances) {
+            if (io.ref) *out += prefix + instance + L".ref = " + *io.ref + L"\r\n";
+            if (io.visible) *out += prefix + instance + L".visible = " + (*io.visible ? L"true" : L"false") + L"\r\n";
+            for (const auto &[key, value] : io.values) *out += prefix + instance + L"." + key + L" = " + value + L"\r\n";
+        }
+    }
+}
+
+}  // namespace
+
+std::wstring SerializeThemeSettings(const Settings &s) {
+    std::wstring out = L"# AnimeLogon settings. Edit through the AnimeLogon settings app.\r\n";
+    out += L"monitor_mode = " + std::wstring(ToString(s.monitorMode)) + L"\r\n";
+    out += L"theme = " + s.theme.value_or(kDefaultTheme) + L"\r\n";
+    for (const auto &[monitor, id] : s.screens) out += kScreenPrefix + monitor + L" = " + id + L"\r\n";
+    out += L"components = " + std::wstring(s.components.value_or(true) ? L"true" : L"false") + L"\r\n";
+    out += L"component_displays = " +
+           std::wstring(ToString(s.componentDisplays.value_or(ComponentDisplays::Auto))) + L"\r\n";
+    const ClockStyle &style = s.clock.style;
+    out += L"clock_hours = " + std::wstring(ToString(style.hours)) + L"\r\n";
+    out += L"clock_ampm = " + std::wstring(style.ampm ? L"true" : L"false") + L"\r\n";
+    out += L"clock_date = " + std::wstring(ToString(style.date)) + L"\r\n";
+    out += L"clock_language = " + style.locale + L"\r\n";
+    out += L"audio = " + std::wstring(s.audio.enabled ? L"true" : L"false") + L"\r\n";
+    out += L"audio_device = " + (s.audio.device.empty() ? std::wstring(L"auto") : s.audio.device) + L"\r\n";
+    out += L"audio_volume = " + std::to_wstring(s.audio.volume) + L"\r\n";
+    out += L"video_audio = " + std::wstring(s.audio.videoTrack.enabled ? L"true" : L"false") + L"\r\n";
+    out += L"video_audio_volume = " + std::to_wstring(s.audio.videoTrack.volume) + L"\r\n";
+    AppendOverrides(s, &out);
+    return out;
+}
+
 std::wstring SerializeSettings(const Settings &s) {
     std::wstring out = L"# AnimeLogon settings. Edit through the AnimeLogon settings app.\r\n";
     out += L"monitor_mode = " + std::wstring(ToString(s.monitorMode)) + L"\r\n";
@@ -252,16 +292,7 @@ std::wstring SerializeSettings(const Settings &s) {
     out += L"skin = " + c.skin + L"\r\n";
     for (const auto &[id, values] : c.values)
         for (const auto &[setting, value] : values) out += kSkinPrefix + id + L"." + setting + L" = " + value + L"\r\n";
-    for (const auto &[themeId, o] : s.themeOverrides) {
-        const std::wstring prefix = kThemePrefix + themeId + L".";
-        if (o.wallpaper) out += prefix + L"wallpaper = " + *o.wallpaper + L"\r\n";
-        if (o.fit) out += prefix + L"fit = " + ToString(*o.fit) + L"\r\n";
-        for (const auto &[instance, io] : o.instances) {
-            if (io.ref) out += prefix + instance + L".ref = " + *io.ref + L"\r\n";
-            if (io.visible) out += prefix + instance + L".visible = " + (*io.visible ? L"true" : L"false") + L"\r\n";
-            for (const auto &[key, value] : io.values) out += prefix + instance + L"." + key + L" = " + value + L"\r\n";
-        }
-    }
+    AppendOverrides(s, &out);
     return out;
 }
 
