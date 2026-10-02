@@ -524,20 +524,20 @@ struct Config : Window {
         for (const std::wstring &w : wallpapers) args += L" --remove-wallpaper " + w;
         for (const std::wstring &c : components) args += L" --remove-component " + c;
         const int code = commit::RunElevated(hwnd, args);
-        if (code == commit::kOk) {
+        // The theme goes first, so after a failure further on it may be gone all the same.
+        const bool gone = code != commit::kDeclined && !ThemeExists(id);
+        if (gone) {
             set.themeOverrides.erase(id);
             if (set.theme && *set.theme == id) set.theme = std::wstring(kDefaultTheme);
             for (auto it = set.screens.begin(); it != set.screens.end();)
                 it = it->second == id ? set.screens.erase(it) : std::next(it);
             Save();
-            Reload();
-            Note(L"已移除主题「" + name + L"」。");
-        } else if (code == commit::kDeclined) {
-            Note(L"已取消。");
-        } else {
-            Problem(L"无法移除这个主题，它的文件可能正被登录界面使用。请稍后再试。");
-            Reload();
         }
+        Reload();
+        if (code == commit::kOk) Note(L"已移除主题「" + name + L"」。");
+        else if (code == commit::kDeclined) Note(L"已取消。");
+        else if (gone) Problem(L"已移除主题「" + name + L"」，但它的壁纸或组件暂时无法删除，可能正被登录界面使用。");
+        else Problem(L"无法移除这个主题，它的文件可能正被登录界面使用。请稍后再试。");
         GoTo(page);
     }
 
