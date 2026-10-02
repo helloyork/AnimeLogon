@@ -4,10 +4,14 @@
 #include <wincodec.h>
 
 #include <cstring>
+#include <mutex>
+#include <thread>
 
 #include "animelogon/log.h"
-#include "clockface.h"
+#include "animelogon/text.h"
+#include "componentlayer.h"
 #include "layout.h"
+#include "picture.h"
 #include "video_ps.h"
 #include "video_vs.h"
 
@@ -20,7 +24,7 @@ struct Params {
     float offset[2];
     float uvMax[2];
     float dim;
-    float source;  // 0 black, 1 the video, 2 the still
+    float source;  // 0 black, 1 the video, 2 a picture: the still, an image wallpaper or the gradient
 };
 static_assert(sizeof(Params) % 16 == 0, "constant buffer size");
 
@@ -28,7 +32,35 @@ bool IsLost(HRESULT hr) {
     return hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET || hr == DXGI_ERROR_DEVICE_HUNG;
 }
 
+// An immutable BGRA texture of `bgra` (rows `width` * 4 bytes apart) and its view. The device
+// is free-threaded, so this runs on any thread.
+HRESULT MakeView(ID3D11Device *device, const void *bgra, int width, int height,
+                 ComPtr<ID3D11ShaderResourceView> *view) {
+    D3D11_TEXTURE2D_DESC d{};
+    d.Width = (UINT)width;
+    d.Height = (UINT)height;
+    d.MipLevels = 1;
+    d.ArraySize = 1;
+    d.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    d.SampleDesc.Count = 1;
+    d.Usage = D3D11_USAGE_IMMUTABLE;
+    d.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+    const D3D11_SUBRESOURCE_DATA data{bgra, (UINT)width * 4, 0};
+    ComPtr<ID3D11Texture2D> texture;
+    HRESULT hr = device->CreateTexture2D(&d, &data, &texture);
+    if (SUCCEEDED(hr)) hr = device->CreateShaderResourceView(texture.Get(), nullptr, view->ReleaseAndGetAddressOf());
+    return hr;
+}
+
 }  // namespace
+
+// An image being read on its own thread. The thread fills it in and sets `done`.
+struct Presenter::ImageJob {
+    std::mutex lock;
+    bool done = false;
+    Texture texture;
+    std::wstring why;
+};
 
 Presenter::~Presenter() {
     DestroyWindows();
@@ -134,21 +166,7 @@ bool Presenter::LoadStill(const std::wstring &path) {
         pixels.resize((size_t)w * h * 4);
         hr = bgra->CopyPixels(nullptr, w * 4, (UINT)pixels.size(), pixels.data());
     }
-    ComPtr<ID3D11Texture2D> texture;
-    if (SUCCEEDED(hr)) {
-        D3D11_TEXTURE2D_DESC d{};
-        d.Width = w;
-        d.Height = h;
-        d.MipLevels = 1;
-        d.ArraySize = 1;
-        d.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-        d.SampleDesc.Count = 1;
-        d.Usage = D3D11_USAGE_IMMUTABLE;
-        d.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-        const D3D11_SUBRESOURCE_DATA data{pixels.data(), w * 4, 0};
-        hr = device_->CreateTexture2D(&d, &data, &texture);
-    }
-    if (SUCCEEDED(hr)) hr = device_->CreateShaderResourceView(texture.Get(), nullptr, &stillView_);
+    if (SUCCEEDED(hr)) hr = MakeView(device_.Get(), pixels.data(), (int)w, (int)h, &stillView_);
     if (FAILED(hr)) {
         ALOG(L"present: the sign-in background could not be loaded (0x%08X)", hr);
         stillView_.Reset();
@@ -160,7 +178,111 @@ bool Presenter::LoadStill(const std::wstring &path) {
     return true;
 }
 
+void Presenter::RequestImage(const std::wstring &id, const std::wstring &path) {
+    WIN32_FILE_ATTRIBUTE_DATA a{};
+    const bool there = GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &a) != FALSE;
+    const uint64_t bytes = ((uint64_t)a.nFileSizeHigh << 32) | a.nFileSizeLow;
+    const auto it = images_.find(id);
+    if (it != images_.end() && there && it->second.path == path && it->second.bytes == bytes &&
+        CompareFileTime(&it->second.written, &a.ftLastWriteTime) == 0 && (it->second.texture.view || it->second.job))
+        return;  // held, or on its way
+
+    ImageEntry &e = images_[id];
+    e = ImageEntry{};
+    e.path = path;
+    e.written = a.ftLastWriteTime;
+    e.bytes = bytes;
+    if (!device_) {
+        e.why = L"there is no device";
+        return;
+    }
+    // Read off the render thread: an 8K image.bmp is over 100 MB.
+    auto job = std::make_shared<ImageJob>();
+    const ComPtr<ID3D11Device> device = device_;
+    try {
+        std::thread([job, device, path] {
+            picture::Image image;
+            std::wstring why;
+            Texture texture;
+            if (picture::ReadImage(path, &image, &why)) {
+                const HRESULT hr = MakeView(device.Get(), image.bgra.data(), image.width, image.height, &texture.view);
+                if (SUCCEEDED(hr)) {
+                    texture.width = image.width;
+                    texture.height = image.height;
+                } else {
+                    texture.view.Reset();
+                    why = animelogon::Format(L"its %dx%d texture could not be made (0x%08X)", image.width,
+                                             image.height, hr);
+                }
+            }
+            const std::lock_guard<std::mutex> hold(job->lock);
+            job->texture = std::move(texture);
+            job->why = std::move(why);
+            job->done = true;
+        }).detach();
+        e.job = std::move(job);
+    } catch (const std::exception &) {
+        e.why = L"no thread could read it";
+    }
+}
+
+Presenter::ImageState Presenter::ImageStatus(const std::wstring &id, std::wstring *why) {
+    const auto it = images_.find(id);
+    if (it == images_.end()) {
+        if (why) *why = L"it was never asked for";
+        return ImageState::Failed;
+    }
+    ImageEntry &e = it->second;
+    if (const std::shared_ptr<ImageJob> job = e.job) {
+        {
+            const std::lock_guard<std::mutex> hold(job->lock);
+            if (!job->done) return ImageState::Reading;
+            e.texture = std::move(job->texture);
+            e.why = std::move(job->why);
+        }
+        e.job.reset();
+    }
+    if (e.texture.view) return ImageState::Ready;
+    if (why) *why = e.why;
+    return ImageState::Failed;
+}
+
+void Presenter::KeepImages(const std::set<std::wstring> &ids) {
+    for (auto it = images_.begin(); it != images_.end();) it = ids.count(it->first) ? std::next(it) : images_.erase(it);
+}
+
+const Presenter::Texture *Presenter::Gradient(int rows) {
+    const picture::Image column = picture::GradientColumn(rows);
+    const auto it = gradients_.find(column.height);
+    if (it != gradients_.end()) return &it->second;
+    Texture t;
+    if (!device_ || FAILED(MakeView(device_.Get(), column.bgra.data(), column.width, column.height, &t.view))) return nullptr;
+    t.width = column.width;
+    t.height = column.height;
+    return &(gradients_[column.height] = std::move(t));
+}
+
+const Presenter::Texture *Presenter::WallpaperTexture(const Target &target, animelogon::Scaling *fit) {
+    switch (target.wallpaper.source) {
+    case plan::Source::Image: {
+        const auto it = images_.find(target.wallpaper.id);
+        if (it == images_.end() || !it->second.texture.view) return nullptr;
+        *fit = target.wallpaper.fit;
+        return &it->second.texture;
+    }
+    case plan::Source::Gradient:
+        // A column as tall as the canvas, stretched across it: what every fit makes of a
+        // picture the canvas's own size.
+        *fit = animelogon::Scaling::Stretch;
+        return Gradient(target.canvas.bottom - target.canvas.top);
+    default:
+        return nullptr;
+    }
+}
+
 void Presenter::ReleaseDevice() {
+    images_.clear();
+    gradients_.clear();
     stillView_.Reset();
     sampler_.Reset();
     constants_.Reset();
@@ -227,9 +349,9 @@ bool Presenter::CreateWindows(const std::vector<Target> &targets, const wchar_t 
         windows_.push_back(std::move(w));
     }
     opacity_ = 1.0f;
-    // Black until the first frame arrives.
+    // Black until there is a picture to show.
     std::vector<Picture> none(targets_.size());
-    if (!Render(none, animelogon::Scaling::Fill, 1.0f, 1.0f)) return false;
+    if (!Render(none, 1.0f, 1.0f)) return false;
     return !windows_.empty() && SUCCEEDED(dcomp_->Commit());
 }
 
@@ -244,9 +366,10 @@ void Presenter::DestroyWindows() {
     windows_.clear();
     targets_.clear();
     visible_ = false;
-    clock_ = nullptr;
-    clockFailed_ = false;
-    clockOpacity_ = 1.0f;
+    components_ = nullptr;
+    componentsPerTarget_.clear();
+    componentsFailed_ = false;
+    componentOpacity_ = 1.0f;
     if (dcomp_) dcomp_->Commit();
     if (context_) {
         context_->ClearState();
@@ -254,11 +377,21 @@ void Presenter::DestroyWindows() {
     }
 }
 
-bool Presenter::MoveClockTo(const RECT &monitor) {
+void Presenter::SetWallpaper(size_t target, const plan::Wallpaper &wallpaper) {
+    if (target < targets_.size()) targets_[target].wallpaper = wallpaper;
+}
+
+void Presenter::SetComponents(ComponentLayer *layer, const std::vector<std::vector<size_t>> &perTarget) {
+    components_ = layer;
+    componentsPerTarget_ = perTarget;
+    componentsFailed_ = false;
+}
+
+bool Presenter::MoveComponentsTo(const RECT &monitor) {
     bool found = false;
     for (const Target &t : targets_) found = found || EqualRect(&t.rect, &monitor);
     if (!found) return false;
-    for (Target &t : targets_) t.clock = EqualRect(&t.rect, &monitor) != FALSE;
+    for (Target &t : targets_) t.showComponents = EqualRect(&t.rect, &monitor) != FALSE;
     return true;
 }
 
@@ -313,10 +446,11 @@ double Presenter::CompositionRate() const {
     return (double)st.currentCompositionRate.Numerator / st.currentCompositionRate.Denominator;
 }
 
-bool Presenter::Render(const std::vector<Picture> &pictures, animelogon::Scaling scaling, float dim, float opacity) {
+bool Presenter::Render(const std::vector<Picture> &pictures, float dim, float opacity) {
     if (!device_ || lost_) return false;
     for (size_t i = 0; i < windows_.size(); ++i) {
         Window &w = windows_[i];
+        const Target &t = targets_[i];
         const Picture pic = i < pictures.size() ? pictures[i] : Picture{};
         ComPtr<ID3D11Texture2D> back;
         ComPtr<ID3D11RenderTargetView> rtv;
@@ -328,24 +462,49 @@ bool Presenter::Render(const std::vector<Picture> &pictures, animelogon::Scaling
         }
         Params p{};
         p.dim = dim;
-        const bool video = pic.frame && pic.videoW > 0, still = !video && pic.still && stillView_;
-        p.source = video ? 1.0f : still ? 2.0f : 0.0f;
-        if (still) {
-            // As Windows draws it: filling each display.
-            const RECT &r = targets_[i].rect;
-            const layout::Mapping m = layout::Map((int)stillW_, (int)stillH_, r, r, animelogon::Scaling::Fill);
+        // t0 and t1 the video's planes, t2 a picture.
+        ID3D11ShaderResourceView *views[3] = {};
+        bool placed = false;
+        layout::Mapping m;
+        switch (pic.kind) {
+        case Picture::Kind::Video:
+            if (pic.frame && pic.videoW > 0 && pic.videoH > 0) {
+                m = layout::Map(pic.videoW, pic.videoH, t.canvas, t.rect, t.wallpaper.fit);
+                p.source = 1.0f;
+                p.uvMax[0] = pic.frame->uMax;
+                p.uvMax[1] = pic.frame->vMax;
+                views[0] = pic.frame->luma;
+                views[1] = pic.frame->chroma;
+                placed = true;
+            }
+            break;
+        case Picture::Kind::Wallpaper: {
+            animelogon::Scaling fit = animelogon::Scaling::Fill;
+            if (const Texture *texture = WallpaperTexture(t, &fit)) {
+                m = layout::Map(texture->width, texture->height, t.canvas, t.rect, fit);
+                p.source = 2.0f;
+                views[2] = texture->view.Get();
+                placed = true;
+            }
+            break;
+        }
+        case Picture::Kind::Still:
+            if (stillView_) {
+                // As Windows draws it: filling each display.
+                m = layout::Map((int)stillW_, (int)stillH_, t.rect, t.rect, animelogon::Scaling::Fill);
+                p.source = 2.0f;
+                views[2] = stillView_.Get();
+                placed = true;
+            }
+            break;
+        case Picture::Kind::Black:
+            break;
+        }
+        if (placed) {
             p.scale[0] = m.scaleX;
             p.scale[1] = m.scaleY;
             p.offset[0] = m.offsetX;
             p.offset[1] = m.offsetY;
-        } else if (video) {
-            const layout::Mapping m = layout::Map(pic.videoW, pic.videoH, targets_[i].canvas, targets_[i].rect, scaling);
-            p.scale[0] = m.scaleX;
-            p.scale[1] = m.scaleY;
-            p.offset[0] = m.offsetX;
-            p.offset[1] = m.offsetY;
-            p.uvMax[0] = pic.frame->uMax;
-            p.uvMax[1] = pic.frame->vMax;
         }
         context_->UpdateSubresource(constants_.Get(), 0, nullptr, &p, 0, 0);
         D3D11_VIEWPORT vp{0.0f, 0.0f, (float)w.width, (float)w.height, 0.0f, 1.0f};
@@ -360,19 +519,19 @@ bool Presenter::Render(const std::vector<Picture> &pictures, animelogon::Scaling
         context_->PSSetConstantBuffers(0, 1, cb);
         ID3D11SamplerState *samplers[] = {sampler_.Get()};
         context_->PSSetSamplers(0, 1, samplers);
-        ID3D11ShaderResourceView *views[] = {video ? pic.frame->luma : nullptr, video ? pic.frame->chroma : nullptr,
-                                             still ? stillView_.Get() : nullptr};
         context_->PSSetShaderResources(0, 3, views);
         context_->Draw(3, 0);
         ID3D11ShaderResourceView *none[3] = {};
         context_->PSSetShaderResources(0, 3, none);
         context_->OMSetRenderTargets(0, nullptr, nullptr);
-        if (clock_ && targets_[i].clock && !clockFailed_ && clockOpacity_ > 0.0f) {
+        if (components_ && t.showComponents && !componentsFailed_ && componentOpacity_ > 0.0f &&
+            i < componentsPerTarget_.size() && !componentsPerTarget_[i].empty()) {
             ComPtr<IDXGISurface> surface;
-            if (FAILED(back.As(&surface)) || !clock_->Draw(surface.Get(), w.width, w.height, i, clockOpacity_)) {
-                // The video goes on without it.
-                ALOG(L"present: the clock could not be drawn -- continuing without it");
-                clockFailed_ = true;
+            if (FAILED(back.As(&surface)) ||
+                !components_->Draw(surface.Get(), w.width, w.height, i, componentsPerTarget_[i], componentOpacity_)) {
+                // The wallpaper goes on without them.
+                ALOG(L"present: the components could not be drawn -- continuing without them");
+                componentsFailed_ = true;
             }
         }
         hr = w.swapChain->Present(0, 0);

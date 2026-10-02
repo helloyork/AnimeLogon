@@ -79,4 +79,20 @@ std::vector<uint8_t> Render() {
     return png;
 }
 
+std::vector<uint8_t> Pixels(int width, int height) {
+    if (width < 1 || height < 1) return {};
+    // Render()'s colours and arithmetic, with the display's height in place of kHeight.
+    static const int top[3] = {18, 20, 28};
+    static const int bottom[3] = {6, 7, 10};
+    std::vector<uint8_t> out((size_t)width * height * 4);
+    for (int y = 0; y < height; ++y) {
+        uint8_t px[4] = {0, 0, 0, 255};
+        for (int c = 0; c < 3; ++c)
+            px[2 - c] = (uint8_t)(height > 1 ? top[c] + (bottom[c] - top[c]) * y / (height - 1) : top[c]);
+        uint8_t *row = out.data() + (size_t)y * width * 4;
+        for (int x = 0; x < width; ++x) std::memcpy(row + (size_t)x * 4, px, 4);
+    }
+    return out;
+}
+
 }  // namespace animelogon::background

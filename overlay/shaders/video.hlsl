@@ -1,17 +1,18 @@
-// NV12 (BT.709, limited range) to RGB, with the window's placement on the video. Before the
-// first frame, the baked still -- the picture Windows already shows -- in its place.
+// The wallpaper, with the window's placement on it: a video frame, NV12 (BT.709, limited
+// range) converted to RGB, or a picture -- an image wallpaper, the built-in gradient, or before
+// the wallpaper is ready the baked still, the picture Windows already shows.
 
 cbuffer Params : register(b0) {
     float2 scale;     // window pixel to picture UV
     float2 offset;
-    float2 uvMax;     // the visible part of the texture
+    float2 uvMax;     // the visible part of the video texture
     float dim;        // 0 shows the picture, 1 is black
-    float source;     // 0 black, 1 the video, 2 the still
+    float source;     // 0 black, 1 the video, 2 a picture
 };
 
 Texture2D<float> luma : register(t0);
 Texture2D<float2> chroma : register(t1);
-Texture2D<float4> still : register(t2);
+Texture2D<float4> picture : register(t2);
 SamplerState linearClamp : register(s0);
 
 float4 VS(uint id : SV_VertexID) : SV_Position {
@@ -22,7 +23,8 @@ float4 VS(uint id : SV_VertexID) : SV_Position {
 float4 PS(float4 pos : SV_Position) : SV_Target {
     float2 uv = pos.xy * scale + offset;
     if (source < 0.5 || any(uv < 0) || any(uv > 1)) return float4(0, 0, 0, 1);
-    if (source > 1.5) return float4(still.Sample(linearClamp, uv).rgb * (1.0 - dim), 1.0);
+    // Pictures are drawn opaque, whatever their fourth byte says.
+    if (source > 1.5) return float4(picture.Sample(linearClamp, uv).rgb * (1.0 - dim), 1.0);
     uv *= uvMax;
     float y = (luma.Sample(linearClamp, uv) - 16.0 / 255.0) * (255.0 / 219.0);
     float2 c = (chroma.Sample(linearClamp, uv) - 128.0 / 255.0) * (255.0 / 224.0);
