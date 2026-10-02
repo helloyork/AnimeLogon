@@ -13,15 +13,16 @@
 #include <vector>
 
 #include "animelogon/background.h"
-#include "animelogon/library.h"
 #include "animelogon/log.h"
 #include "animelogon/monitors.h"
 #include "animelogon/paths.h"
+#include "animelogon/resolve.h"
 #include "animelogon/secure.h"
 #include "animelogon/settings.h"
 #include "animelogon/text.h"
 #include "layout.h"
 #include "nv12.h"
+#include "picture.h"
 #include "plan.h"
 
 using Microsoft::WRL::ComPtr;
@@ -198,41 +199,61 @@ bool Refresh(const std::wstring &preview) {
     std::wstring why;
     const animelogon::Settings settings = animelogon::LoadSettings(false, &why);
     const std::vector<animelogon::MonitorInfo> monitors = animelogon::EnumerateMonitors();
-    const std::vector<Presenter::Target> targets = plan::Build(settings, monitors);
-    if (targets.empty()) return false;
-    const Presenter::Target &primary = targets.front();  // EnumerateMonitors puts it first
+    // Every file the plan names was found administrators-only by LoadWallpaper.
+    const plan::Plan plan = plan::Build(settings, monitors, animelogon::DiskStore());
+    if (plan.displays.empty()) return false;
+    const plan::Display &primary = plan.displays.front();  // EnumerateMonitors puts it first
+    const plan::Wallpaper &wallpaper = primary.wallpaper;
     const int windowW = primary.rect.right - primary.rect.left, windowH = primary.rect.bottom - primary.rect.top;
     if (windowW <= 0 || windowH <= 0) return false;
 
-    const std::wstring file = primary.videoId.empty() ? std::wstring() : animelogon::VideoFilePath(primary.videoId);
-    // A preview runs with its caller's rights and writes only where the caller asked.
-    const bool video = !file.empty() && (preview.empty() ? animelogon::secure::IsTrusted(file, &why)
-                                                         : GetFileAttributesW(file.c_str()) != INVALID_FILE_ATTRIBUTES);
-    const std::wstring key =
-        video ? animelogon::Format(L"%s|%s|%s|%ld,%ld,%ld,%ld|%dx%d", kVersion, primary.videoId.c_str(),
-                                   animelogon::ToString(settings.scaling), primary.canvas.left - primary.rect.left,
-                                   primary.canvas.top - primary.rect.top, primary.canvas.right - primary.rect.left,
-                                   primary.canvas.bottom - primary.rect.top, windowW, windowH)
-              : std::wstring(L"default");
+    // With a theme whose wallpaper is "none" there is nothing to follow: the background stays
+    // as it is. In legacy mode a display without a video has the installed gradient, as before.
+    if (wallpaper.source == plan::Source::None && !primary.legacy) return false;
+    const bool video = wallpaper.source == plan::Source::Video, image = wallpaper.source == plan::Source::Image;
+    // Where the wallpaper sits on the primary display, as it is drawn there.
+    const std::wstring placed =
+        animelogon::Format(L"%s|%ld,%ld,%ld,%ld|%dx%d", animelogon::ToString(wallpaper.fit),
+                           primary.canvas.left - primary.rect.left, primary.canvas.top - primary.rect.top,
+                           primary.canvas.right - primary.rect.left, primary.canvas.bottom - primary.rect.top, windowW,
+                           windowH);
+    // A video's key is what it was before themes, so the same video keeps the same background.
+    const std::wstring key = video ? animelogon::Format(L"%s|%s|%s", kVersion, wallpaper.id.c_str(), placed.c_str())
+                             : image ? animelogon::Format(L"%s|image %s|%s", kVersion, wallpaper.id.c_str(), placed.c_str())
+                                     : std::wstring(L"default");
     if (preview.empty() && key == ReadKey()) return false;
 
     std::vector<uint8_t> png;
+    const float shrink = std::min(1.0f, (float)kMaxSide / (float)std::max(windowW, windowH));
+    const int width = std::max(1, (int)std::lround(windowW * shrink)),
+              height = std::max(1, (int)std::lround(windowH * shrink));
     if (video) {
         Frame f;
-        if (!FirstFrame(file, &f)) {
-            ALOG(L"bake: the first frame of %s could not be decoded", primary.videoId.c_str());
+        if (!FirstFrame(wallpaper.path, &f)) {
+            ALOG(L"bake: the first frame of %s could not be decoded", wallpaper.id.c_str());
             return false;
         }
-        const float shrink = std::min(1.0f, (float)kMaxSide / (float)std::max(windowW, windowH));
-        const int width = std::max(1, (int)std::lround(windowW * shrink)),
-                  height = std::max(1, (int)std::lround(windowH * shrink));
-        const layout::Mapping m =
-            layout::Map(f.displayW, f.displayH, primary.canvas, primary.rect, settings.scaling);
+        const layout::Mapping m = layout::Map(f.displayW, f.displayH, primary.canvas, primary.rect, wallpaper.fit);
         if (!EncodePng(Compose(f, m, windowW, windowH, width, height), width, height, &png)) {
             ALOG(L"bake: the background could not be encoded");
             return false;
         }
+    } else if (image) {
+        // The pixels themselves, placed by the fit: image.bmp is read as the overlay reads it,
+        // without any decoder.
+        picture::Image pixels;
+        if (!picture::ReadImage(wallpaper.path, &pixels, &why)) {
+            ALOG(L"bake: image %s could not be read: %s", wallpaper.id.c_str(), why.c_str());
+            return false;
+        }
+        const layout::Mapping m = layout::Map(pixels.width, pixels.height, primary.canvas, primary.rect, wallpaper.fit);
+        if (!EncodePng(picture::Compose(pixels, m, windowW, windowH, width, height), width, height, &png)) {
+            ALOG(L"bake: the background could not be encoded");
+            return false;
+        }
     } else {
+        // The built-in wallpaper is exactly the background the installer writes, so a machine
+        // that never chose another never has its background rewritten.
         png = animelogon::background::Render();
     }
     if (!preview.empty()) {

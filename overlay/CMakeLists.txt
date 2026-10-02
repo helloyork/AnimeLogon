@@ -10,8 +10,9 @@ animelogon_add_executable(overlay
         src/screen.cpp
         src/keyhook.cpp
         src/plan.cpp
+        src/picture.cpp
         src/bake.cpp
-        src/clockface.cpp
+        src/componentlayer.cpp
         src/clocktext.cpp
     DESCRIPTION "AnimeLogon 登录界面视频"
     LIBS animelogon_render d3d11 dxgi dcomp dwmapi d2d1 dwrite dxguid mf mfplat mfreadwrite mfuuid windowscodecs xaudio2 mmdevapi

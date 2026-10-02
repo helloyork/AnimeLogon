@@ -1,8 +1,10 @@
-// overlay.exe: plays the imported video on the Winlogon desktop until a key or click, then
-// fades out and hands the screen back to Windows. Started as SYSTEM by the service, one per
-// logon screen. It parks between appearances: once dismissed it stays out of the way until the
-// session is used and locked again, so it never fights somebody signing in. `--windowed` runs
-// it on the ordinary desktop, for looking at a change without a lock screen.
+// overlay.exe: shows each display's theme -- its wallpaper, a video or a picture, and the
+// components over it -- on the Winlogon desktop until a key or click, then fades out and hands
+// the screen back to Windows. Started as SYSTEM by the service, one per logon screen. It parks
+// between appearances: once dismissed it stays out of the way until the session is used and
+// locked again, so it never fights somebody signing in. `--windowed` runs it on the ordinary
+// desktop, showing the primary display's theme in a window, for looking at a change without a
+// lock screen.
 
 #include <windows.h>
 #include <dwmapi.h>
@@ -14,6 +16,7 @@
 #include <atomic>
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -24,14 +27,14 @@
 #include "animelogon/machine.h"
 #include "animelogon/monitors.h"
 #include "animelogon/paths.h"
+#include "animelogon/resolve.h"
 #include "animelogon/secure.h"
 #include "animelogon/settings.h"
-#include "animelogon/skins.h"
 
 #include "audio.h"
 #include "bake.h"
-#include "clockface.h"
 #include "clocktext.h"
+#include "componentlayer.h"
 #include "events.h"
 #include "inputsink.h"
 #include "keyhook.h"
@@ -46,7 +49,7 @@ namespace {
 constexpr wchar_t kWindowClass[] = L"AnimeLogonOverlay";
 constexpr int kRescueHotkeyId = 0xA10E;  // Ctrl+Alt+F11
 constexpr float kFadeSeconds = 0.5f;
-// The clock fades in once the video is up.
+// The components fade in once the wallpaper is up.
 constexpr float kClockFadeInSeconds = 0.4f;
 // How long after the compositor's frame the next picture is drawn: right after one frame
 // leaves nearly a whole frame of slack for the next, which a late wake-up would not.
@@ -278,9 +281,32 @@ double RefreshSeconds() {
     return 1.0 / 60.0;
 }
 
-// One appearance: resolve the settings, open the videos, cover the screen and play until
-// somebody arrives or the screen is handed back. Returns why it ended.
+// Development: the primary display's theme, in a window on the ordinary desktop. In legacy
+// mode without a video it plays the library's first video, trusted or not, as before themes.
+plan::Plan WindowedPlan(plan::Plan plan) {
+    if (plan.displays.empty()) return plan;
+    plan::Display d = plan.displays.front();
+    d.rect = {d.rect.left + 80, d.rect.top + 80, d.rect.left + 80 + 960, d.rect.top + 80 + 540};
+    d.canvas = d.rect;
+    d.covered = true;
+    d.showComponents = true;
+    if (d.legacy && d.wallpaper.source == plan::Source::None) {
+        const std::vector<animelogon::VideoInfo> videos = animelogon::ListVideos();
+        if (!videos.empty()) {
+            d.wallpaper.source = plan::Source::Video;
+            d.wallpaper.id = videos.front().id;
+            d.wallpaper.path = animelogon::VideoFilePath(d.wallpaper.id);
+        }
+    }
+    plan.displays = {d};
+    return plan;
+}
+
+// One appearance: resolve each display's theme, cover the screen, and show the wallpapers and
+// their components until somebody arrives or the screen is handed back. Returns why it ended.
 LiveEnd GoLiveOnce(Presenter &presenter, const Options &opt, HINSTANCE instance) {
+    using Kind = Presenter::Picture::Kind;
+
     // Fresh state for this appearance.
     g_overlay.inputWindow = nullptr;
     g_overlay.woke = false;
@@ -299,72 +325,110 @@ LiveEnd GoLiveOnce(Presenter &presenter, const Options &opt, HINSTANCE instance)
     }
 
     // settings.ini holds only ids and enums, never a path, so it is loaded without a trust
-    // check; every video file it names is trust-checked below before the SYSTEM decoder
-    // touches it.
+    // check. Resolving the themes checks every file they lead to -- theme.xml, wallpaper.ini,
+    // the video, the image, component.xml -- before the SYSTEM decoder or reader touches it.
     std::wstring why;
     animelogon::Settings settings = animelogon::LoadSettings(false, &why);
     if (!why.empty()) ALOG(L"settings: %s -- using defaults", why.c_str());
 
-    std::vector<animelogon::MonitorInfo> monitors = animelogon::EnumerateMonitors();
+    plan::Plan plan = plan::Build(settings, animelogon::EnumerateMonitors(), animelogon::DiskStore());
+    if (opt.windowed) plan = WindowedPlan(std::move(plan));
+    for (const std::wstring &p : plan.problems) ALOG(L"theme: %s", p.c_str());
+    for (const plan::Display &d : plan.displays) ALOG(L"theme: %s", plan::Describe(d).c_str());
+
+    // One window per covered display. `shown[i]` is what targets[i] came from.
     std::vector<Presenter::Target> targets;
-    if (opt.windowed) {
+    std::vector<const plan::Display *> shown;
+    for (const plan::Display &d : plan.displays) {
+        if (!d.covered) continue;
         Presenter::Target t;
-        const animelogon::MonitorInfo &m = monitors.front();
-        t.rect = {m.rect.left + 80, m.rect.top + 80, m.rect.left + 80 + 960, m.rect.top + 80 + 540};
-        t.canvas = t.rect;
-        t.clock = settings.clock.enabled;
-        t.videoId = settings.video.empty() ? (animelogon::ListVideos().empty() ? std::wstring()
-                                                                               : animelogon::ListVideos().front().id)
-                                           : settings.video;
+        t.rect = d.rect;
+        t.canvas = d.canvas;
+        t.wallpaper = d.wallpaper;
+        t.showComponents = d.showComponents;
         targets.push_back(t);
-    } else {
-        targets = plan::Build(settings, monitors);
+        shown.push_back(&d);
     }
 
-    // Only administrators-only video is handed to the SYSTEM decoder.
-    std::map<std::wstring, bool> trusted;
-    for (const Presenter::Target &t : targets) {
-        if (t.videoId.empty() || trusted.count(t.videoId)) continue;
-        std::wstring trust;
-        trusted[t.videoId] = opt.windowed || animelogon::secure::IsTrusted(animelogon::VideoFilePath(t.videoId), &trust);
-        if (!trusted[t.videoId]) ALOG(L"overlay: %s is not trusted (%s) -- skipping it", t.videoId.c_str(), trust.c_str());
-    }
+    // A theme's wallpaper that cannot be shown after all gives way to the built-in one, as
+    // ResolveTheme does for one that does not load. Legacy displays keep their old behaviour.
+    auto fallBack = [&](size_t i, const std::wstring &reason) {
+        ALOG(L"overlay: wallpaper %s cannot be shown (%s) -- showing the built-in wallpaper",
+             targets[i].wallpaper.id.c_str(), reason.c_str());
+        plan::Wallpaper w;
+        w.source = plan::Source::Gradient;
+        w.id = animelogon::kDefaultWallpaper;
+        w.fit = targets[i].wallpaper.fit;
+        targets[i].wallpaper = w;
+        presenter.SetWallpaper(i, w);
+    };
+
+    // Videos by wallpaper id, each opened once however many displays show it.
     std::map<std::wstring, std::shared_ptr<VideoPlayer>> players;
+    std::set<std::wstring> unplayable;
     auto openPlayers = [&] {
-        for (const auto &[id, ok] : trusted) {
-            if (!ok) continue;
+        for (const Presenter::Target &t : targets) {
+            const plan::Wallpaper &w = t.wallpaper;
+            if (w.source != plan::Source::Video || players.count(w.id) || unplayable.count(w.id)) continue;
             auto player = std::make_shared<VideoPlayer>();
-            if (player->Open(animelogon::VideoFilePath(id), presenter.device(), presenter.videoManager()))
-                players[id] = player;
-            else
-                ALOG(L"overlay: %s could not be opened", id.c_str());
+            if (player->Open(w.path, presenter.device(), presenter.videoManager())) {
+                players[w.id] = player;
+            } else {
+                ALOG(L"overlay: %s could not be opened", w.id.c_str());
+                unplayable.insert(w.id);
+            }
         }
     };
 
-    // The screen is covered first with the baked still, the picture Windows is already showing,
-    // so that its credential screen is never seen; the video takes over when its first frame is
-    // ready. Without a still, nothing is shown until there is a video to show.
-    if (!opt.windowed) {
-        std::vector<Presenter::Target> playable;
+    // Image wallpapers start reading at once, off this thread. One the device still holds from
+    // an earlier appearance, its file unchanged, is ready now.
+    {
+        std::set<std::wstring> images;
         for (const Presenter::Target &t : targets)
-            if (!t.videoId.empty() && trusted[t.videoId]) playable.push_back(t);
-        targets.swap(playable);
+            if (t.wallpaper.source == plan::Source::Image && images.insert(t.wallpaper.id).second)
+                presenter.RequestImage(t.wallpaper.id, t.wallpaper.path);
+        presenter.KeepImages(images);
     }
-    const bool cover = !opt.windowed && !targets.empty() && LoadStill(presenter);
+
+    // The screen is covered first, so that Windows' credential screen is never seen. A
+    // wallpaper that is ready at once -- an image already read, the built-in one, black -- is
+    // the cover itself. Otherwise the baked still is: the picture Windows is already showing,
+    // which the wallpaper replaces when it is ready. Without a still, nothing is shown until
+    // there is a wallpaper to show.
+    bool allReady = !targets.empty();
+    for (const Presenter::Target &t : targets) {
+        const plan::Source s = t.wallpaper.source;
+        allReady = allReady && s != plan::Source::Video &&
+                   (s != plan::Source::Image ||
+                    presenter.ImageStatus(t.wallpaper.id) == Presenter::ImageState::Ready);
+    }
+    const bool still = !opt.windowed && !targets.empty() && !allReady && LoadStill(presenter);
+    const bool cover = !opt.windowed && !targets.empty() && (allReady || still);
     if (!cover) {
         openPlayers();
         if (!opt.windowed) {
-            std::vector<Presenter::Target> playable;
-            for (const Presenter::Target &t : targets)
-                if (players.count(t.videoId)) playable.push_back(t);
-            targets.swap(playable);
+            // A display whose video cannot be opened is left to Windows, as before themes, or
+            // with a theme gets the built-in wallpaper.
+            std::vector<Presenter::Target> keptTargets;
+            std::vector<const plan::Display *> keptShown;
+            for (size_t i = 0; i < targets.size(); ++i) {
+                const plan::Wallpaper &w = targets[i].wallpaper;
+                if (w.source == plan::Source::Video && !players.count(w.id)) {
+                    if (shown[i]->legacy) continue;
+                    fallBack(i, L"it could not be opened");
+                }
+                keptTargets.push_back(targets[i]);
+                keptShown.push_back(shown[i]);
+            }
+            targets.swap(keptTargets);
+            shown.swap(keptShown);
         }
     }
     if (presenter.DeviceLost()) {
         ALOG(L"overlay: the graphics device was lost -- exiting so a fresh one starts");
         return LiveEnd::Leave;
     }
-    if (targets.empty() || (!opt.windowed && !cover && players.empty())) {
+    if (targets.empty()) {
         ALOG(L"overlay: no video to show -- leaving the screen to Windows");
         return LiveEnd::Dismissed;  // park until the screen is used
     }
@@ -375,42 +439,114 @@ LiveEnd GoLiveOnce(Presenter &presenter, const Options &opt, HINSTANCE instance)
     }
     g_overlay.inputWindow = presenter.primary();
 
-    std::vector<Presenter::Picture> stills(targets.size());
-    for (Presenter::Picture &p : stills) p.still = cover;
-    if (cover) {
-        presenter.Render(stills, settings.scaling, 0.0f, 1.0f);
-        presenter.Show();
-        ALOG(L"cover: the sign-in background is up, %llu ms after the logon screen", GetTickCount64() - g_overlay.seenAt);
-    }
-
-    // The clock is drawn into the video's own frames, so it fades out with them. It is set up
-    // after the cover and fades in once the video is up, so the cover never waits for it.
-    ClockFace clock;
-    bool anyClock = false;
-    for (const Presenter::Target &t : targets) anyClock = anyClock || t.clock;
-    bool withClock = false;
-    if (anyClock) {
-        std::wstring refused;
-        const animelogon::skin::Skin skin = animelogon::LoadSkin(settings.clock.skin, &refused);
-        if (!refused.empty())
-            ALOG(L"clock: skin %s refused (%s) -- using the default", settings.clock.skin.c_str(), refused.c_str());
-        const std::wstring &id = refused.empty() ? settings.clock.skin : std::wstring(L"default");
-        withClock = clock.Init(presenter.device(), animelogon::skin::Resolve(skin, settings.clock.ValuesFor(id)),
-                               settings.clock.style, clocktext::UserFormat());
-    }
-
-    if (withClock) {
-        presenter.SetClock(&clock);
-        presenter.SetClockOpacity(0.0f);
-    }
-    // By default the clock goes where Windows puts its password box, which LogonUI may not
-    // have drawn yet; it is looked for again below until found.
-    bool clockPlaced = !withClock || opt.windowed || settings.clock.displays != animelogon::ClockDisplays::Auto;
-    auto placeClock = [&] {
-        RECT monitor{};
-        if (!clockPlaced && screen::CredentialMonitor(&monitor) && presenter.MoveClockTo(monitor)) clockPlaced = true;
+    // What each window shows now: its wallpaper when that is ready, else the still if the
+    // screen was covered with it, else black. `ready` turns false while a video has no frame yet
+    // or an image is still being read; `changed` turns true when any window's picture is new.
+    std::vector<VideoPlayer::Frame> held(targets.size());
+    std::vector<Kind> drawn(targets.size(), Kind::Black);
+    auto compose = [&](double t, bool *ready, bool *changed, bool *firstFresh) {
+        std::vector<Presenter::Picture> pictures(targets.size());
+        for (size_t i = 0; i < targets.size(); ++i) {
+            Presenter::Picture &p = pictures[i];
+            p.kind = still ? Kind::Still : Kind::Black;
+            const plan::Wallpaper &w = targets[i].wallpaper;
+            switch (w.source) {
+            case plan::Source::Video: {
+                const auto it = players.find(w.id);
+                bool fresh = false;
+                if (it != players.end() && it->second->FrameAt(t, &held[i], &fresh)) {
+                    p.kind = Kind::Video;
+                    p.frame = &held[i];
+                    p.videoW = it->second->width();
+                    p.videoH = it->second->height();
+                    if (fresh) *changed = true;
+                    if (fresh && i == 0 && firstFresh) *firstFresh = true;
+                } else if (it != players.end()) {
+                    *ready = false;
+                }
+                break;
+            }
+            case plan::Source::Image: {
+                std::wstring failure;
+                const Presenter::ImageState state = presenter.ImageStatus(w.id, &failure);
+                if (state == Presenter::ImageState::Reading) {
+                    *ready = false;
+                } else {
+                    if (state == Presenter::ImageState::Failed) fallBack(i, failure);
+                    p.kind = Kind::Wallpaper;
+                }
+                break;
+            }
+            case plan::Source::Gradient:
+                p.kind = Kind::Wallpaper;
+                break;
+            case plan::Source::None:
+                p.kind = Kind::Black;
+                break;
+            }
+            if (p.kind != drawn[i]) *changed = true;
+        }
+        return pictures;
     };
-    placeClock();
+    auto rendered = [&](const std::vector<Presenter::Picture> &pictures) {
+        for (size_t i = 0; i < pictures.size(); ++i) drawn[i] = pictures[i].kind;
+    };
+
+    if (cover) {
+        bool ready = true, changed = false;
+        const std::vector<Presenter::Picture> pictures = compose(0.0, &ready, &changed, nullptr);
+        presenter.Render(pictures, 0.0f, 1.0f);
+        rendered(pictures);
+        presenter.Show();
+        ALOG(L"cover: %s is up, %llu ms after the logon screen", still ? L"the sign-in background" : L"the wallpaper",
+             GetTickCount64() - g_overlay.seenAt);
+    }
+
+    // The components are drawn into the wallpaper's own frames, so they fade out with it. They
+    // are set up after the cover and fade in once the wallpaper is up, so the cover never waits
+    // for them. Instances drawn alike on several displays share one view, with a cache per window.
+    ComponentLayer layer;
+    bool withComponents = false;
+    {
+        bool any = false;
+        for (const plan::Display *d : shown) any = any || !d->components.empty();
+        if (any && layer.Init(presenter.device())) {
+            const animelogon::RegionalFormat format = clocktext::UserFormat();
+            constexpr size_t kNone = (size_t)-1;
+            std::map<std::wstring, size_t> byKey;
+            std::vector<std::vector<size_t>> perTarget(targets.size());
+            for (size_t i = 0; i < shown.size(); ++i) {
+                for (const plan::Component &c : shown[i]->components) {
+                    auto it = byKey.find(c.key);
+                    if (it == byKey.end()) {
+                        size_t index = kNone;
+                        if (!layer.Add(c.drawing, settings.clock.style, format, &index)) {
+                            ALOG(L"components: %s could not be set up -- left out", c.key.c_str());
+                            index = kNone;
+                        }
+                        it = byKey.emplace(c.key, index).first;
+                    }
+                    if (it->second != kNone) perTarget[i].push_back(it->second);
+                }
+            }
+            withComponents = layer.size() > 0;
+            if (withComponents) {
+                presenter.SetComponents(&layer, perTarget);
+                presenter.SetComponentOpacity(0.0f);
+                ALOG(L"components: %zu instance(s) set up", layer.size());
+            }
+        }
+    }
+    // By default the components go where Windows puts its password box, which LogonUI may not
+    // have drawn yet; it is looked for again below until found.
+    bool componentsPlaced =
+        !withComponents || opt.windowed || plan.componentDisplays != animelogon::ComponentDisplays::Auto;
+    auto placeComponents = [&] {
+        RECT monitor{};
+        if (!componentsPlaced && screen::CredentialMonitor(&monitor) && presenter.MoveComponentsTo(monitor))
+            componentsPlaced = true;
+    };
+    placeComponents();
 
     // Without raw input nothing could wake the screen, so it is never covered.
     if (!inputsink::Register(g_overlay.inputWindow)) {
@@ -432,52 +568,51 @@ LiveEnd GoLiveOnce(Presenter &presenter, const Options &opt, HINSTANCE instance)
     HPOWERNOTIFY power =
         RegisterPowerSettingNotification(g_overlay.inputWindow, &kConsoleDisplayState, DEVICE_NOTIFY_WINDOW_HANDLE);
 
-    if (cover) openPlayers();
+    if (cover) {
+        openPlayers();
+        for (size_t i = 0; i < targets.size(); ++i) {
+            const plan::Wallpaper &w = targets[i].wallpaper;
+            if (w.source == plan::Source::Video && !players.count(w.id) && !shown[i]->legacy)
+                fallBack(i, L"it could not be opened");
+        }
+    }
+    // Only legacy displays can be left with nothing to show: a video that could not be opened.
+    bool anything = opt.windowed;
+    for (const Presenter::Target &t : targets)
+        anything = anything || t.wallpaper.source != plan::Source::Video || players.count(t.wallpaper.id) != 0;
     bool done = false;
     LiveEnd end = LiveEnd::Leave;
     if (presenter.DeviceLost()) {
         ALOG(L"overlay: the graphics device was lost -- exiting so a fresh one starts");
         done = true;
-    } else if (players.empty() && !opt.windowed) {
+    } else if (!anything) {
         ALOG(L"overlay: no video to show -- leaving the screen to Windows");
         done = true;
         end = LiveEnd::Dismissed;
     }
 
+    // The audio configuration is global (the audio system's own); the only source a theme has
+    // is its wallpaper's sound track, when the wallpaper is a video with one.
     AudioSystem audio;
     audio.Open(settings.audio);
     const double refresh = RefreshSeconds();
     if (!opt.windowed && !done) {
         AudioSystem::RememberConsoleDefault();
-        const std::wstring &primaryVideo = targets.front().videoId;
-        if (!primaryVideo.empty()) {
-            animelogon::VideoInfo info;
-            if (animelogon::LoadVideo(primaryVideo, &info) && info.hasAudio)
-                audio.PlayVideoTrack(animelogon::AudioFilePath(primaryVideo), 0.0, kFadeSeconds);
-        }
+        const plan::Wallpaper &first = targets.front().wallpaper;
+        if (first.source == plan::Source::Video && !first.audioPath.empty())
+            audio.PlayVideoTrack(first.audioPath, 0.0, kFadeSeconds);
     }
 
-    // Until every display has its first frame the still stays up (or, without one, the windows
-    // stay hidden), so the change from Windows' background -- that frame, baked -- to the video
-    // is not a change at all.
+    // Until every display has its wallpaper -- a video's first frame, an image read -- the still
+    // stays up (or, without one, the windows stay hidden), so the change from Windows'
+    // background -- that same picture, baked -- to the wallpaper is not a change at all.
     for (const ULONGLONG until = GetTickCount64() + kFirstFrameWaitMs; !done;) {
         Beat();
-        std::vector<Presenter::Picture> pictures = stills;
-        std::vector<VideoPlayer::Frame> held(targets.size());
-        bool all = true;
-        for (size_t i = 0; i < targets.size(); ++i) {
-            auto it = players.find(targets[i].videoId);
-            bool changed = false;
-            if (it != players.end() && it->second->FrameAt(0.0, &held[i], &changed)) {
-                pictures[i].frame = &held[i];
-                pictures[i].videoW = it->second->width();
-                pictures[i].videoH = it->second->height();
-            } else if (it != players.end()) {
-                all = false;
-            }
-        }
-        if (all || GetTickCount64() >= until) {
-            presenter.Render(pictures, settings.scaling, 0.0f, 1.0f);
+        bool ready = true, changed = false;
+        const std::vector<Presenter::Picture> pictures = compose(0.0, &ready, &changed, nullptr);
+        if (ready || GetTickCount64() >= until) {
+            presenter.Render(pictures, 0.0f, 1.0f);
+            rendered(pictures);
             break;
         }
         Sleep(5);
@@ -493,7 +628,7 @@ LiveEnd GoLiveOnce(Presenter &presenter, const Options &opt, HINSTANCE instance)
     // --- frame loop --------------------------------------------------------------------
     HANDLE timer = CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
     const ULONGLONG start = GetTickCount64();
-    bool clockFading = withClock;
+    bool componentsFading = withComponents;
     // The video's clock stands still while the panel is dark or the machine sleeps.
     const ULONGLONG clockStart = screen::AwakeMs();
     ULONGLONG darkMs = 0, darkSince = 0;
@@ -551,7 +686,7 @@ LiveEnd GoLiveOnce(Presenter &presenter, const Options &opt, HINSTANCE instance)
         }
 
         audio.Tick();
-        const bool clockChanged = withClock && clock.Tick();
+        const bool componentsChanged = withComponents && layer.Tick();
 
         double t = 0.0;
         if (!audio.TrackClock(&t)) {
@@ -570,34 +705,26 @@ LiveEnd GoLiveOnce(Presenter &presenter, const Options &opt, HINSTANCE instance)
         }
 
         if (draw) {
-            std::vector<Presenter::Picture> pictures = stills;
-            std::vector<VideoPlayer::Frame> held(targets.size());
-            // Drawn only when something on it changed: a high refresh rate need not cost a
-            // full-screen draw per tick.
-            bool fresh = lit || clockChanged || g_overlay.woke || clockFading;
-            if (clockFading) {
+            // Drawn only when something on it changed: a still wallpaper costs nothing between
+            // the minutes, and a high refresh rate need not cost a full-screen draw per tick.
+            bool fresh = lit || componentsChanged || g_overlay.woke || componentsFading;
+            if (componentsFading) {
                 const float k = std::min(1.0f, (float)(now - start) / 1000.0f / kClockFadeInSeconds);
-                clockFading = k < 1.0f;
-                presenter.SetClockOpacity(k * k * (3.0f - 2.0f * k));
+                componentsFading = k < 1.0f;
+                presenter.SetComponentOpacity(k * k * (3.0f - 2.0f * k));
             }
-            for (size_t i = 0; i < targets.size(); ++i) {
-                auto it = players.find(targets[i].videoId);
-                if (it == players.end()) continue;
-                bool changed = false;
-                if (it->second->FrameAt(t, &held[i], &changed)) {
-                    fresh = fresh || changed;
-                    if (i == 0 && changed) {
-                        ++shownFrames;
-                        if (firstT < 0) firstT = t;
-                        lastT = t;
-                    }
-                    pictures[i].frame = &held[i];
-                    pictures[i].videoW = it->second->width();
-                    pictures[i].videoH = it->second->height();
-                }
+            bool ready = true, changed = false, firstFresh = false;
+            const std::vector<Presenter::Picture> pictures = compose(t, &ready, &changed, &firstFresh);
+            if (firstFresh) {
+                ++shownFrames;
+                if (firstT < 0) firstT = t;
+                lastT = t;
             }
-            if (fresh && !presenter.Render(pictures, settings.scaling, 0.0f, opacity)) {
-                if (presenter.DeviceLost()) {
+            fresh = fresh || changed;
+            if (fresh) {
+                if (presenter.Render(pictures, 0.0f, opacity)) {
+                    rendered(pictures);
+                } else if (presenter.DeviceLost()) {
                     ALOG(L"overlay: the graphics device was lost -- exiting so a fresh one starts");
                     end = LiveEnd::Leave;
                     break;
@@ -625,7 +752,7 @@ LiveEnd GoLiveOnce(Presenter &presenter, const Options &opt, HINSTANCE instance)
         // Leave when the logon screen does (real mode), after three readings.
         if (!opt.windowed && now - lastExitCheck > 500) {
             lastExitCheck = now;
-            placeClock();
+            placeComponents();
             const screen::Session s = screen::ReadSession(g_overlay.session);
             const bool stillLogon = s.console && (!s.signedIn || s.locked);
             if (!screen::InputDesktopIsSecure() && !stillLogon) {
@@ -658,7 +785,7 @@ LiveEnd GoLiveOnce(Presenter &presenter, const Options &opt, HINSTANCE instance)
     }
 
     if (shownFrames > 1 && lastT > firstT) {
-        const auto it = players.find(targets.front().videoId);
+        const auto it = players.find(targets.front().wallpaper.id);
         const double videoFps = it != players.end() ? 1.0 / it->second->frameSeconds() : 0.0;
         ALOG(L"overlay: %d frames in %.1f s of video, %.1f fps shown of %.1f; the compositor runs at %.1f Hz",
              shownFrames, lastT - firstT, (shownFrames - 1) / (lastT - firstT), videoFps,
