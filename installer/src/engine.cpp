@@ -8,13 +8,16 @@
 #include <wrl/client.h>
 
 #include "animelogon/background.h"
-#include "animelogon/library.h"
+#include "animelogon/components.h"
 #include "animelogon/log.h"
 #include "animelogon/machine.h"
 #include "animelogon/paths.h"
 #include "animelogon/secure.h"
 #include "animelogon/settings.h"
+#include "animelogon/skins.h"
 #include "animelogon/text.h"
+#include "animelogon/theme.h"
+#include "animelogon/wallpaper.h"
 
 #pragma comment(lib, "mfuuid.lib")
 
@@ -123,14 +126,34 @@ bool InstallDirAllowed(const std::wstring &dir) {
     return paths::IsWithin(dir, root) && dir.size() > root.size();
 }
 
+constexpr size_t kMaxSettingsBytes = 256 * 1024;
+
 // %ProgramData%\AnimeLogon and the directories in it, taken back and emptied if anyone but
-// an administrator could have prepared them.
+// an administrator could have prepared them: the logs, and the stores themes are made of.
 DWORD PrepareDataDir() {
-    for (const std::wstring &dir : {paths::DataDir(), paths::LogDir(), paths::LibraryDir()}) {
+    for (const std::wstring &dir : {paths::DataDir(), paths::LogDir(), WallpapersDir(), ComponentsDir(), ThemesDir()}) {
         const DWORD e = secure::SecureDirectory(dir);
         if (e != ERROR_SUCCESS) return e;
     }
     return ERROR_SUCCESS;
+}
+
+// The stores from before themes, videos\ and skins\. Nothing reads them once themes are in use,
+// and nothing in them carries over: themes replaced them without a migration.
+void RemoveOldStores() {
+    for (const std::wstring &dir : {paths::LibraryDir(), SkinsDir()}) {
+        const DWORD e = secure::RemoveTree(dir);
+        if (e != ERROR_SUCCESS) ALOG(L"%s cannot be removed (%lu)", dir.c_str(), e);
+    }
+}
+
+// Whether settings.ini names a theme. One from before themes does not, and its keys mean
+// nothing to this version.
+bool SettingsNameATheme() {
+    std::vector<uint8_t> bytes;
+    if (!secure::ReadFileBytes(paths::SettingsPath(), &bytes, kMaxSettingsBytes)) return false;
+    const size_t skip = (bytes.size() >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF) ? 3 : 0;
+    return ParseSettings(FromUtf8(std::string_view((const char *)bytes.data() + skip, bytes.size() - skip))).theme.has_value();
 }
 
 // Deletes an installed file now, or queues it for the next restart if it is in use.
@@ -211,6 +234,7 @@ Report Install(const std::wstring &targetDir) {
     step(L"检查 H.264 解码器");
     if (stopped != ERROR_SUCCESS) ALOG(L"install: stopping the service failed (%lu)", stopped);
     step(L"停止正在运行的服务");
+    RemoveOldStores();
     step(L"准备数据目录");
 
     if (!paths::CreateDirectories(targetDir)) return fail(L"无法创建安装目录：" + targetDir);
@@ -234,11 +258,16 @@ Report Install(const std::wstring &targetDir) {
     }
     step(L"生成登录背景");
 
-    // settings.ini holds only ids and enums, so Users may rewrite it. One an administrator
-    // did not create is replaced with the defaults.
-    if (!secure::IsAdminOwnedFile(paths::SettingsPath(), &why)) {
-        ALOG(L"install: settings.ini %s -- writing defaults", why.c_str());
-        const std::string text = ToUtf8(SerializeSettings(Settings{}));
+    // settings.ini holds only ids and enums, so Users may rewrite it. One an administrator did
+    // not create is replaced with the defaults, and so is one from before themes: the default
+    // theme, with nothing changed about it.
+    bool defaults = !secure::IsAdminOwnedFile(paths::SettingsPath(), &why);
+    if (defaults) ALOG(L"install: settings.ini %s -- writing defaults", why.c_str());
+    else if ((defaults = !SettingsNameATheme())) ALOG(L"install: settings.ini names no theme -- writing defaults");
+    if (defaults) {
+        Settings fresh;
+        fresh.theme = std::wstring(kDefaultTheme);
+        const std::string text = ToUtf8(SerializeThemeSettings(fresh));
         e = secure::WriteBytes(paths::SettingsPath(), text.data(), text.size());
         if (e != ERROR_SUCCESS) return fail(WithError(L"无法写入默认设置", e));
     }
@@ -273,7 +302,7 @@ Report Install(const std::wstring &targetDir) {
     else ALOG(L"install: no Start menu shortcut (0x%08lx)", (unsigned long)hr);
 
     r.ok = true;
-    r.message = L"AnimeLogon 已安装。按 Win + L 锁定屏幕即可查看，或打开 AnimeLogon 设置导入视频。";
+    r.message = L"AnimeLogon 已安装。按 Win + L 锁定屏幕即可查看，或打开 AnimeLogon 设置导入视频或图片。";
     return r;
 }
 
@@ -315,7 +344,9 @@ Report Uninstall(bool keepData) {
         if (e != ERROR_SUCCESS) problem(L"删除数据目录", e);
         else step(L"删除数据目录");
     } else {
+        // The themes, their wallpapers and components, and settings.ini stay for a later install.
         secure::RemoveTree(paths::LogDir());
+        RemoveOldStores();
         machine::ClearPausedMarker();
     }
     // A failed restore keeps its recorded originals for the next uninstall.
