@@ -5,6 +5,7 @@
 #include <dwrite_1.h>
 
 #include <algorithm>
+#include <cfloat>
 #include <cmath>
 
 #include "animelogon/log.h"
@@ -349,11 +350,36 @@ bool SkinView::Draw(ID2D1Bitmap1 *target, UINT width, UINT height, size_t slot, 
     }
     dc_->SetTarget(target);
     dc_->BeginDraw();
-    const bool faded = opacity < 1.0f;
-    if (faded)
-        dc_->PushLayer(D2D1::LayerParameters1(D2D1::InfiniteRect(), nullptr, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
-                                              D2D1::IdentityMatrix(), std::max(0.0f, opacity)),
-                       nullptr);
+    bool layered = false;
+    if (opacity < 1.0f) {
+        // The layer covers only what the panels can touch: one the size of the target costs a
+        // full-screen blend per frame while the skin fades in.
+        D2D1_RECT_F area = D2D1::RectF(FLT_MAX, FLT_MAX, -FLT_MAX, -FLT_MAX);
+        auto add = [&](float left, float top, float right, float bottom) {
+            area = D2D1::RectF(std::min(area.left, left), std::min(area.top, top), std::max(area.right, right),
+                               std::max(area.bottom, bottom));
+        };
+        for (size_t i = 0; i < s.panels.size(); ++i) {
+            const Built &b = s.panels[i];
+            if (!b.text) continue;
+            const D2D1_SIZE_U size = b.text->GetPixelSize();
+            add(b.at.x, b.at.y, b.at.x + (float)size.width, b.at.y + (float)size.height);
+            for (const skin::Shadow &sh : skin_.panels[i].shadows) {
+                const float x = b.at.x + std::round(sh.x * b.px), y = b.at.y + std::round(sh.y * b.px);
+                const float blur = std::ceil(3.0f * std::max(0.5f, sh.blur * b.px)) + 1.0f;
+                add(x - blur, y - blur, x + (float)size.width + blur, y + (float)size.height + blur);
+            }
+            if (b.backdrop) {
+                const D2D1_ELLIPSE &e = b.backdropArea;
+                add(e.point.x - e.radiusX, e.point.y - e.radiusY, e.point.x + e.radiusX, e.point.y + e.radiusY);
+            }
+        }
+        layered = area.right > area.left && area.bottom > area.top;  // else there is nothing to draw
+        if (layered)
+            dc_->PushLayer(D2D1::LayerParameters1(area, nullptr, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+                                                  D2D1::IdentityMatrix(), std::max(0.0f, opacity)),
+                           nullptr);
+    }
     for (size_t i = 0; i < s.panels.size(); ++i) {
         const Built &b = s.panels[i];
         if (!b.text) continue;
@@ -370,7 +396,7 @@ bool SkinView::Draw(ID2D1Bitmap1 *target, UINT width, UINT height, size_t slot, 
         }
         dc_->DrawImage(b.text.Get(), b.at);
     }
-    if (faded) dc_->PopLayer();
+    if (layered) dc_->PopLayer();
     const HRESULT hr = dc_->EndDraw();
     dc_->SetTarget(nullptr);
     return SUCCEEDED(hr);
