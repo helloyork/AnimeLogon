@@ -445,11 +445,10 @@ struct Config : Window {
                 for (const std::wstring &id : InstalledThemeIds())
                     if (!before.count(id)) added = id;
                 Reload();
-                // The first theme imported is put on the logon screen.
-                const bool apply = !added.empty() && CurrentTheme() == kDefaultTheme;
-                if (apply) set.theme = added;
+                // What was just imported is what the person wants to see next.
+                if (!added.empty()) set.theme = added;
                 Save();
-                Note(L"已导入主题「" + r.name + (apply ? L"」，并已开始使用。" : L"」。"));
+                Note(L"已导入主题「" + r.name + (added.empty() ? L"」。" : L"」，并已开始使用。"));
             } else if (code == commit::kDeclined) {
                 Note(L"已取消，未导入。");
             } else {
