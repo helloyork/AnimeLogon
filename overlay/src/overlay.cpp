@@ -338,17 +338,21 @@ LiveEnd GoLiveOnce(Presenter &presenter, const Options &opt, HINSTANCE instance)
         shown.push_back(&d);
     }
 
-    // A theme's wallpaper that cannot be shown after all gives way to the built-in one, as
-    // ResolveTheme does for one that does not load.
-    auto fallBack = [&](size_t i, const std::wstring &reason) {
-        ALOG(L"overlay: wallpaper %s cannot be shown (%s) -- showing the built-in wallpaper",
-             targets[i].wallpaper.id.c_str(), reason.c_str());
-        plan::Wallpaper w;
-        w.source = plan::Source::Gradient;
-        w.id = animelogon::kDefaultWallpaper;
-        w.fit = targets[i].wallpaper.fit;
-        targets[i].wallpaper = w;
-        presenter.SetWallpaper(i, w);
+    // A wallpaper that cannot be shown after all -- a video that does not open or stops
+    // decoding, an image that cannot be read -- gives way to the built-in one on every display
+    // showing it, as ResolveTheme does for one that does not load, and the screen stays covered.
+    // `id` is taken by value: it may be a target's own, which this replaces.
+    auto fallBack = [&](std::wstring id, const std::wstring &reason) {
+        std::vector<plan::Wallpaper> now(targets.size());
+        for (size_t i = 0; i < targets.size(); ++i) now[i] = targets[i].wallpaper;
+        const std::vector<size_t> changed = plan::ShowBuiltInInstead(&now, id);
+        if (changed.empty()) return;
+        ALOG(L"overlay: wallpaper %s cannot be shown (%s) -- showing the built-in wallpaper on %zu display(s)",
+             id.c_str(), reason.c_str(), changed.size());
+        for (size_t i : changed) {
+            targets[i].wallpaper = now[i];
+            presenter.SetWallpaper(i, now[i]);
+        }
     };
 
     // Videos by wallpaper id, each opened once however many displays show it.
@@ -368,10 +372,7 @@ LiveEnd GoLiveOnce(Presenter &presenter, const Options &opt, HINSTANCE instance)
         }
     };
     auto replaceUnplayable = [&] {
-        for (size_t i = 0; i < targets.size(); ++i) {
-            const plan::Wallpaper &w = targets[i].wallpaper;
-            if (w.source == plan::Source::Video && !players.count(w.id)) fallBack(i, L"it could not be opened");
-        }
+        for (const std::wstring &id : unplayable) fallBack(id, L"it could not be opened");
     };
 
     // Image wallpapers start reading at once, off this thread. One the device still holds from
@@ -451,7 +452,7 @@ LiveEnd GoLiveOnce(Presenter &presenter, const Options &opt, HINSTANCE instance)
                 if (state == Presenter::ImageState::Reading) {
                     *ready = false;
                 } else {
-                    if (state == Presenter::ImageState::Failed) fallBack(i, failure);
+                    if (state == Presenter::ImageState::Failed) fallBack(w.id, failure);
                     p.kind = Kind::Wallpaper;
                 }
                 break;
@@ -562,19 +563,48 @@ LiveEnd GoLiveOnce(Presenter &presenter, const Options &opt, HINSTANCE instance)
     // is its wallpaper's sound track, when the wallpaper is a video with one.
     AudioSystem audio;
     audio.Open(settings.audio);
+    std::wstring track;  // the wallpaper whose sound track plays, if any
     const double refresh = RefreshSeconds();
     if (!opt.windowed && !done) {
         AudioSystem::RememberConsoleDefault();
         const plan::Wallpaper &first = targets.front().wallpaper;
-        if (first.source == plan::Source::Video && !first.audioPath.empty())
+        if (first.source == plan::Source::Video && !first.audioPath.empty()) {
             audio.PlayVideoTrack(first.audioPath, 0.0, kFadeSeconds);
+            track = first.id;
+        }
     }
+
+    // A video that stops decoding gives way to the built-in wallpaper, and its sound track
+    // stops with it. Returns false when the cause was a lost device, which ends the appearance.
+    auto replaceFailed = [&] {
+        for (auto it = players.begin(); it != players.end();) {
+            if (!it->second->failed()) {
+                ++it;
+                continue;
+            }
+            if (presenter.DeviceLost()) return false;
+            const std::wstring id = it->first, why = it->second->failure();
+            it = players.erase(it);
+            unplayable.insert(id);
+            if (id == track) {
+                audio.FadeOut(0.2f);
+                track.clear();
+            }
+            fallBack(id, why);
+        }
+        return true;
+    };
 
     // Until every display has its wallpaper -- a video's first frame, an image read -- the still
     // stays up (or, without one, the windows stay hidden), so the change from Windows'
     // background -- that same picture, baked -- to the wallpaper is not a change at all.
     for (const ULONGLONG until = GetTickCount64() + kFirstFrameWaitMs; !done;) {
         Beat();
+        if (!replaceFailed()) {
+            ALOG(L"overlay: the graphics device was lost -- exiting so a fresh one starts");
+            done = true;
+            break;
+        }
         bool ready = true, changed = false;
         const std::vector<Presenter::Picture> pictures = compose(0.0, &ready, &changed, nullptr);
         if (ready || GetTickCount64() >= until) {
@@ -671,6 +701,14 @@ LiveEnd GoLiveOnce(Presenter &presenter, const Options &opt, HINSTANCE instance)
             }
         }
 
+        // A video that stopped decoding is replaced before this tick's picture is composed, so
+        // the built-in wallpaper is drawn in its place at once.
+        if (!done && !replaceFailed()) {
+            ALOG(L"overlay: the graphics device was lost -- exiting so a fresh one starts");
+            end = LiveEnd::Leave;
+            break;
+        }
+
         if (draw) {
             // Drawn only when something on it changed: a still wallpaper costs nothing between
             // the minutes, and a high refresh rate need not cost a full-screen draw per tick.
@@ -703,18 +741,6 @@ LiveEnd GoLiveOnce(Presenter &presenter, const Options &opt, HINSTANCE instance)
             lastKeepTop = now;
             presenter.KeepOnTop();
         }
-
-        for (auto &[id, player] : players)
-            if (!done && player->failed()) {
-                done = true;
-                if (presenter.DeviceLost()) {
-                    ALOG(L"overlay: the graphics device was lost -- exiting so a fresh one starts");
-                    end = LiveEnd::Leave;
-                } else {
-                    ALOG(L"overlay: %s stopped decoding -- leaving the screen", id.c_str());
-                    end = LiveEnd::Dismissed;
-                }
-            }
 
         // Leave when the logon screen does (real mode), after three readings.
         if (!opt.windowed && now - lastExitCheck > 500) {

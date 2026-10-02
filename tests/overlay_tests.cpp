@@ -302,6 +302,45 @@ TEST(PlanMonitorModes) {
     CHECK(plan::Describe(p.displays[0]).find(L"no wallpaper (black)") != std::wstring::npos);
 }
 
+TEST(UnshowableWallpaperGivesWayToTheBuiltInOne) {
+    FakeStore store = Store();
+    store.themes[L"dddddddddddddddd"] = "<theme format=\"1\" name=\"D\"><wallpaper ref=\"1111111111111111\" fit=\"fit\"/></theme>";
+    auto wallpapers = [](const plan::Plan &p) {
+        std::vector<plan::Wallpaper> out;
+        for (const plan::Display &d : p.displays) out.push_back(d.wallpaper);
+        return out;
+    };
+    // One video on three displays: all three change, each keeping its fit; then nothing is left.
+    Settings s;
+    s.theme = kThemeV;
+    std::vector<plan::Wallpaper> shown = wallpapers(plan::Build(s, Monitors(3), store));
+    std::vector<size_t> changed = plan::ShowBuiltInInstead(&shown, kVideoY);
+    CHECK(changed.size() == 3);
+    for (const plan::Wallpaper &w : shown) {
+        CHECK(w.source == plan::Source::Gradient && w.id == L"default" && w.fit == Scaling::Fill);
+        CHECK(w.path.empty() && w.audioPath.empty());
+    }
+    CHECK(plan::ShowBuiltInInstead(&shown, kVideoY).empty());
+    CHECK(plan::ShowBuiltInInstead(&shown, L"default").empty());  // the built-in one is never replaced
+
+    // Per-monitor: only the displays showing that wallpaper; a video with sound loses its sound.
+    s.monitorMode = MonitorMode::PerMonitor;
+    s.screens[L"00000000000000aa"] = kThemeU;              // none
+    s.screens[L"00000000000000bb"] = L"dddddddddddddddd";  // video X, with sound, fit
+    s.screens[L"00000000000000cc"] = kThemeT;              // the image, fit
+    shown = wallpapers(plan::Build(s, Monitors(3), store));
+    CHECK(shown.size() == 3 && shown[1].source == plan::Source::Video && !shown[1].audioPath.empty());
+    changed = plan::ShowBuiltInInstead(&shown, kVideoX);
+    CHECK(changed.size() == 1 && changed[0] == 1);
+    CHECK(shown[1].source == plan::Source::Gradient && shown[1].audioPath.empty() && shown[1].fit == Scaling::Fit);
+    CHECK(shown[0].source == plan::Source::None && shown[2].source == plan::Source::Image);
+    // An image that cannot be read, likewise; "none" and an id nobody shows change nothing.
+    changed = plan::ShowBuiltInInstead(&shown, kImage);
+    CHECK(changed.size() == 1 && changed[0] == 2 && shown[2].source == plan::Source::Gradient && shown[2].fit == Scaling::Fit);
+    CHECK(plan::ShowBuiltInInstead(&shown, L"").empty() && plan::ShowBuiltInInstead(&shown, kVideoY).empty());
+    CHECK(shown[0].source == plan::Source::None);
+}
+
 TEST(GradientIsTheInstalledBackground) {
     // At the installed size, exactly the picture Render() encodes.
     const std::vector<uint8_t> rows = RenderRows();

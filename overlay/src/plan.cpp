@@ -100,4 +100,19 @@ std::wstring Describe(const Display &d) {
                               d.components.empty() ? L"" : d.showComponents ? L", drawn here" : L", not drawn here");
 }
 
+std::vector<size_t> ShowBuiltInInstead(std::vector<Wallpaper> *shown, const std::wstring &id) {
+    std::vector<size_t> changed;
+    for (size_t i = 0; i < shown->size(); ++i) {
+        Wallpaper &w = (*shown)[i];
+        if ((w.source != Source::Video && w.source != Source::Image) || w.id != id) continue;
+        Wallpaper builtIn;
+        builtIn.source = Source::Gradient;
+        builtIn.id = animelogon::kDefaultWallpaper;
+        builtIn.fit = w.fit;
+        w = builtIn;
+        changed.push_back(i);
+    }
+    return changed;
+}
+
 }  // namespace plan

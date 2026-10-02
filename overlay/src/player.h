@@ -43,7 +43,9 @@ public:
     int height() const { return displayH_; }
     bool hardware() const { return hardware_; }
     double frameSeconds() const { return frameSeconds_; }
+    // True once decoding has stopped for good; failure() then says why, for the log.
     bool failed() const { return failed_.load(); }
+    std::wstring failure() const { return failed() ? failure_ : std::wstring(); }
 
 private:
     struct Slot {
@@ -58,6 +60,8 @@ private:
     bool CreateSlots();
     void Decode();
     bool Store(IMFSample *sample, Slot &slot);
+    // On the decoding thread: logs `why` and stops for good.
+    void Fail(const std::wstring &why);
 
     std::wstring path_;
     Microsoft::WRL::ComPtr<ID3D11Device> device_;
@@ -80,4 +84,5 @@ private:
     std::thread thread_;
     std::atomic<bool> stop_{false};
     std::atomic<bool> failed_{false};
+    std::wstring failure_;  // written before failed_ turns true, and only read after
 };

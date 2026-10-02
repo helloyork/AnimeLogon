@@ -5,6 +5,7 @@
 #include <propvarutil.h>
 
 #include "animelogon/log.h"
+#include "animelogon/text.h"
 #include "nv12.h"
 
 using Microsoft::WRL::ComPtr;
@@ -145,6 +146,7 @@ bool VideoPlayer::Open(const std::wstring &path, ID3D11Device *device, IMFDXGIDe
          allocH_, 1.0 / frameSeconds_, hardware_ ? L"hardware" : L"software");
     stop_ = false;
     failed_ = false;
+    failure_.clear();
     thread_ = std::thread([this] { Decode(); });
     return true;
 }
@@ -189,6 +191,12 @@ bool VideoPlayer::Store(IMFSample *sample, Slot &slot) {
     return true;
 }
 
+void VideoPlayer::Fail(const std::wstring &why) {
+    ALOG(L"video: %s", why.c_str());
+    failure_ = why;
+    failed_ = true;
+}
+
 void VideoPlayer::Decode() {
     const HRESULT com = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     double loopBase = 0.0, loopLength = 0.0;
@@ -211,14 +219,12 @@ void VideoPlayer::Decode() {
         const HRESULT hr =
             reader_->ReadSample((DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0, nullptr, &flags, &ts, &sample);
         if (FAILED(hr) || (flags & MF_SOURCE_READERF_ERROR)) {
-            ALOG(L"video: decoding failed (0x%08X)", hr);
-            failed_ = true;
+            Fail(animelogon::Format(L"decoding failed (0x%08X)", hr));
             break;
         }
         if (flags & MF_SOURCE_READERF_ENDOFSTREAM) {
             if (last < 0 || ++consecutiveEmpty > 2) {
-                ALOG(L"video: the file has no frames to loop");
-                failed_ = true;
+                Fail(L"the file has no frames to loop");
                 break;
             }
             // Loop: the next pass continues the timeline rather than restarting it.
@@ -231,8 +237,7 @@ void VideoPlayer::Decode() {
             continue;
         }
         if (flags & MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED) {
-            ALOG(L"video: the stream changed format mid-file");
-            failed_ = true;
+            Fail(L"the stream changed format mid-file");
             break;
         }
         if (!sample) continue;
@@ -240,8 +245,7 @@ void VideoPlayer::Decode() {
         if (first < 0) first = ts;
         if (loopLength <= 0.0 && ts > last) last = ts;
         if (!Store(sample.Get(), slots_[target])) {
-            ALOG(L"video: a decoded frame could not be stored");
-            failed_ = true;
+            Fail(L"a decoded frame could not be stored");
             break;
         }
         std::lock_guard<std::mutex> l(lock_);

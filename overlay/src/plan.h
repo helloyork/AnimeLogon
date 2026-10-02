@@ -74,4 +74,9 @@ Plan Build(const animelogon::Settings &settings, const std::vector<animelogon::M
 // components it has.
 std::wstring Describe(const Display &display);
 
+// What the overlay does when wallpaper `id` -- a video or an image -- turns out not to be
+// showable after all: every one of `shown` that is that wallpaper becomes the built-in one,
+// keeping its fit, so the displays stay covered. Returns the indices it changed.
+std::vector<size_t> ShowBuiltInInstead(std::vector<Wallpaper> *shown, const std::wstring &id);
+
 }  // namespace plan
