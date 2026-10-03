@@ -1,5 +1,5 @@
 helloyork/micula
-commit 785124af380539b02276f5ad3c8c480004bb2a1a
+commit ba702ae66b8590fcab48ce7a1b5e815bed209570
 files  CMakeLists.txt, include/, LICENSE
 
 Vendored so a plain clone builds with nothing else to fetch. To update, copy these

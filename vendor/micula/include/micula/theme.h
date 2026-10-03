@@ -40,6 +40,7 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 
+#include "glyphs.h"
 #include <windows.h>
 
 // Before <d2d1.h>, and that ordering is the whole of it.
@@ -470,9 +471,37 @@ inline Palette MakePalette(bool dark) {
 namespace metric {
 constexpr float kRadiusControl = 4.0f;
 constexpr float kRadiusCard    = 8.0f;
+// A label drawn beside an icon is raised by this much. `PARAGRAPH_ALIGNMENT_CENTER` centres a
+// line of text by its line box, and a line box is not the ink: the ascender above the cap band
+// is taller than the descender below the baseline, so the ink sits low in its own box -- by
+// about 0.7 of a DIP at 14 DIP, and up to 1.7 for a label with a descender in it. An icon's
+// ink is centred in its own em, so the two do not line up until the text is lifted. It is
+// roughly (ascent - capHeight - descent) / 2 for the UI face, which is one DIP at every text
+// size this library uses.
+constexpr float kTextLift      = 1.0f;
 constexpr float kControlH      = 32.0f;
 constexpr float kButtonMinW    = 100.0f;
 }  // namespace metric
+
+// A panel's four corner radii in DIPs, in XAML's order: top-left, top-right, bottom-right,
+// bottom-left. 0 is a square corner, any mixture is a shape, and the four may differ -- WinUI's
+// content layer is one rounded corner and three square ones.
+struct Corners {
+    float r[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+    constexpr Corners() = default;
+    constexpr Corners(float tl, float tr, float br, float bl) : r{ tl, tr, br, bl } {}
+};
+
+// Which of a panel's four edges its border runs along. A corner is drawn when both of the edges
+// meeting there are, so the common shape -- a border on the two sides a panel shows to the rest
+// of the window and none on the two that are the window -- is still one unbroken line.
+namespace edge {
+constexpr unsigned kTop    = 1u;
+constexpr unsigned kRight  = 2u;
+constexpr unsigned kBottom = 4u;
+constexpr unsigned kLeft   = 8u;
+constexpr unsigned kAll    = 15u;
+}  // namespace edge
 
 // ---------------------------------------------------------------- typography
 
@@ -580,26 +609,7 @@ inline bool SystemAutoHidesScrollBars() {
     return v != 0;
 }
 
-// A handful of Segoe Fluent Icons code points -- the ones the controls draw, and a few
-// a page commonly wants -- named so a reader does not have to look them up. Every one
-// of them also exists in Segoe MDL2 Assets at the same code point, which is what makes
-// the fallback above safe. Draw them with Fonts::icon, never with a text format.
-//
-// Escapes rather than the characters themselves, so this header means the same thing
-// whatever code page the compiler reads it in.
-namespace glyph {
-constexpr const wchar_t *kCheck    = L"\uE73E";  // CheckMark
-constexpr const wchar_t *kWarning  = L"\uE7BA";  // Warning
-constexpr const wchar_t *kError    = L"\uEA39";  // ErrorBadge
-constexpr const wchar_t *kInfo     = L"\uE946";  // Info
-constexpr const wchar_t *kFolder   = L"\uE8B7";  // FolderOpen
-constexpr const wchar_t *kChevron  = L"\uE70D";  // ChevronDown
-constexpr const wchar_t *kRefresh  = L"\uE72C";  // Refresh
-constexpr const wchar_t *kSettings = L"\uE713";  // Settings
-constexpr const wchar_t *kShield   = L"\uEA18";  // Shield
-constexpr const wchar_t *kBusy     = L"\uE895";  // SyncStatus
-constexpr const wchar_t *kCaretUp   = L"\uEDDB";  // CaretUpSolid8, a scroll bar's arrow
-constexpr const wchar_t *kCaretDown = L"\uEDDC";  // CaretDownSolid8
-}  // namespace glyph
+// The icon code points -- the ones the controls draw, and the ones a page wants -- are in
+// glyphs.h, which is the one header of this library a page is expected to add to.
 
 }  // namespace micula

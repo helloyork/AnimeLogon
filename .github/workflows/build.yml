@@ -28,3 +28,8 @@ jobs:
 
       - name: Build
         run: cmake --build --preset ${{ matrix.arch }}-release
+
+      # ARM64 is cross-built on an x64 runner, so only x64 runs the tests.
+      - name: Test
+        if: matrix.arch == 'x64'
+        run: ctest --preset x64-release

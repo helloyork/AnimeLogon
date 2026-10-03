@@ -75,6 +75,7 @@
 #include <wincodec.h>
 #include <windowsx.h>
 
+#include <functional>
 #include <map>
 #include <memory>
 #include <string>
@@ -170,7 +171,12 @@ constexpr DWORD kDwmImmersiveDarkMode = 20;
 constexpr DWORD kDwmCornerPreference  = 33;
 constexpr DWORD kDwmSystemBackdrop    = 38;
 constexpr DWORD kDwmCornerRound       = 2;
+// DWMWA_SYSTEMBACKDROP_TYPE's values, which the SDK this builds against may not name.
+constexpr DWORD kDwmBackdropAuto       = 0;   // DWMSBT_AUTO: let DWM choose
+constexpr DWORD kDwmBackdropNone       = 1;   // DWMSBT_NONE
 constexpr DWORD kDwmBackdropMainWindow = 2;   // DWMSBT_MAINWINDOW == Mica
+constexpr DWORD kDwmBackdropAcrylic    = 3;   // DWMSBT_TRANSIENTWINDOW
+constexpr DWORD kDwmBackdropTabbed     = 4;   // DWMSBT_TABBEDWINDOW == Mica Alt
 
 // The three system cursors, as wide resource ids. IDC_ARROW and its siblings are
 // MAKEINTRESOURCE, which follows UNICODE -- in a program built without it they are
@@ -225,6 +231,102 @@ struct Painter {
     void Line(float x0, float y0, float x1, float y1, const D2D1_COLOR_F &c,
               float width = 1.0f) const {
         rt->DrawLine(D2D1::Point2F(x0, y0), D2D1::Point2F(x1, y1), Brush(c), width);
+    }
+    // A panel whose four corners are chosen one by one, and whose border runs along any
+    // combination of its edges -- WinUI's content layer is one rounded corner, three square ones,
+    // a border along the two edges that face the rest of the window, and none along the two that
+    // are the window.
+    //
+    // The shape is a path because it has to be: `FillRoundedRectangle` takes one radius for all
+    // four corners, and a page's layer has exactly one of them rounded. Drawing it as a rounded
+    // rectangle with the square corners patched on over the top is the same picture for an opaque
+    // colour -- and a band of a lighter colour down every edge it passes for a translucent one,
+    // which is what a layer colour is: two coats in one place and one everywhere else. Over Mica
+    // that is a hint; over Acrylic it is a band you can measure.
+    //
+    // The path is built per call rather than cached, which is what a page with a handful of
+    // panels can afford. A page that draws hundreds of them wants its own cache.
+    void Panel(const D2D1_RECT_F &r, const Corners &c, const D2D1_COLOR_F &fill,
+               const D2D1_COLOR_F &border = D2D1::ColorF(0, 0.0f),
+               unsigned edges = edge::kAll, float width = 1.0f) const {
+        ID2D1Factory *factory = nullptr;
+        rt->GetFactory(&factory);
+        if (!factory) return;
+        // One figure per run of neighbouring pieces, and the pieces themselves in drawing order:
+        // the top edge, the arc joining it to the right edge, the right edge, and so on round, so
+        // that piece `i` runs from `pt[i]` to `pt[i + 1]`. A corner is an arc where two edges meet
+        // -- and half an arc is not a corner, which is why a corner needs both of its edges.
+        auto shape = [&](const D2D1_RECT_F &box, const Corners &k,
+                         unsigned on) -> ID2D1PathGeometry * {
+            float tl = k.r[0], tr = k.r[1], br = k.r[2], bl = k.r[3];
+            // No two radii on one side may overlap, or the curve crosses itself and the fill comes
+            // out inside out. XAML scales the pair down the same way.
+            const float w = box.right - box.left, h = box.bottom - box.top;
+            if (tl + tr > 0.0f) { const float s = (std::min)(1.0f, w / (tl + tr)); tl *= s; tr *= s; }
+            if (bl + br > 0.0f) { const float s = (std::min)(1.0f, w / (bl + br)); bl *= s; br *= s; }
+            if (tl + bl > 0.0f) { const float s = (std::min)(1.0f, h / (tl + bl)); tl *= s; bl *= s; }
+            if (tr + br > 0.0f) { const float s = (std::min)(1.0f, h / (tr + br)); tr *= s; br *= s; }
+            const D2D1_POINT_2F pt[9] = {
+                D2D1::Point2F(box.left + tl, box.top),     D2D1::Point2F(box.right - tr, box.top),
+                D2D1::Point2F(box.right, box.top + tr),    D2D1::Point2F(box.right, box.bottom - br),
+                D2D1::Point2F(box.right - br, box.bottom), D2D1::Point2F(box.left + bl, box.bottom),
+                D2D1::Point2F(box.left, box.bottom - bl),  D2D1::Point2F(box.left, box.top + tl),
+                D2D1::Point2F(box.left + tl, box.top),
+            };
+            const float rad[8] = { 0.0f, tr, 0.0f, br, 0.0f, bl, 0.0f, tl };
+            const bool lit[8] = {
+                (on & edge::kTop) != 0,
+                (on & edge::kTop) != 0 && (on & edge::kRight) != 0,
+                (on & edge::kRight) != 0,
+                (on & edge::kRight) != 0 && (on & edge::kBottom) != 0,
+                (on & edge::kBottom) != 0,
+                (on & edge::kBottom) != 0 && (on & edge::kLeft) != 0,
+                (on & edge::kLeft) != 0,
+                (on & edge::kLeft) != 0 && (on & edge::kTop) != 0,
+            };
+            ID2D1PathGeometry *path = nullptr;
+            if (FAILED(factory->CreatePathGeometry(&path)) || !path) return nullptr;
+            ID2D1GeometrySink *sink = nullptr;
+            if (FAILED(path->Open(&sink)) || !sink) { path->Release(); return nullptr; }
+            for (int i = 0; i < 8;) {
+                if (!lit[i]) { i++; continue; }
+                int j = i;
+                while (j < 8 && lit[j]) j++;
+                sink->BeginFigure(pt[i], D2D1_FIGURE_BEGIN_FILLED);
+                for (int p = i; p < j; p++) {
+                    if (rad[p] > 0.0f)
+                        sink->AddArc(D2D1::ArcSegment(pt[p + 1], D2D1::SizeF(rad[p], rad[p]), 0.0f,
+                                                      D2D1_SWEEP_DIRECTION_CLOCKWISE,
+                                                      D2D1_ARC_SIZE_SMALL));
+                    else
+                        sink->AddLine(pt[p + 1]);
+                }
+                sink->EndFigure(D2D1_FIGURE_END_OPEN);
+                i = j;
+            }
+            sink->Close();
+            sink->Release();
+            return path;
+        };
+        // The fill is the whole shape whatever the border covers, and an open figure is filled as
+        // if it were closed, which is what makes the two share one builder.
+        if (ID2D1PathGeometry *p = shape(r, c, edge::kAll)) {
+            rt->FillGeometry(p, Brush(fill));
+            p->Release();
+        }
+        if (border.a > 0.0f && width > 0.0f && edges != 0) {
+            // Inset by the stroke and drawn on that edge, which is what StrokeRound does with a
+            // rectangle: a stroke centred on the edge is two half-covered rows of pixels.
+            const D2D1_RECT_F in = { r.left + width / 2, r.top + width / 2,
+                                     r.right - width / 2, r.bottom - width / 2 };
+            Corners k = c;
+            for (float &rad : k.r) rad = rad > width / 2 ? rad - width / 2 : 0.0f;
+            if (ID2D1PathGeometry *p = shape(in, k, edges)) {
+                rt->DrawGeometry(p, Brush(border), width);
+                p->Release();
+            }
+        }
+        factory->Release();
     }
 
     // One line, vertically centred in `r`, clipped. CLIP is on because a string that
@@ -312,10 +414,13 @@ struct Widget {
     // Fluent. micula::motion::Ramp is the transition, linear and 83 ms, because that is what
     // BrushTransition is.
     float hoverT = 0.0f, pressT = 0.0f, focusT = 0.0f;
-    // Paint order, and hit-test order reversed. Everything is 0 except a dropdown
-    // while its list is open: that list has to be drawn over the controls below it and
-    // has to take the click that lands on one of them, and insertion order cannot
-    // express that -- the dropdown was added in the middle of the page.
+    // Paint order, and hit-test order reversed. Three layers: 0 is the furniture and the
+    // page, 1 is raised *within* the page -- a dropdown's list is drawn over the controls
+    // below it and takes the click that lands on one of them, and insertion order cannot
+    // express that, because the dropdown was added in the middle of the page -- and 2 is
+    // over the page altogether, which is what a navigation pane is while it is open over
+    // one. Only the drawing order knows the difference between 1 and 2; the hit test asks
+    // whether a widget is raised at all, since a click belongs to whatever is on top.
     int  z = 0;
     Window *owner = nullptr;
 
@@ -376,8 +481,6 @@ struct Widget {
     // what Space means there is "the one the list has already arrived at". The default is a
     // click, which is what every other control wants.
     virtual void OnActivate() { OnClick(); }
-    // A WM_TIMER the window does not own. Return true if the id was this control's.
-    virtual bool OnTimer(UINT_PTR /*id*/) { return false; }
     // Something happened that should put away anything transient this control is
     // showing: a press somewhere else, the window being deactivated. Only a flyout has
     // anything to put away, and the reason this is a window-level broadcast rather than
@@ -458,7 +561,6 @@ struct Widget {
     // OnDrag; this is for the few things that genuinely mean "where is the pointer now",
     // such as a hovered row.
     D2D1_POINT_2F Cursor() const;
-
     // The part of the page that is on screen, in this widget's own coordinates -- the
     // window's ClipRect with the page's paint offset added back on. Empty when the page
     // does not scroll, and empty in the same way ClipRect is.
@@ -468,6 +570,18 @@ struct Widget {
     // scrolling page that strip is not the window's: it moves with the page while the
     // control's own rectangle stays where the layout put it.
     D2D1_RECT_F VisibleArea() const;
+
+    // Whether the pointer is on this control, in the control's own coordinates -- the page's
+    // offset has already been taken off. This is what the window's hit test asks, rather than
+    // `rect` on its own.
+    //
+    // It exists for the control whose rectangle is not its own to keep: a page hands one a fresh
+    // `rect` in every Layout, taking back the edge the control derives from its own state, and
+    // deriving it again is a frame's work. Between the two -- a layout with no animation after
+    // it -- the control is drawn correctly and cannot be clicked, which is a control that is
+    // broken for seconds at a time and comes back when anything else in the window happens to
+    // animate. See `SideNav`.
+    virtual bool Covers(float x, float y) const { return Inside(rect, x, y); }
 
     // This widget moves with the page's scroll: its `rect` is in the page's own space --
     // window coordinates with the scroll *not* taken off -- and the offset that puts it
@@ -488,6 +602,35 @@ struct Widget {
     bool persistent = false;
 };
 
+// One Windows timer, whose id nobody had to choose: the window hands them out from a pool of its
+// own, so a control that needs one does not have to know which numbers the library uses -- or
+// which numbers a page picked for itself.
+//
+// It is also the answer to where the timer's message goes. The window keeps the timers that are
+// running and offers every `WM_TIMER` to them by id, so a timer belongs to whatever started it.
+// The window used to walk its *widgets* instead and ask each one `OnTimer(id)`, which required
+// any owner to be in that list: a scroll bar inside a drop-down is not, so its timers arrived
+// nowhere at all -- silently -- and the drop-down carried a forwarder to work around it.
+class Timer {
+public:
+    Timer() = default;
+    Timer(const Timer &) = delete;
+    Timer &operator=(const Timer &) = delete;
+    ~Timer();
+    // Starts it, or moves it: `fn` runs `ms` from now, and again every `ms` -- a Windows timer
+    // repeats until it is stopped. Called on the window's thread, like everything else here.
+    void Start(Window *w, UINT ms, std::function<void()> fn);
+    // Ends it, and gives the id back. Safe to call from inside the callback.
+    void Stop();
+    bool Running() const { return win != nullptr; }
+    // One `WM_TIMER`: true when the id was this timer's.
+    bool Handle(UINT_PTR which);
+private:
+    Window *win = nullptr;
+    UINT_PTR id = 0;
+    std::function<void()> tick;
+};
+
 // ---------------------------------------------------------------- Window
 
 struct Window {
@@ -498,6 +641,11 @@ struct Window {
     // False on Windows 11 before 22H2, and on anything that refuses the attribute.
     // The page paints an opaque background instead of letting the material through.
     bool micaActive = false;
+    // Which system backdrop to ask DWM for: one of the kDwmBackdrop* values, Mica unless a page
+    // says otherwise -- `kDwmBackdropAcrylic` is the translucent one, `kDwmBackdropTabbed` Mica
+    // Alt, `kDwmBackdropNone` a flat window. Set it before `Create`; a page that switches
+    // material at run time sets it and calls `ApplyThemeToFrame()`.
+    DWORD backdrop = kDwmBackdropMainWindow;
     bool resizable = false;
     // How Create shows the window. SW_HIDE leaves it hidden for the program to show
     // later: after restoring a saved position, say, or without taking the foreground
@@ -549,6 +697,18 @@ struct Window {
     // rather than switching, and the close button is the one people notice.
     float captionT[3] = { 0.0f, 0.0f, 0.0f };
     bool active = true;
+
+    // The timers this window is running, and the ids they took -- see Timer, which is where both
+    // the ids and the dispatch come from. Declared before `widgets` because a control's timer
+    // takes itself out of this list as it stops, which happens while the controls are being
+    // destroyed.
+    std::vector<Timer *> timers;
+    std::vector<UINT_PTR> timerIds;
+    UINT_PTR TakeTimerId();
+    void GiveTimerId(UINT_PTR id);
+    // The window's own two, from the same pool: the caret's blink, and the frame loop's stand-in
+    // while Windows is running a modal size or move loop of its own.
+    Timer caretTimer, frameTimer;
 
     std::vector<std::unique_ptr<Widget>> widgets;
     Widget *capture = nullptr;    // the widget the mouse went down on
@@ -745,6 +905,10 @@ struct Window {
     void ReleaseImages();
     LRESULT CaptionHitTest(POINT screen) const;
     Widget *HitTest(float x, float y);
+    // Everything but `except` puts away what it is showing -- an open list, a peeked pane. From
+    // a copy of the list, because a dismissal is allowed to lay the page out again and the list
+    // itself may not survive that. See `retired`.
+    void DismissOthers(Widget *except);
     void MoveFocus(int delta);
     void SetFocusTo(Widget *w);
     // Ends a gesture the pointer is no longer allowed to finish, and hands the widget
@@ -755,35 +919,72 @@ struct Window {
     static LRESULT CALLBACK Proc(HWND h, UINT m, WPARAM w, LPARAM l);
 };
 
-// The one timer left. The animation clock used to be the other one; Window::Run says
-// what replaced it and why. Named so a subclass that adds one of its own does not
-// silently take it over.
-constexpr UINT_PTR kCaretTimer = 2;
+inline UINT_PTR Window::TakeTimerId() {
+    // From the bottom up, and 1 is left out: `SetTimer` refuses 0, and a program that sets a timer
+    // of its own is likelier to have picked 1 than 2. Timers are few, so a scan is a scan.
+    for (UINT_PTR id = 2;; id++) {
+        bool taken = false;
+        for (UINT_PTR used : timerIds) if (used == id) { taken = true; break; }
+        if (!taken) { timerIds.push_back(id); return id; }
+    }
+}
 
-// The stand-in for the frame loop while Windows is running a modal loop of its own: a drag
-// of the border or of the caption, which happens inside DefWindowProc and stops the
-// window's own loop from getting another turn until it is over. See WM_ENTERSIZEMOVE.
-//
-// 3, between the caret's 2 and the scroll bars' 4 to 7: a timer id has to be one the
-// controls do not claim, and one of a page's own would be offered to them first and
-// swallowed.
-constexpr UINT_PTR kFrameTimer = 3;
+inline void Window::GiveTimerId(UINT_PTR id) {
+    for (size_t i = 0; i < timerIds.size(); i++)
+        if (timerIds[i] == id) { timerIds.erase(timerIds.begin() + i); return; }
+}
 
-inline void ApplyBackdrop(HWND hwnd, bool dark, bool *micaOut) {
+inline void Timer::Start(Window *w, UINT ms, std::function<void()> fn) {
+    if (!w || !w->hwnd) return;
+    if (win && win != w) Stop();   // a timer belongs to one window at a time
+    if (!win) {
+        win = w;
+        id = w->TakeTimerId();
+        w->timers.push_back(this);
+    }
+    this->tick = std::move(fn);
+    SetTimer(w->hwnd, id, ms, nullptr);   // an id that is already set is simply re-armed
+}
+
+inline void Timer::Stop() {
+    if (!win) return;
+    if (win->hwnd) KillTimer(win->hwnd, id);
+    for (size_t i = 0; i < win->timers.size(); i++)
+        if (win->timers[i] == this) { win->timers.erase(win->timers.begin() + i); break; }
+    win->GiveTimerId(id);
+    win = nullptr;
+    id = 0;
+    tick = nullptr;
+}
+
+inline Timer::~Timer() { Stop(); }
+
+inline bool Timer::Handle(UINT_PTR which) {
+    if (which != id) return false;
+    // Copied, because the callback may stop this timer -- the scroll bar's state timer does --
+    // and stopping clears `tick` out from under the call that is running it.
+    const std::function<void()> f = tick;
+    if (f) f();
+    return true;
+}
+
+inline void ApplyBackdrop(HWND hwnd, bool dark, bool *micaOut,
+                          DWORD backdrop = kDwmBackdropMainWindow) {
     const BOOL d = dark ? TRUE : FALSE;
     DwmSetWindowAttribute(hwnd, kDwmImmersiveDarkMode, &d, sizeof(d));
     const DWORD round = kDwmCornerRound;
     DwmSetWindowAttribute(hwnd, kDwmCornerPreference, &round, sizeof(round));
-    // The one that matters, and the one that can fail. Mica is Windows 11 22H2 and
-    // later; before that this returns E_INVALIDARG and the caller paints an opaque
+    // The one that matters, and the one that can fail. The system backdrops are Windows 11
+    // 22H2 and later; before that this returns E_INVALIDARG and the caller paints an opaque
     // background instead.
-    const DWORD backdrop = kDwmBackdropMainWindow;
     const HRESULT hr = DwmSetWindowAttribute(hwnd, kDwmSystemBackdrop, &backdrop,
                                              sizeof(backdrop));
     if (micaOut) *micaOut = SUCCEEDED(hr);
 }
 
-inline void Window::ApplyThemeToFrame() { ApplyBackdrop(hwnd, pal.dark, &micaActive); }
+inline void Window::ApplyThemeToFrame() {
+    ApplyBackdrop(hwnd, pal.dark, &micaActive, backdrop);
+}
 
 inline void Window::ReloadTheme() {
     pal = MakePalette(SystemUsesDarkTheme());
@@ -968,11 +1169,21 @@ inline void Window::Paint() {
         // Clip first, transform second. The clip is a fixed window onto the page and
         // must not move with what is being drawn inside it -- pushed the other way round
         // it slides too, and the cards then run off under the header.
-        if (clipping) dc->PushAxisAlignedClip(clip, D2D1_ANTIALIAS_MODE_ALIASED);
+        //
+        // The clip is the *page's*, so it is the page's contents that take it. Anything
+        // with a z is over the page rather than in it -- a lid, a flyout, a pane that
+        // covers the content -- and is drawn whole: its shadow reaches outside its own
+        // rectangle by design, and a panel whose shadow is sliced off at the header stops
+        // reading as something floating above the page at all. What such a control still
+        // does is keep *itself* inside the room it has, which is `Bounds()` in the
+        // drop-down and the window's own edges in a pane.
+        const bool pageArea = z == 0;
+        const bool clipped = clipping && pageArea;
+        if (clipped) dc->PushAxisAlignedClip(clip, D2D1_ANTIALIAS_MODE_ALIASED);
         if (dy != 0.0f) dc->SetTransform(D2D1::Matrix3x2F::Translation(0.0f, dy));
         const bool layered = op < 1.0f;
         if (layered) {
-            const D2D1_RECT_F b = clipping
+            const D2D1_RECT_F b = clipped
                 ? D2D1_RECT_F{ clip.left, clip.top - 32, clip.right, clip.bottom + 32 }
                 : D2D1::InfiniteRect();
             dc->PushLayer(D2D1::LayerParameters(b, nullptr, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
@@ -982,10 +1193,11 @@ inline void Window::Paint() {
             if (w->z == z && w->scrolls && shown(w.get())) w->Paint(p);
         if (layered) dc->PopLayer();
         if (dy != 0.0f) dc->SetTransform(D2D1::Matrix3x2F::Identity());
-        if (clipping) dc->PopAxisAlignedClip();
+        if (clipped) dc->PopAxisAlignedClip();
     };
     pass(0);
     pass(1);
+    pass(2);
     // Last, so a page that draws to the top of its own area cannot run under the
     // caption -- which is now client area like any other, and has nothing but paint
     // order protecting it.
@@ -1226,7 +1438,7 @@ inline Widget *Window::HitTest(float x, float y) {
         return w->visible && w->enabled && (!clipping || !w->scrolls || Inside(clip, x, y));
     };
     auto over = [&](const Widget *w) {
-        return Inside(w->rect, x, w->scrolls ? y - dy : y);
+        return w->Covers(x, w->scrolls ? y - dy : y);
     };
     // Raised first, then the rest back-to-front: the reverse of the paint order, so
     // whatever is drawn on top is whatever the click reaches.
@@ -1239,8 +1451,15 @@ inline Widget *Window::HitTest(float x, float y) {
     return nullptr;
 }
 
-inline bool Window::RefreshHover() {
-    POINT pt = {};
+inline void Window::DismissOthers(Widget *except) {
+    std::vector<Widget *> shown;
+    shown.reserve(widgets.size());
+    for (auto &w : widgets) shown.push_back(w.get());
+    for (Widget *w : shown)
+        if (w != except) w->Dismiss();
+}
+
+inline bool Window::RefreshHover() {    POINT pt = {};
     if (!GetCursorPos(&pt)) return false;
     // Whose window the pointer is actually over. A cursor resting on something else
     // must not leave a control lit: this is called from the tick, not from a mouse
@@ -1482,7 +1701,16 @@ inline double MonotonicSeconds() {
 }
 
 inline int Window::Run() {
-    SetTimer(hwnd, kCaretTimer, 530, nullptr);   // GetCaretBlinkTime's own default
+    // GetCaretBlinkTime's own default period. The window owns this timer the way a control owns
+    // its own; see Timer.
+    caretTimer.Start(this, 530, [this] {
+        // Only repaint when there is a caret to blink. A window that invalidates twice a second
+        // forever is a window that keeps a laptop's GPU awake.
+        if (focused && focused->CaretPoint(nullptr)) {
+            caretOn = !caretOn;
+            Invalidate();
+        }
+    });
     QueryPerformanceFrequency(&qpcFreq);
     QueryPerformanceCounter(&qpcLast);
     const frameclock::Fn clock = frameclock::Resolve();
@@ -1554,6 +1782,10 @@ inline int Window::Run() {
     // keystroke for one. The exit code is the quit message's, so take it from the queue.
     MSG quit;
     if (PeekMessageW(&quit, nullptr, WM_QUIT, WM_QUIT, PM_REMOVE)) exitCode = (int)quit.wParam;
+    // Nothing is left to fire at, and the window is about to go: the caret's and the frame loop's
+    // timers are stopped here rather than in their destructors, which run with no hwnd left.
+    caretTimer.Stop();
+    frameTimer.Stop();
     if (pace) CloseHandle(pace);
     fonts.Release();
     ReleaseDevice();
@@ -1688,11 +1920,19 @@ inline LRESULT CALLBACK Window::Proc(HWND h, UINT m, WPARAM wp, LPARAM lp) {
         // controls caught up with the new size only when the drag was let go, and whatever
         // was animating -- an indeterminate bar, a page's glide -- stood still until then.
         self->inSizeMove = true;
-        SetTimer(h, kFrameTimer, 16, nullptr);
+        // A frame of the loop that cannot run, in the loop's own order: tick, then paint. No
+        // Dispatch of its own -- the one at the top of Proc covers the whole message, which is
+        // what a tick needs to be able to lay the page out.
+        self->frameTimer.Start(self, 16, [self] {
+            if (!self->inSizeMove) { self->frameTimer.Stop(); return; }
+            self->Frame();
+            self->Paint();
+            ValidateRect(self->hwnd, nullptr);
+        });
         return 0;
     case WM_EXITSIZEMOVE:
         self->inSizeMove = false;
-        KillTimer(h, kFrameTimer);
+        self->frameTimer.Stop();
         // And the clock is picked up again here, or the frame loop's first frame after the
         // drag carries the whole drag's worth of `dt` -- which the loop clamps to a tenth of
         // a second, but a tenth of a second of an animation in one step is a jump.
@@ -1784,8 +2024,13 @@ inline LRESULT CALLBACK Window::Proc(HWND h, UINT m, WPARAM wp, LPARAM lp) {
         // Everything else puts away whatever it was showing. This is what closes an open
         // drop-down when the click lands somewhere else -- including on nothing, which is
         // the case the control itself can never see.
-        for (auto &other : self->widgets)
-            if (other.get() != w) other->Dismiss();
+        self->DismissOthers(w);
+        // Those dismissals can lay the page out again -- a pane that closes tells the page, and
+        // a page that lays itself out is a different list of widgets. What the pointer was over
+        // is then a control that has been retired, freed when this message returns, and a press
+        // taken on it would leave the capture pointing at memory that is going: the mouse-up
+        // after it is the crash. So the hit test is made again, on the page that is there now.
+        w = self->HitTest(mx, my);
         // Clicking anywhere takes the focus ring away again: it is a keyboard
         // affordance, and a mouse user who has just clicked a button does not want the
         // rectangle left behind on it.
@@ -1883,6 +2128,40 @@ inline LRESULT CALLBACK Window::Proc(HWND h, UINT m, WPARAM wp, LPARAM lp) {
                 }
             }
         }
+        // Then anything floating over the page. A popup that is up is what a wheel over it is for,
+        // and the page under it is not the thing being turned: a page that scrolled out from under
+        // an open list would take the list's own place in it with it. Tried after the control the
+        // pointer is actually over, so that an ordinary control's wheel still wins where the two
+        // overlap, and only where a floating control says it wants the turn at all.
+        {
+            const float x = pt.x / s, y = pt.y / s;
+            for (auto &w : self->widgets) {
+                if (!w->visible || w->z <= 0) continue;
+                float pdy = 0.0f, popacity = 1.0f;
+                if (w->scrolls) self->ContentTransform(&pdy, &popacity);
+                if (w->OnWheel(x, y - pdy,
+                               (float)GET_WHEEL_DELTA_WPARAM(wp) / (float)WHEEL_DELTA)) {
+                    self->Invalidate();
+                    return 0;
+                }
+            }
+        }
+        // The page scrolls only when the wheel is over the page. `ClipRect` is where the page
+        // draws its scrolling content; its *box* is that strip widened up to the top of the page's
+        // own furniture, because the page's title and its caption are the page's -- a wheel over
+        // them is a wheel over the page. What is left out is everything that belongs to the window
+        // rather than to the page: the caption bar and its buttons above, and the pane's rail to
+        // the left. A wheel over one of those used to scroll the page underneath it.
+        //
+        // Where the page names no strip at all -- nothing to scroll -- the box is what is left of
+        // the client under the caption bar, which is the same rule with the page's own answer
+        // missing.
+        const float wx = pt.x / s, wy = pt.y / s;
+        D2D1_RECT_F page = self->ClipRect();
+        if (page.right <= page.left || page.bottom <= page.top)
+            page = D2D1_RECT_F{ 0, 0, self->ClientW(), self->ClientH() };
+        const D2D1_RECT_F box = { page.left, kCaptionH, page.right, self->ClientH() };
+        if (wx < box.left || wx >= box.right || wy < box.top || wy >= box.bottom) return 0;
         return self->OnAppMessage(m, wp, MAKELPARAM(pt.x, pt.y)) ? 0
                                                                  : DefWindowProcW(h, m, wp, lp);
     }
@@ -1932,34 +2211,14 @@ inline LRESULT CALLBACK Window::Proc(HWND h, UINT m, WPARAM wp, LPARAM lp) {
         }
         return 0;
     case WM_TIMER:
-        // Only the caret's and the modal loop's are the window's own. A control's is offered
-        // to the controls (by index: a scroll bar's repeat scrolls, and scrolling replaces
-        // the list), and anything else a page set falls through to OnAppMessage, which is
-        // where a page's messages are answered.
-        if (wp == kFrameTimer) {
-            if (!self->inSizeMove) { KillTimer(h, kFrameTimer); return 0; }
-            // A frame of the loop that cannot run, in the loop's own order: tick, then
-            // paint. No Dispatch of its own -- the one at the top of this function covers
-            // the whole message, which is what the tick needs to be able to lay the page out.
-            self->Frame();
-            self->Paint();
-            ValidateRect(h, nullptr);
-            return 0;
-        }
-        if (wp != kCaretTimer) {
-            for (size_t i = 0; i < self->widgets.size(); i++)
-                if (self->widgets[i]->OnTimer(wp)) return 0;
-            break;
-        }
-        {
-            // Only repaint when there is a caret to blink. A window that invalidates
-            // twice a second forever is a window that keeps a laptop's GPU awake.
-            if (self->focused && self->focused->CaretPoint(nullptr)) {
-                self->caretOn = !self->caretOn;
-                self->Invalidate();
-            }
-        }
-        return 0;
+        // A timer this window is running: see Timer, where the window's own and every control's
+        // come from, and which knows whose id this is. By index, with the size asked again each
+        // turn, because a callback can stop the timer it is running on.
+        for (size_t i = 0; i < self->timers.size(); i++)
+            if (self->timers[i]->Handle(wp)) return 0;
+        // Anything else is a timer a page set for itself, which falls through to OnAppMessage,
+        // which is where a page's messages are answered.
+        break;
     case WM_ERASEBKGND:
         return 1;   // every pixel comes from the composition surface
     case WM_DESTROY:
