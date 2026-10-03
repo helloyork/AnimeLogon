@@ -10,8 +10,8 @@ can place videos, widgets and other content on it.
 
 ## Planned features
 
-- [ ] Full-screen video on the lock screen and on the sign-in screen at startup
-- [ ] Custom clock styles
+- [x] Full-screen video on the lock screen and on the sign-in screen at startup
+- [x] Custom clock styles
 - [ ] Widgets
 
 ## Requirements
@@ -27,14 +27,15 @@ Windows N and KN editions are not supported.
 
 1. Download the latest version from [Releases](https://github.com/helloyork/AnimeLogon/releases).
 2. Run `install.exe` and follow the prompts.
-3. Open the AnimeLogon settings and import a video.
+3. Open the AnimeLogon settings and import a video or picture on the **Themes** page.
 
 ## Usage
 
-Lock the computer (<kbd>Win</kbd>+<kbd>L</kbd>) or restart it. The video plays until
-you press a key or click, and the Windows sign-in screen appears.
+Lock the computer (<kbd>Win</kbd>+<kbd>L</kbd>) or restart it. The lock screen shows the theme in use
+until you press a key or click, and the Windows sign-in screen appears.
 
-To change the video, import a different one in the settings.
+To change it, import a video, picture or theme package (.altheme) on the **Themes** page of the
+settings and select **Use**. Themes can be exported as .altheme files to share.
 
 ## Changes to your system
 
@@ -43,7 +44,7 @@ To change the video, import a different one in the settings.
   installed.
 - **The sign-in screen background is set by AnimeLogon.** The lock screen picture can no
   longer be changed in Windows Settings.
-- **Imported videos are stored on drive C:.** The location cannot be changed.
+- **Imported videos, pictures and themes are stored on drive C:.** The location cannot be changed.
 
 Uninstalling AnimeLogon restores these settings.
 
@@ -84,7 +85,6 @@ Options:
 
 Planned:
 
-- Custom clock drawn on the lock screen
 - Custom lock screen elements (widgets), defined in a declarative format
 - Rendered animated scenes
 
