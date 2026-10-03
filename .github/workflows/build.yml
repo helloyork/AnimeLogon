@@ -29,7 +29,9 @@ jobs:
       - name: Build
         run: cmake --build --preset ${{ matrix.arch }}-release
 
-      # ARM64 is cross-built on an x64 runner, so only x64 runs the tests.
+      # ARM64 is cross-built on an x64 runner, so only x64 runs the tests. --verbose prints the
+      # test program's whole output, so the log shows which Media Foundation tests ran and which
+      # said they were skipped.
       - name: Test
         if: matrix.arch == 'x64'
-        run: ctest --preset x64-release
+        run: ctest --preset x64-release --verbose
