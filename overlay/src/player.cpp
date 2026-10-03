@@ -13,6 +13,8 @@ using Microsoft::WRL::ComPtr;
 namespace {
 
 constexpr size_t kSlots = 5;
+// How many reads Open makes on the software path before leaving the first frame to Decode.
+constexpr int kFirstReads = 16;
 
 bool Aperture(IMFMediaType *type, GUID key, UINT32 *w, UINT32 *h) {
     MFVideoArea area{};
@@ -23,6 +25,29 @@ bool Aperture(IMFMediaType *type, GUID key, UINT32 *w, UINT32 *h) {
     *w = (UINT32)area.Area.cx;
     *h = (UINT32)area.Area.cy;
     return true;
+}
+
+// What an output type says about the frames in it.
+struct Shape {
+    UINT32 allocW = 0, allocH = 0;   // as decoded, padding included
+    int displayW = 0, displayH = 0;  // the visible part
+    LONG stride = 0;
+    double frameSeconds = 0.0;       // 0 when the type does not say
+};
+
+Shape ShapeOf(IMFMediaType *type) {
+    Shape s;
+    MFGetAttributeSize(type, MF_MT_FRAME_SIZE, &s.allocW, &s.allocH);
+    UINT32 w = s.allocW, h = s.allocH;
+    if (!Aperture(type, MF_MT_MINIMUM_DISPLAY_APERTURE, &w, &h)) Aperture(type, MF_MT_GEOMETRIC_APERTURE, &w, &h);
+    s.displayW = (int)(w <= s.allocW ? w : s.allocW);
+    s.displayH = (int)(h <= s.allocH ? h : s.allocH);
+    UINT32 num = 0, den = 0;
+    if (SUCCEEDED(MFGetAttributeRatio(type, MF_MT_FRAME_RATE, &num, &den)) && num && den)
+        s.frameSeconds = (double)den / (double)num;
+    UINT32 stride = 0;
+    s.stride = SUCCEEDED(type->GetUINT32(MF_MT_DEFAULT_STRIDE, &stride)) ? (LONG)stride : (LONG)s.allocW;
+    return s;
 }
 
 }  // namespace
@@ -58,17 +83,47 @@ bool VideoPlayer::CreateReader(bool hardware) {
     }
     ComPtr<IMFMediaType> got;
     if (FAILED(reader_->GetCurrentMediaType((DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM, &got))) return false;
-    MFGetAttributeSize(got.Get(), MF_MT_FRAME_SIZE, &allocW_, &allocH_);
-    UINT32 w = allocW_, h = allocH_;
-    if (!Aperture(got.Get(), MF_MT_MINIMUM_DISPLAY_APERTURE, &w, &h)) Aperture(got.Get(), MF_MT_GEOMETRIC_APERTURE, &w, &h);
-    displayW_ = (int)(w <= allocW_ ? w : allocW_);
-    displayH_ = (int)(h <= allocH_ ? h : allocH_);
-    UINT32 num = 0, den = 0;
-    if (SUCCEEDED(MFGetAttributeRatio(got.Get(), MF_MT_FRAME_RATE, &num, &den)) && num && den)
-        frameSeconds_ = (double)den / (double)num;
-    UINT32 stride = 0;
-    stride_ = SUCCEEDED(got->GetUINT32(MF_MT_DEFAULT_STRIDE, &stride)) ? (LONG)stride : (LONG)allocW_;
+    return Adopt(got.Get());
+}
+
+bool VideoPlayer::Adopt(IMFMediaType *type) {
+    const Shape s = ShapeOf(type);
+    allocW_ = s.allocW;
+    allocH_ = s.allocH;
+    displayW_ = s.displayW;
+    displayH_ = s.displayH;
+    stride_ = s.stride;
+    if (s.frameSeconds > 0.0) frameSeconds_ = s.frameSeconds;
     return allocW_ >= 2 && allocH_ >= 2 && allocW_ <= 8192 && allocH_ <= 8192;
+}
+
+bool VideoPlayer::Fits(IMFMediaType *type) const {
+    const Shape s = ShapeOf(type);
+    return s.allocW == allocW_ && s.allocH == allocH_ && s.stride == stride_ && s.displayW == displayW_ &&
+           s.displayH == displayH_;
+}
+
+bool VideoPlayer::ReadFirst() {
+    for (int i = 0; i < kFirstReads; ++i) {
+        ReadResult r;
+        r.hr = reader_->ReadSample((DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0, nullptr, &r.flags, &r.ts, &r.sample);
+        if (SUCCEEDED(r.hr) && (r.flags & MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED)) {
+            ComPtr<IMFMediaType> type;
+            if (FAILED(reader_->GetCurrentMediaType((DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM, &type)) ||
+                !Adopt(type.Get())) {
+                ALOG(L"video: the decoder's output type cannot be shown (%ux%u)", allocW_, allocH_);
+                return false;
+            }
+            r.flags &= ~(DWORD)MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED;
+        }
+        // A frame, the end, or an error: Decode takes it from here as if it had read it itself.
+        if (FAILED(r.hr) || r.sample || (r.flags & (MF_SOURCE_READERF_ERROR | MF_SOURCE_READERF_ENDOFSTREAM))) {
+            first_ = std::move(r);
+            haveFirst_ = true;
+            return true;
+        }
+    }
+    return true;  // nothing yet: Decode reads on
 }
 
 bool VideoPlayer::CreateSlots() {
@@ -137,7 +192,11 @@ bool VideoPlayer::Open(const std::wstring &path, ID3D11Device *device, IMFDXGIDe
             PropVariantClear(&start);
         }
     }
-    if (!hardware_ && !CreateReader(false)) return false;
+    // A software decoder settles its output type only on the first frame -- 1080 lines come out as
+    // 1088, the picture's 1080 the visible part -- and announces the change with that frame. It
+    // is read here, so the slots are made for what really arrives; they are never remade while
+    // the presenter may be drawing from one.
+    if (!hardware_ && (!CreateReader(false) || !ReadFirst())) return false;
     if (!CreateSlots()) {
         ALOG(L"video: cannot create frame textures for %ux%u", allocW_, allocH_);
         return false;
@@ -158,6 +217,8 @@ void VideoPlayer::Close() {
     }
     space_.notify_all();
     if (thread_.joinable()) thread_.join();
+    first_ = ReadResult{};
+    haveFirst_ = false;
     reader_.Reset();
     slots_.clear();
     readIndex_ = 0;
@@ -213,16 +274,19 @@ void VideoPlayer::Decode() {
             if (stop_) break;
             target = (readIndex_ + queued_) % slots_.size();
         }
-        DWORD flags = 0;
-        LONGLONG ts = 0;
-        ComPtr<IMFSample> sample;
-        const HRESULT hr =
-            reader_->ReadSample((DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0, nullptr, &flags, &ts, &sample);
-        if (FAILED(hr) || (flags & MF_SOURCE_READERF_ERROR)) {
-            Fail(animelogon::Format(L"decoding failed (0x%08X)", hr));
+        ReadResult r;
+        if (haveFirst_) {
+            r = std::move(first_);
+            haveFirst_ = false;
+        } else {
+            r.hr = reader_->ReadSample((DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0, nullptr, &r.flags, &r.ts,
+                                       &r.sample);
+        }
+        if (FAILED(r.hr) || (r.flags & MF_SOURCE_READERF_ERROR)) {
+            Fail(animelogon::Format(L"decoding failed (0x%08X)", r.hr));
             break;
         }
-        if (flags & MF_SOURCE_READERF_ENDOFSTREAM) {
+        if (r.flags & MF_SOURCE_READERF_ENDOFSTREAM) {
             if (last < 0 || ++consecutiveEmpty > 2) {
                 Fail(L"the file has no frames to loop");
                 break;
@@ -236,20 +300,29 @@ void VideoPlayer::Decode() {
             PropVariantClear(&start);
             continue;
         }
-        if (flags & MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED) {
-            Fail(L"the stream changed format mid-file");
-            break;
+        if (r.flags & MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED) {
+            // On the software path a type announced again without a change in size, pitch or
+            // visible part goes on into the same slots. Anything else is another stream, which the
+            // slots -- one perhaps on the screen right now -- do not fit. On the hardware path the
+            // slots were made from the type before the decoder's first frame, so there every
+            // announcement ends playback.
+            ComPtr<IMFMediaType> type;
+            if (hardware_ || FAILED(reader_->GetCurrentMediaType((DWORD)MF_SOURCE_READER_FIRST_VIDEO_STREAM, &type)) ||
+                !Fits(type.Get())) {
+                Fail(L"the stream changed format mid-file");
+                break;
+            }
         }
-        if (!sample) continue;
+        if (!r.sample) continue;
         consecutiveEmpty = 0;
-        if (first < 0) first = ts;
-        if (loopLength <= 0.0 && ts > last) last = ts;
-        if (!Store(sample.Get(), slots_[target])) {
+        if (first < 0) first = r.ts;
+        if (loopLength <= 0.0 && r.ts > last) last = r.ts;
+        if (!Store(r.sample.Get(), slots_[target])) {
             Fail(L"a decoded frame could not be stored");
             break;
         }
         std::lock_guard<std::mutex> l(lock_);
-        slots_[target].pts = loopBase + (double)(ts - first) / 1e7;
+        slots_[target].pts = loopBase + (double)(r.ts - first) / 1e7;
         slots_[target].ready = true;
         ++queued_;
     }

@@ -56,7 +56,22 @@ private:
         bool ready = false;
     };
 
+    // What one IMFSourceReader::ReadSample call returned.
+    struct ReadResult {
+        HRESULT hr = S_OK;
+        DWORD flags = 0;
+        LONGLONG ts = 0;
+        Microsoft::WRL::ComPtr<IMFSample> sample;
+    };
+
     bool CreateReader(bool hardware);
+    // Takes the frame size, visible part, row pitch and frame rate from the reader's output type.
+    // False if the size is not one the slots can be made for.
+    bool Adopt(IMFMediaType *type);
+    // Whether frames of `type` fit the slots as made: the same decoded size, pitch and visible part.
+    bool Fits(IMFMediaType *type) const;
+    // Software path: reads until the first frame, taking the output type the decoder settles on.
+    bool ReadFirst();
     bool CreateSlots();
     void Decode();
     bool Store(IMFSample *sample, Slot &slot);
@@ -74,6 +89,9 @@ private:
     int displayW_ = 0, displayH_ = 0;
     LONG stride_ = 0;
     double frameSeconds_ = 1.0 / 30.0;
+    // The read Open made on the software path, which Decode takes as its first.
+    ReadResult first_;
+    bool haveFirst_ = false;
 
     std::vector<Slot> slots_;
     size_t readIndex_ = 0;   // next slot the decoder fills is (readIndex_ + queued_)

@@ -16,11 +16,16 @@ target_sources(animelogon_tests PRIVATE config_tests.cpp
     ${PROJECT_SOURCE_DIR}/config/src/exporter.cpp
     ${PROJECT_SOURCE_DIR}/config/src/transcode.cpp)
 target_include_directories(animelogon_tests PRIVATE ${PROJECT_SOURCE_DIR}/config/src)
-# Only export_sound_tests.cpp calls into Media Foundation, and it checks first; delay-loading
-# keeps the tests starting on a machine without Media Foundation.
+# Only export_sound_tests.cpp and player_tests.cpp call into Media Foundation, and they check
+# first; delay-loading keeps the tests starting on a machine without Media Foundation.
 target_link_libraries(animelogon_tests PRIVATE mfplat mfreadwrite mfuuid ole32 delayimp)
 target_link_options(animelogon_tests PRIVATE /DELAYLOAD:mfplat.dll /DELAYLOAD:mfreadwrite.dll)
 
 # Exporting a video wallpaper with its sound and importing it again, with Media Foundation for
 # real on a clip made by the test.
 target_sources(animelogon_tests PRIVATE export_sound_tests.cpp ${PROJECT_SOURCE_DIR}/config/src/remux.cpp)
+
+# The overlay's video player decoding clips made by the test, in software on a WARP device and,
+# where there is one, on a hardware device with video support.
+target_sources(animelogon_tests PRIVATE player_tests.cpp ${PROJECT_SOURCE_DIR}/overlay/src/player.cpp)
+target_link_libraries(animelogon_tests PRIVATE d3d11)
