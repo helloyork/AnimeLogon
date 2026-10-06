@@ -487,9 +487,13 @@ void PlaysAndLoops(const std::wstring &scratch, ID3D11Device *device, IMFDXGIDev
                 player.hardware() ? "hardware" : "software", texW, texH, shown, kFrames, GetTickCount64() - start);
 }
 
-// Plays a clip whose frame size changes after `before` frames. The frames before the change are
-// shown, then the player fails, with the reason the overlay logs when it puts the built-in
-// wallpaper in its place.
+// Plays a clip whose frame size changes after `before` frames. The player fails, with the reason
+// the overlay logs when it puts the built-in wallpaper in its place. On the software path the
+// frames before the change are shown first. On the hardware path they may not be: Open reads one
+// frame there and seeks back to the start, and a decoder that has already read ahead to the second
+// part's in-band parameter sets keeps them across the seek and decodes the start with them, so the
+// change comes at the first frame. The Basic Render Driver on a GitHub runner does that with this
+// clip; a clip whose parameter sets never change plays on it as anywhere else.
 void FailsWhenTheSizeChanges(const std::wstring &clip, ID3D11Device *device, IMFDXGIDeviceManager *manager,
                              int before) {
     VideoPlayer player;
@@ -502,7 +506,7 @@ void FailsWhenTheSizeChanges(const std::wstring &clip, ID3D11Device *device, IMF
                 player.failure().c_str());
     CHECK(player.failed());
     CHECK(player.failure() == L"the stream changed format mid-file");
-    CHECK(shown >= 1 && shown <= before);
+    CHECK(shown >= (player.hardware() ? 0 : 1) && shown <= before);
 }
 
 }  // namespace
@@ -574,6 +578,10 @@ TEST(PlayerStillDecodesOnTheHardwarePath) {
         return Skipped("Media Foundation cannot encode H.264 here");
     }
     PlaysAndLoops(scratch, device.Get(), manager.Get(), 1920, 1080);
+    // Sizes that are not whole macroblocks, whose padded frames the decoder announces with the
+    // first one, as on the software path.
+    PlaysAndLoops(scratch, device.Get(), manager.Get(), 854, 480);
+    PlaysAndLoops(scratch, device.Get(), manager.Get(), 640, 360);
     Track first, second;
     const std::wstring a = scratch + L"\\a.mp4", b = scratch + L"\\b.mp4", spliced = scratch + L"\\spliced.mp4";
     CHECK(MakeClip(a, 640, 360, 15, kBaseline) && MakeClip(b, 320, 240, 15, kBaseline));
