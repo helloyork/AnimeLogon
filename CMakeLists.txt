@@ -11,8 +11,8 @@ set(ANIMELOGON_VERSION_SUFFIX "" CACHE STRING "Pre-release suffix, for example -
 
 set(ANIMELOGON_VERSION "${PROJECT_VERSION}${ANIMELOGON_VERSION_SUFFIX}")
 set(ANIMELOGON_DISPLAY_NAME "AnimeLogon")
-set(ANIMELOGON_COMPANY "Nomen")
-set(ANIMELOGON_COPYRIGHT "© 2026 Nomen")
+set(ANIMELOGON_COMPANY "Nomen (helloyork)")
+set(ANIMELOGON_COPYRIGHT "© 2026 Nomen (helloyork)")
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -36,6 +36,14 @@ add_subdirectory(vendor/micula EXCLUDE_FROM_ALL)
 
 include(cmake/AnimeLogon.cmake)
 
+add_subdirectory(common)
+add_subdirectory(render)
 add_subdirectory(overlay)
 add_subdirectory(config)
 add_subdirectory(installer)
+
+include(CTest)
+if(BUILD_TESTING)
+    add_subdirectory(tests)
+    add_subdirectory(tools)
+endif()
