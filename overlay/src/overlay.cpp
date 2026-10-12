@@ -54,7 +54,7 @@ constexpr float kClockFadeInSeconds = 0.4f;
 // leaves nearly a whole frame of slack for the next, which a late wake-up would not.
 constexpr double kAfterComposeSeconds = 0.001;
 // A live screen whose loop has not turned for this long is ended, so it can never hold the
-// password box hostage.
+// password box hostage; so is one stuck closing its videos, so it can never stop the next lock.
 constexpr ULONGLONG kHangMs = 5000;
 // Exit code telling the launcher to start the next overlay parked (see kDismissedFlag).
 constexpr int kExitDismissed = 3;
@@ -102,8 +102,9 @@ struct Overlay {
 Overlay g_overlay;
 const GUID kConsoleDisplayState = {0x6fe69556, 0x704a, 0x47a0, {0x8f, 0x24, 0xc2, 0x8d, 0x93, 0x6f, 0xda, 0x47}};
 
-// The watchdog's view of the main thread.
-std::atomic<bool> g_live{false};
+// The watchdog's view of the main thread: whether it is timing it -- while a screen is live, and
+// while its videos are being closed -- and when it last moved on.
+std::atomic<bool> g_watched{false};
 std::atomic<ULONGLONG> g_heartbeat{0};
 
 void Beat() { g_heartbeat.store(GetTickCount64()); }
@@ -617,7 +618,7 @@ LiveEnd GoLiveOnce(Presenter &presenter, const Options &opt, HINSTANCE instance)
     Beat();
     if (!done) {
         presenter.Show();
-        g_live.store(true);
+        g_watched.store(true);
         ALOG(L"overlay: live on %zu display(s), %llu ms after the logon screen", targets.size(),
              GetTickCount64() - g_overlay.seenAt);
     }
@@ -787,7 +788,7 @@ LiveEnd GoLiveOnce(Presenter &presenter, const Options &opt, HINSTANCE instance)
 
     // --- tear the appearance down ------------------------------------------------------
     presenter.Hide();
-    g_live.store(false);
+    g_watched.store(false);
     if (power) UnregisterPowerSettingNotification(power);
     if (g_overlay.keyhookOn) {
         keyhook::Uninstall();
@@ -800,20 +801,27 @@ LiveEnd GoLiveOnce(Presenter &presenter, const Options &opt, HINSTANCE instance)
         audio.Tick();
         Sleep(16);
     }
+    // Closing a video waits for its decoding thread, and a decoder that stopped handing out frames
+    // without failing may never let that thread go. The process would then sit here, alive, and
+    // the launcher would start no other, so no later lock would show anything. Under the watchdog
+    // it ends instead, and the launcher starts a parked overlay in its place.
+    Beat();
+    g_watched.store(true);
     players.clear();
+    g_watched.store(false);
     presenter.DestroyWindows();
     g_overlay.inputWindow = nullptr;
     if (timer) CloseHandle(timer);
     return end;
 }
 
-// Ends the process if a live screen's loop stops turning. The launcher then starts a parked
-// overlay, and Windows' own screen is back within a few seconds.
+// Ends the process if a live screen's loop stops turning, or closing its videos never finishes.
+// The launcher then starts a parked overlay, and Windows' own screen is back within a few seconds.
 void StartWatchdog() {
     std::thread([] {
         for (;;) {
             Sleep(500);
-            if (g_live.load() && GetTickCount64() - g_heartbeat.load() > kHangMs)
+            if (g_watched.load() && GetTickCount64() - g_heartbeat.load() > kHangMs)
                 TerminateProcess(GetCurrentProcess(), kExitDismissed);
         }
     }).detach();
