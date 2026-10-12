@@ -21,8 +21,9 @@ public:
     // Ends the agent and the pipe, and deletes live.ini.
     void Stop();
 
-    // From the service's loop, every 100 ms or so: starts the agent in the console session's
-    // signed-in user's session when it should run, ends it when it should not.
+    // From the service's loop, as often as it likes; it looks once a second. Starts the agent
+    // in the console session's signed-in user's session when it should run, ends it when it
+    // should not.
     void Tick(DWORD consoleSession);
 
 private:
@@ -43,7 +44,7 @@ private:
 
     HANDLE agent_ = nullptr;
     DWORD agentSession_ = 0xFFFFFFFF;
-    ULONGLONG agentAt_ = 0, nextTry_ = 0, settingsAt_ = 0;
+    ULONGLONG agentAt_ = 0, nextTry_ = 0, settingsAt_ = 0, tickAt_ = 0;
     DWORD backoff_ = 0;
     bool media_ = true;  // settings.ini's `media`
 };

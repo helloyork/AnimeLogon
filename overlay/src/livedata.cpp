@@ -15,6 +15,7 @@ namespace {
 using namespace animelogon;
 
 constexpr DWORD kNoSession = 0xFFFFFFFF;
+constexpr ULONGLONG kTickMs = 1000;      // how often the console's user and the agent are looked at
 constexpr ULONGLONG kSettingsMs = 5000;  // how often settings.ini's `media` is read again
 constexpr ULONGLONG kWriteMs = 250;      // live.ini is written at most this often
 // Interactive users may connect and write; nobody else, and nobody may make another instance.
@@ -90,6 +91,8 @@ void LiveData::EndAgent() {
 
 void LiveData::Tick(DWORD consoleSession) {
     const ULONGLONG now = GetTickCount64();
+    if (tickAt_ && now - tickAt_ < kTickMs) return;
+    tickAt_ = now;
     if (!settingsAt_ || now - settingsAt_ >= kSettingsMs) {
         settingsAt_ = now;
         const bool media = LoadSettings(false).media;
