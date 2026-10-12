@@ -7,6 +7,9 @@
 #include <shobjidl.h>
 #include <wrl/client.h>
 
+#include <iterator>
+#include <vector>
+
 #include "animelogon/background.h"
 #include "animelogon/components.h"
 #include "animelogon/log.h"
@@ -25,10 +28,16 @@ using namespace animelogon;
 
 namespace engine {
 
-const wchar_t *const kComponents[] = {L"overlay.exe", L"launcher.exe", L"config.exe", L"uninstall.exe"};
+// WebView2Loader.dll is the settings app's: it finds the Edge WebView2 runtime its page runs in.
+const wchar_t *const kComponents[] = {L"overlay.exe", L"launcher.exe", L"animelogon.exe", L"WebView2Loader.dll",
+                                      L"uninstall.exe"};
 const size_t kComponentCount = ARRAYSIZE(kComponents);
 
 namespace {
+
+// Installed by earlier versions and no longer: config.exe was the settings app before
+// animelogon.exe. Deleted by install and by uninstall.
+const wchar_t *const kRetired[] = {L"config.exe"};
 
 constexpr const wchar_t *kDisplayName = L"AnimeLogon";
 constexpr const wchar_t *kUninstallKey =
@@ -50,7 +59,7 @@ std::wstring ProgramFilesDir() {
 
 std::wstring SourceDir() { return paths::ModuleDir(); }
 std::wstring LauncherPath(const std::wstring &dir) { return dir + L"\\launcher.exe"; }
-std::wstring ConfigPath(const std::wstring &dir) { return dir + L"\\config.exe"; }
+std::wstring AppPath(const std::wstring &dir) { return dir + L"\\animelogon.exe"; }
 
 std::wstring StartMenuShortcut() {
     const std::wstring dir = KnownFolder(FOLDERID_CommonPrograms);
@@ -105,7 +114,7 @@ DWORD WriteUninstallEntry(const std::wstring &targetDir) {
         WriteRegString(key, L"DisplayVersion", FromUtf8("0.1.0")),
         WriteRegString(key, L"Publisher", L"Nomen (helloyork)"),
         WriteRegString(key, L"InstallLocation", targetDir),
-        WriteRegString(key, L"DisplayIcon", ConfigPath(targetDir)),
+        WriteRegString(key, L"DisplayIcon", AppPath(targetDir)),
         WriteRegString(key, L"UninstallString", uninstall),
         WriteRegString(key, L"QuietUninstallString", uninstall + L" --quiet"),
         WriteRegDword(key, L"NoModify", 1),
@@ -161,12 +170,28 @@ DWORD RemoveFileOrQueue(const std::wstring &path) {
     DWORD e = GetLastError();
     if (e == ERROR_FILE_NOT_FOUND || e == ERROR_PATH_NOT_FOUND) return ERROR_SUCCESS;
     if (MoveFileExW(path.c_str(), nullptr, MOVEFILE_DELAY_UNTIL_REBOOT)) {
-        ALOG(L"uninstall: %s is in use (%lu); deleted at the next restart", path.c_str(), e);
+        ALOG(L"%s is in use (%lu); deleted at the next restart", path.c_str(), e);
         return ERROR_SUCCESS;
     }
     e = GetLastError();
-    ALOG(L"uninstall: cannot delete %s (%lu)", path.c_str(), e);
+    ALOG(L"cannot delete %s (%lu)", path.c_str(), e);
     return e;
+}
+
+// Whether the settings app will find the Edge WebView2 runtime, asked of the loader it ships
+// with, the copy just installed. Windows 11 has the runtime built in; Windows 10 may not.
+bool WebView2RuntimePresent(const std::wstring &targetDir) {
+    HMODULE loader = LoadLibraryExW((targetDir + L"\\WebView2Loader.dll").c_str(), nullptr,
+                                    LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
+    if (!loader) return false;
+    using Find = HRESULT(STDAPICALLTYPE *)(PCWSTR, LPWSTR *);
+    const auto find = reinterpret_cast<Find>(GetProcAddress(loader, "GetAvailableCoreWebView2BrowserVersionString"));
+    LPWSTR version = nullptr;
+    const bool present = find && SUCCEEDED(find(nullptr, &version)) && version;
+    if (present) ALOG(L"install: WebView2 runtime %s", version);
+    CoTaskMemFree(version);
+    FreeLibrary(loader);
+    return present;
 }
 
 }  // namespace
@@ -245,6 +270,7 @@ Report Install(const std::wstring &targetDir) {
         if (!CopyFileW(from.c_str(), to.c_str(), FALSE))
             return fail(WithError(std::wstring(L"无法复制 ") + component, GetLastError()));
     }
+    for (const wchar_t *retired : kRetired) RemoveFileOrQueue(targetDir + L"\\" + retired);
     step(L"复制程序文件");
 
     // The sign-in background. One already in place is kept -- the overlay may have baked it
@@ -294,12 +320,18 @@ Report Install(const std::wstring &targetDir) {
     step(L"关闭 Windows 锁屏并启动服务");
 
     const std::wstring link = StartMenuShortcut();
-    const HRESULT hr = link.empty() ? E_FAIL : CreateShortcut(link, ConfigPath(targetDir), ConfigPath(targetDir));
+    const HRESULT hr = link.empty() ? E_FAIL : CreateShortcut(link, AppPath(targetDir), AppPath(targetDir));
     if (SUCCEEDED(hr)) step(L"创建开始菜单快捷方式");
     else ALOG(L"install: no Start menu shortcut (0x%08lx)", (unsigned long)hr);
 
     r.ok = true;
     r.message = L"AnimeLogon 已安装。按 Win + L 锁定屏幕即可查看，或打开 AnimeLogon 设置导入视频或图片。";
+    // The logon screen works without it; only the settings app needs it.
+    if (!WebView2RuntimePresent(targetDir)) {
+        ALOG(L"install: no WebView2 runtime");
+        r.message += L"\n\nAnimeLogon 设置需要 Microsoft Edge WebView2 运行时，这台电脑上没有找到。"
+                     L"请从 Microsoft 网站安装「WebView2 运行时」后再打开设置。";
+    }
     return r;
 }
 
@@ -352,8 +384,10 @@ Report Uninstall(bool keepData) {
 
     if (!dir.empty()) {
         DWORD first = ERROR_SUCCESS;
-        for (const wchar_t *component : kComponents) {
-            e = RemoveFileOrQueue(dir + L"\\" + component);
+        std::vector<const wchar_t *> files(kComponents, kComponents + kComponentCount);
+        files.insert(files.end(), std::begin(kRetired), std::end(kRetired));
+        for (const wchar_t *file : files) {
+            e = RemoveFileOrQueue(dir + L"\\" + file);
             if (e != ERROR_SUCCESS && first == ERROR_SUCCESS) first = e;
         }
         // Gone now if empty; otherwise after the restart that removes what is still in use

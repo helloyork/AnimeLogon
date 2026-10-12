@@ -18,6 +18,8 @@ can place videos, widgets and other content on it.
 
 - Windows 10 or Windows 11, x64 or ARM64
 - Administrator rights for installation
+- The Microsoft Edge WebView2 runtime for the AnimeLogon settings. Windows 11 includes it;
+  on Windows 10 the installer says so if it is missing.
 
 Windows N and KN editions are not supported.
 
@@ -27,15 +29,17 @@ Windows N and KN editions are not supported.
 
 1. Download the latest version from [Releases](https://github.com/helloyork/AnimeLogon/releases).
 2. Run `install.exe` and follow the prompts.
-3. Open the AnimeLogon settings and import a video or picture on the **Themes** page.
+3. Open AnimeLogon settings from the Start menu and select **Import…** to add a video or picture.
 
 ## Usage
 
 Lock the computer (<kbd>Win</kbd>+<kbd>L</kbd>) or restart it. The lock screen shows the theme in use
 until you press a key or click, and the Windows sign-in screen appears.
 
-To change it, import a video, picture or theme package (.altheme) on the **Themes** page of the
-settings and select **Use**. Themes can be exported as .altheme files to share.
+To change it, click a theme in the settings' theme library. Videos, pictures and theme packages
+(.altheme) are added with **Import…**, and an imported theme is put in use at once. Select
+**Customize** on a theme to change its wallpaper and widgets. Themes can be exported as .altheme
+files to share.
 
 ## Changes to your system
 
@@ -99,4 +103,6 @@ Planned:
 
 MIT © 2026 Nomen (helloyork). See [LICENSE](LICENSE).
 
-Includes [Micula](https://github.com/helloyork/micula) (MIT) in `vendor/micula`.
+Includes [Micula](https://github.com/helloyork/micula) (MIT) in `vendor/micula`, and the headers
+and loader of the Microsoft Edge WebView2 SDK (BSD 3-Clause) in `vendor/webview2`. The loader,
+`WebView2Loader.dll`, is installed with AnimeLogon.

@@ -17,6 +17,7 @@ AnimeLogon 使用自己绘制的叠层替换了 Windows 10/11 的锁屏界面，
 
 - Windows 10 或 Windows 11，x64 或 ARM64
 - 安装需要管理员权限
+- AnimeLogon 设置需要 Microsoft Edge WebView2 运行时。Windows 11 已自带；Windows 10 上如果没有，安装程序会提示。
 
 不支持 Windows N 和 KN 版本。
 
@@ -26,13 +27,13 @@ AnimeLogon 使用自己绘制的叠层替换了 Windows 10/11 的锁屏界面，
 
 1. 从 [Releases](https://github.com/helloyork/AnimeLogon/releases) 下载最新版本。
 2. 运行 `install.exe`，按提示完成安装。
-3. 打开 AnimeLogon 设置，在「主题」页导入视频或图片。
+3. 从开始菜单打开 AnimeLogon 设置，选择「导入…」导入视频或图片。
 
 ## 使用
 
 锁定电脑（<kbd>Win</kbd>+<kbd>L</kbd>）或重新启动后，锁屏显示当前使用的主题。按任意键或点击鼠标，即显示 Windows 登录界面。
 
-如需更换，在设置的「主题」页导入视频、图片或主题包（.altheme），再选择「使用」。主题可以导出为 .altheme 文件分享给他人。
+如需更换，在设置的「主题库」中单击一个主题即可套用。视频、图片和主题包（.altheme）用「导入…」添加，导入的主题会直接设为当前主题。选择主题的「自定义」可以调整壁纸和组件。主题可以导出为 .altheme 文件分享给他人。
 
 ## 对系统的更改
 
@@ -91,4 +92,4 @@ cmake --build --preset x64-release
 
 MIT © 2026 Nomen (helloyork)。详见 [LICENSE](LICENSE)。
 
-`vendor/micula` 中包含 [Micula](https://github.com/helloyork/micula)（MIT）。
+`vendor/micula` 中包含 [Micula](https://github.com/helloyork/micula)（MIT）。`vendor/webview2` 中包含 Microsoft Edge WebView2 SDK 的头文件和加载器（BSD 3-Clause），加载器 `WebView2Loader.dll` 随 AnimeLogon 一起安装。
