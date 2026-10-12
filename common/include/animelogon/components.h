@@ -4,7 +4,8 @@
 // settings app's elevated helper.
 //
 // Built-in components have lowercase word ids: "clock" is the clock that comes with AnimeLogon
-// (skin::Default()). Imported ones have 16 lowercase hex digits.
+// (skin::Default()); "battery", "media" and "countdown" show the battery, what is playing and
+// the days to a date. Imported ones have 16 lowercase hex digits.
 #pragma once
 
 #include <string>
@@ -16,7 +17,14 @@ namespace animelogon {
 
 constexpr const wchar_t *kClockComponent = L"clock";
 
-// "clock" or 16 lowercase hex digits: what a theme's component may name once installed.
+// One of the built-in components' ids.
+bool IsBuiltInComponent(const std::wstring &id);
+// The built-in components' ids, the clock first.
+const std::vector<std::wstring> &BuiltInComponents();
+// A built-in component, as it comes with AnimeLogon. False for any other id.
+bool BuiltInComponent(const std::wstring &id, skin::Skin *component);
+
+// A built-in id or 16 lowercase hex digits: what a theme's component may name once installed.
 bool IsComponentId(const std::wstring &id);
 std::wstring NewComponentId();
 

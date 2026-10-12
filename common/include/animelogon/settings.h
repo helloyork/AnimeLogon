@@ -72,6 +72,9 @@ struct Settings {
     std::map<std::wstring, std::wstring> screens;
     bool components = true;  // `components`: false hides every component of every theme
     ComponentDisplays componentDisplays = ComponentDisplays::Auto;  // `component_displays`
+    // `media`: whether components may show what is playing (titles and artists, from the
+    // signed-in person's own session, on their own lock screen only).
+    bool media = true;
     // `clock_hours`, `clock_ampm`, `clock_date`, `clock_language`: what the clock says,
     // whichever theme and component show it.
     ClockStyle clock;

@@ -78,7 +78,7 @@ bool Build(const std::wstring &themeId, const Settings &settings, const ThemeSto
             return Fail(error, L"这个主题用到的组件已不存在或无法读取，无法导出。", L"component " + i.ref + L": " + why);
         for (auto it = i.sets.begin(); it != i.sets.end();)
             it = skin::Accepts(c, it->first, it->second) ? std::next(it) : i.sets.erase(it);
-        if (i.ref == kClockComponent || componentFiles.count(i.ref)) continue;
+        if (IsBuiltInComponent(i.ref) || componentFiles.count(i.ref)) continue;
         const std::wstring file = L"components/" + i.ref + L".xml";
         componentFiles[i.ref] = file;
         components.push_back({ToUtf8(file), L"", Bytes(skin::Normalize(c))});

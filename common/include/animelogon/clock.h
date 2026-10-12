@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <string>
 
+#include "animelogon/data.h"
 #include "animelogon/skin.h"
 
 namespace animelogon {
@@ -54,9 +55,10 @@ RegionalFormat StandardFormat(const std::wstring &locale);
 RegionalFormat FormatFor(const RegionalFormat &user, const std::wstring &locale);
 
 // A skin text with its data filled in: {time}, {date} ... `format` is already in the style's
-// language.
+// language. The battery, what is playing and the countdown (data.h) come from `context`; without
+// one they are empty.
 std::wstring FillText(const std::wstring &text, const RegionalFormat &format, const ClockStyle &style,
-                      const SYSTEMTIME &t);
+                      const SYSTEMTIME &t, const data::Context *context = nullptr);
 
 const wchar_t *ToString(ClockHours hours);
 bool Parse(const std::wstring &text, ClockHours *out);

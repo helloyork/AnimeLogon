@@ -102,7 +102,7 @@ public:
     }
     bool LoadComponent(const std::wstring &id, animelogon::skin::Skin *out, std::wstring *why) const override {
         using namespace animelogon;
-        if (id == kClockComponent) return *out = skin::Default(), true;
+        if (BuiltInComponent(id, out)) return true;
         return skin::Parse(ReadText(store::In(t_, ComponentFilePath(id)), 64 * 1024), out, why);
     }
 

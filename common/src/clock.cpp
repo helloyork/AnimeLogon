@@ -230,7 +230,7 @@ RegionalFormat FormatFor(const RegionalFormat &user, const std::wstring &locale)
 }
 
 std::wstring FillText(const std::wstring &text, const RegionalFormat &format, const ClockStyle &style,
-                      const SYSTEMTIME &t) {
+                      const SYSTEMTIME &t, const data::Context *context) {
     const std::wstring &time = format.shortTime;
     const ClockHours hours = style.hours;
     const bool marker = style.ampm && (hours == ClockHours::H12 || (hours == ClockHours::Auto && HasMarker(time)));
@@ -244,6 +244,11 @@ std::wstring FillText(const std::wstring &text, const RegionalFormat &format, co
         }
         const std::wstring name = text.substr(i + 1, end - i - 1);
         i = end;
+        std::wstring words;
+        if (data::Fill(name, context ? *context : data::Context{}, t, &words)) {
+            out += words;
+            continue;
+        }
         if (name == L"time")
             out += Formatted(format.locale, t,
                              hours == ClockHours::H24   ? To24HourPicture(time)

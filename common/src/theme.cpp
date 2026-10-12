@@ -43,7 +43,7 @@ bool IsWallpaperRefIn(Form form, const std::wstring &ref) {
 }
 
 bool IsComponentRefIn(Form form, const std::wstring &ref) {
-    return form == Form::Installed ? IsComponentId(ref) : ref == kClockComponent || IsPackageComponentRef(ref);
+    return form == Form::Installed ? IsComponentId(ref) : IsBuiltInComponent(ref) || IsPackageComponentRef(ref);
 }
 
 class Checker {
@@ -244,7 +244,7 @@ bool ToPackage(Theme *theme, const std::wstring &wallpaperFile, const std::map<s
         return Failed(error, L"a bad wallpaper ref " + t.wallpaper);
     }
     for (Instance &i : t.components) {
-        if (i.ref == kClockComponent || IsPackageComponentRef(i.ref)) continue;
+        if (IsBuiltInComponent(i.ref) || IsPackageComponentRef(i.ref)) continue;
         const auto it = componentFiles.find(i.ref);
         if (!IsComponentId(i.ref) || it == componentFiles.end() || !IsPackageComponentRef(it->second))
             return Failed(error, L"no package file for component " + i.ref);

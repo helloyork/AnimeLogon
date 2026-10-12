@@ -169,6 +169,8 @@ void Read(const std::wstring &text, Settings *out, bool *namesTheme, std::vector
             ok = ParseBool(value, &s.components);
         } else if (key == L"component_displays") {
             ok = Parse(value, &s.componentDisplays);
+        } else if (key == L"media") {
+            ok = ParseBool(value, &s.media);
         } else if (key.substr(0, wcslen(kThemePrefix)) == kThemePrefix) {
             ok = ParseThemeOverride(key.substr(wcslen(kThemePrefix)), value, &s);
         } else if (key == L"audio") {
@@ -238,6 +240,7 @@ std::wstring SerializeSettings(const Settings &s) {
     for (const auto &[monitor, id] : s.screens) out += kScreenPrefix + monitor + L" = " + id + L"\r\n";
     out += L"components = " + std::wstring(s.components ? L"true" : L"false") + L"\r\n";
     out += L"component_displays = " + std::wstring(ToString(s.componentDisplays)) + L"\r\n";
+    out += L"media = " + std::wstring(s.media ? L"true" : L"false") + L"\r\n";
     const ClockStyle &style = s.clock;
     out += L"clock_hours = " + std::wstring(ToString(style.hours)) + L"\r\n";
     out += L"clock_ampm = " + std::wstring(style.ampm ? L"true" : L"false") + L"\r\n";

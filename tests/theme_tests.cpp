@@ -132,7 +132,8 @@ TEST(ThemeRefusesBadInstances) {
     // Refs: an installed component id; not the old skin name, nor a package file.
     CHECK(!with("<component id=\"c\" ref=\"default\"/>"));
     CHECK(!with("<component id=\"c\" ref=\"components/a.xml\"/>"));
-    CHECK(!with("<component id=\"c\" ref=\"battery\"/>"));
+    CHECK(!with("<component id=\"c\" ref=\"weather\"/>"));
+    CHECK(with("<component id=\"c\" ref=\"battery\"/>"));  // built in
     CHECK(with("<component id=\"c\" ref=\"0123456789abcdef\"/>"));
     CHECK(!with("<component id=\"c\" ref=\"clock\" visible=\"yes\"/>"));
     CHECK(with("<component id=\"c\" ref=\"clock\" visible=\"true\"/>"));

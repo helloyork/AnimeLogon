@@ -305,8 +305,8 @@ DWORD RemoveEntry(const std::wstring &path, const Descriptor *take, int depth) {
 }
 
 // A new administrators-only file next to `file`. Returns its handle and name.
-HANDLE CreateStaging(const std::wstring &file, std::wstring *staging) {
-    const Descriptor sd(kFileSddl);
+HANDLE CreateStaging(const std::wstring &file, std::wstring *staging, const wchar_t *sddl = kFileSddl) {
+    const Descriptor sd(sddl);
     if (!sd.get()) return INVALID_HANDLE_VALUE;
     SECURITY_ATTRIBUTES sa{sizeof(sa), sd.get(), FALSE};
     for (int attempt = 0; attempt < 8; ++attempt) {
@@ -497,10 +497,10 @@ DWORD SecureDirectory(const std::wstring &dir) {
     return ERROR_CANT_ACCESS_FILE;
 }
 
-DWORD WriteBytes(const std::wstring &file, const void *bytes, size_t size) {
+DWORD WriteBytes(const std::wstring &file, const void *bytes, size_t size, const wchar_t *sddl) {
     Privileges priv;
     std::wstring staging;
-    HANDLE h = CreateStaging(file, &staging);
+    HANDLE h = CreateStaging(file, &staging, sddl);
     if (h == INVALID_HANDLE_VALUE) return GetLastError();
     const auto *p = static_cast<const uint8_t *>(bytes);
     size_t done = 0;

@@ -2,7 +2,9 @@
 // root element is <component>. The code calls a component a skin. A component is structure
 // (elements and their attributes) plus settings the person can adjust; the settings' values
 // come from a theme and from settings.ini. Nothing in a component computes: an attribute is either a literal, or "$id"
-// for the value of one of its settings, and text may name data such as {time}. Beyond the
+// for the value of one of its settings, and text may name data such as {time} or
+// {battery.percent} (data.h). A bar shows a fraction such as {media.progress}, and a panel,
+// line, text or bar may be drawn only `when` a condition on the data holds. Beyond the
 // component's own settings, any attribute that shapes how an element looks can be adjusted by
 // hand, element by element; those values come from the same places.
 //
@@ -13,14 +15,16 @@
 
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
+#include "animelogon/data.h"
 #include "animelogon/xml.h"
 
 namespace animelogon::skin {
 
-enum class SettingKind { Choice, Toggle, Number, Color, Font };
+enum class SettingKind { Choice, Toggle, Number, Color, Font, Date };
 
 struct Option {
     std::wstring value, label;
@@ -61,7 +65,7 @@ bool IsSettingId(const std::wstring &id);
 // --- adjusting one attribute of one element ----------------------------------------------
 //
 // Elements are named by where they are: p1 is the first panel, p1.l2.t1 the first text on its
-// second line, p1.s1 its first shadow, p1.b its backdrop. An adjustment is stored under the
+// second line, p1.l2.r1 the first bar on it, p1.s1 its first shadow, p1.b its backdrop. An adjustment is stored under the
 // element's name and the attribute's, as in p1.l1.t1.weight, and wins over the skin's own
 // value for that attribute.
 
@@ -99,8 +103,11 @@ std::vector<std::wstring> AdjustmentsOf(const Skin &skin, const std::wstring &se
 enum class Align { Auto, Left, Center, Right };
 enum class Case { None, Upper, Lower };
 
+// A text, or a bar: what a line holds, in order.
 struct Text {
-    std::wstring value;  // may name data: {time}, {date} ...
+    std::wstring name;   // t1, r1 ...: where it is among the line's texts or its bars
+    std::optional<data::Condition> when;
+    std::wstring value;  // may name data: {time}, {date} ...; a bar's is one fraction
     std::wstring font;   // empty: the default
     float size = 1.0f;   // em
     int weight = 400;
@@ -110,10 +117,17 @@ struct Text {
     float tracking = 0.0f, space = 0.0f;  // em
     Case textCase = Case::None;
     bool hang = false;  // left out when the line is aligned
+
+    bool bar = false;  // the rest is a bar's
+    float length = 6.0f, thickness = 0.12f;  // em
+    float radius = 0.5f;                     // of the thickness: 0.5 rounds the ends fully
+    uint32_t track = 0xFFFFFFFF;             // the part not yet filled
+    float trackOpacity = 0.25f;
 };
 
 struct Line {
     float gap = 0.2f;  // em, from the line above's baseline to the top of this line's ink
+    std::optional<data::Condition> when;
     std::vector<Text> texts;
 };
 
@@ -132,6 +146,8 @@ struct Panel {
     std::vector<Shadow> shadows;
     float backdrop = 0.0f;  // opacity of a soft dark glow behind the panel
     uint32_t backdropColor = 0xFF000000;
+    std::optional<data::Condition> when;
+    data::Date until;  // what until.* counts down to
 };
 
 struct Resolved {
@@ -142,5 +158,7 @@ Resolved Resolve(const Skin &skin, const Values &values);
 
 // The data a text may name.
 bool IsDataName(const std::wstring &name);
+// The sources of the data the component shows or tests, besides the clock, in data::Source order.
+std::vector<data::Source> SourcesOf(const Skin &skin);
 
 }  // namespace animelogon::skin

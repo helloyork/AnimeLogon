@@ -103,8 +103,6 @@ void WriteOptions(json::Writer &w, const std::vector<skin::Option> &options) {
     w.EndArray();
 }
 
-bool IsBuiltInComponent(const std::wstring &id) { return id == kClockComponent; }
-
 }  // namespace
 
 const Stores &DiskStores() {

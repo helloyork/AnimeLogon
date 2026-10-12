@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cwchar>
+#include <set>
 
 #include "animelogon/clock.h"
 #include "animelogon/text.h"
@@ -15,9 +16,7 @@ constexpr size_t kMaxShadows = 4, kMaxLabel = 40, kMaxDetail = 80, kMaxTemplate 
 
 const wchar_t *const kAnchors[] = {L"top-left", L"top", L"top-right", L"left", L"center",
                                    L"right", L"bottom-left", L"bottom", L"bottom-right"};
-const wchar_t *const kDataNames[] = {L"time", L"ampm", L"date", L"date.long", L"weekday", L"month", L"day", L"year"};
-
-enum class Type { Label, Anchor, Number, Align, Template, Font, Weight, Style, Color, Case, Bool };
+enum class Type { Label, Anchor, Number, Align, Template, Font, Weight, Style, Color, Case, Bool, Condition, Date, Fraction };
 
 // `adjustable` attributes can be set by hand in the settings app.
 struct AttributeSpec {
@@ -30,9 +29,12 @@ struct AttributeSpec {
 const AttributeSpec kPanel[] = {{L"label", Type::Label, 0, 0, false}, {L"anchor", Type::Anchor},
                                 {L"size", Type::Number, 1, 50},       {L"margin", Type::Number, 0, 40},
                                 {L"offset-x", Type::Number, -50, 50}, {L"offset-y", Type::Number, -50, 50},
-                                {L"align", Type::Align}};
-const AttributeSpec kLine[] = {{L"label", Type::Label, 0, 0, false}, {L"gap", Type::Number, -2, 4}};
+                                {L"align", Type::Align},              {L"when", Type::Condition, 0, 0, false},
+                                {L"until", Type::Date, 0, 0, false}};
+const AttributeSpec kLine[] = {{L"label", Type::Label, 0, 0, false}, {L"gap", Type::Number, -2, 4},
+                               {L"when", Type::Condition, 0, 0, false}};
 const AttributeSpec kText[] = {{L"label", Type::Label, 0, 0, false}, {L"value", Type::Template, 0, 0, false},
+                               {L"when", Type::Condition, 0, 0, false},
                                {L"font", Type::Font},                {L"size", Type::Number, 0.05, 4},
                                {L"weight", Type::Weight},            {L"style", Type::Style},
                                {L"color", Type::Color},              {L"opacity", Type::Number, 0, 1},
@@ -46,6 +48,12 @@ const AttributeSpec kShadow[] = {{L"label", Type::Label, 0, 0, false},
                                  {L"color", Type::Color}};
 const AttributeSpec kBackdrop[] = {
     {L"label", Type::Label, 0, 0, false}, {L"opacity", Type::Number, 0, 1}, {L"color", Type::Color}};
+const AttributeSpec kBar[] = {{L"label", Type::Label, 0, 0, false}, {L"value", Type::Fraction, 0, 0, false},
+                              {L"when", Type::Condition, 0, 0, false}, {L"length", Type::Number, 0.2, 40},
+                              {L"thickness", Type::Number, 0.02, 1},   {L"radius", Type::Number, 0, 0.5},
+                              {L"color", Type::Color},                 {L"opacity", Type::Number, 0, 1},
+                              {L"track", Type::Color},                 {L"track-opacity", Type::Number, 0, 1},
+                              {L"space", Type::Number, 0, 4}};
 
 struct SpecList {
     const AttributeSpec *begin;
@@ -62,6 +70,7 @@ SpecList SpecsOf(const std::wstring &element) {
     if (element == L"text") return List(kText);
     if (element == L"shadow") return List(kShadow);
     if (element == L"backdrop") return List(kBackdrop);
+    if (element == L"bar") return List(kBar);
     return {nullptr, 0};
 }
 const AttributeSpec *SpecFor(const std::wstring &element, const std::wstring &attribute) {
@@ -123,6 +132,13 @@ bool IsTemplate(const std::wstring &text) {
     return true;
 }
 
+// "{name}" for a variable that is a fraction.
+bool IsFraction(const std::wstring &text) {
+    if (text.size() < 3 || text.front() != L'{' || text.back() != L'}') return false;
+    const data::Variable *v = data::Find(text.substr(1, text.size() - 2));
+    return v && v->kind == data::Kind::Fraction;
+}
+
 bool IsLabel(const std::wstring &text, size_t limit = kMaxLabel) {
     if (text.empty() || text.size() > limit) return false;
     for (wchar_t c : text)
@@ -147,6 +163,15 @@ bool Check(const AttributeSpec &spec, const std::wstring &value) {
     }
     case Type::Case: return value == L"none" || value == L"upper" || value == L"lower";
     case Type::Bool: return value == L"true" || value == L"false";
+    case Type::Condition: {
+        data::Condition c;
+        return data::ParseCondition(value, &c);
+    }
+    case Type::Date: {
+        data::Date d;
+        return data::ParseDate(value, &d);
+    }
+    case Type::Fraction: return IsFraction(value);
     }
     return false;
 }
@@ -162,6 +187,7 @@ bool Suits(const Setting &setting, const AttributeSpec &spec) {
     case SettingKind::Number: return spec.type == Type::Number && setting.min >= spec.min && setting.max <= spec.max;
     case SettingKind::Color: return spec.type == Type::Color;
     case SettingKind::Font: return spec.type == Type::Font;
+    case SettingKind::Date: return spec.type == Type::Date;
     }
     return false;
 }
@@ -221,6 +247,7 @@ private:
             else if (e.name == L"number") s.kind = SettingKind::Number;
             else if (e.name == L"color") s.kind = SettingKind::Color;
             else if (e.name == L"font") s.kind = SettingKind::Font;
+            else if (e.name == L"date") s.kind = SettingKind::Date;
             else return Fail(e, L"unknown setting <" + e.name + L">");
             const std::wstring *on = nullptr, *off = nullptr, *min = nullptr, *max = nullptr, *step = nullptr;
             bool hasDefault = false;
@@ -293,12 +320,13 @@ private:
             if (e.name == L"line") {
                 if (++lines > kMaxLines) return Fail(e, L"too many lines");
                 if (!Attributes(e, kLine)) return false;
-                if (e.children.empty() || e.children.size() > kMaxTexts) return Fail(e, L"a line needs 1 to 8 texts");
+                if (e.children.empty() || e.children.size() > kMaxTexts)
+                    return Fail(e, L"a line needs 1 to 8 texts and bars");
                 for (const xml::Element &t : e.children) {
-                    if (t.name != L"text") return Fail(t, L"a line holds only <text>");
-                    if (!t.children.empty()) return Fail(t, L"<text> holds nothing");
-                    if (!t.Find(L"value")) return Fail(t, L"<text> needs a value");
-                    if (!Attributes(t, kText)) return false;
+                    if (t.name != L"text" && t.name != L"bar") return Fail(t, L"a line holds only <text> and <bar>");
+                    if (!t.children.empty()) return Fail(t, L"<" + t.name + L"> holds nothing");
+                    if (!t.Find(L"value")) return Fail(t, L"<" + t.name + L"> needs a value");
+                    if (t.name == L"text" ? !Attributes(t, kText) : !Attributes(t, kBar)) return false;
                 }
             } else if (e.name == L"shadow" || e.name == L"backdrop") {
                 if (!e.children.empty()) return Fail(e, L"<" + e.name + L"> holds nothing");
@@ -395,6 +423,14 @@ const Offer kOffers[] = {
     {L"shadow", L"color", L"颜色", L"", Control::Color, 0, 0, 0, L"#000000"},
     {L"backdrop", L"opacity", L"浓度", L"在文字背后压暗画面；0 为不画。", Control::Slider, 0, 1, 0.01, L"0"},
     {L"backdrop", L"color", L"颜色", L"", Control::Color, 0, 0, 0, L"#000000"},
+    {L"bar", L"length", L"长度", L"相对于整体大小。", Control::Slider, 0.5, 20, 0.1, L"6"},
+    {L"bar", L"thickness", L"粗细", L"相对于整体大小。", Control::Slider, 0.02, 0.5, 0.005, L"0.12"},
+    {L"bar", L"radius", L"圆角", L"0 为直角，0.5 为两端全圆。", Control::Slider, 0, 0.5, 0.01, L"0.5"},
+    {L"bar", L"space", L"前方留白", L"与前一段的距离，相对于整体大小。", Control::Slider, 0, 2, 0.01, L"0"},
+    {L"bar", L"color", L"颜色", L"已走过的部分。", Control::Color, 0, 0, 0, L"#FFFFFF"},
+    {L"bar", L"opacity", L"不透明度", L"", Control::Slider, 0, 1, 0.01, L"1"},
+    {L"bar", L"track", L"底色", L"还没走到的部分。", Control::Color, 0, 0, 0, L"#FFFFFF"},
+    {L"bar", L"track-opacity", L"底色浓度", L"0 为不画底。", Control::Slider, 0, 1, 0.01, L"0.25"},
 };
 
 std::vector<Option> OptionsOf(const std::wstring &attribute) {
@@ -427,7 +463,7 @@ const xml::Element *ElementAt(const Skin &skin, const std::wstring &key) {
         if (step.empty()) return nullptr;
         const wchar_t kind = step[0];
         const wchar_t *name = kind == L'p' ? L"panel" : kind == L'l' ? L"line" : kind == L't' ? L"text"
-                            : kind == L's' ? L"shadow" : kind == L'b' ? L"backdrop" : nullptr;
+                            : kind == L'r' ? L"bar" : kind == L's' ? L"shadow" : kind == L'b' ? L"backdrop" : nullptr;
         if (!name) return nullptr;
         size_t wanted = 1;
         if (kind == L'b') {
@@ -480,20 +516,27 @@ bool KeyShape(const std::wstring &key, std::wstring *element, std::wstring *attr
     else if (steps.size() == 2 && numbered(steps[1], L's')) *element = L"shadow";
     else if (steps.size() == 2 && steps[1] == L"b") *element = L"backdrop";
     else if (steps.size() == 3 && numbered(steps[1], L'l') && numbered(steps[2], L't')) *element = L"text";
+    else if (steps.size() == 3 && numbered(steps[1], L'l') && numbered(steps[2], L'r')) *element = L"bar";
     else return false;
     const AttributeSpec *spec = SpecFor(*element, *attribute);
     return spec && spec->adjustable;
 }
 
+// What a text or bar shows, when it names exactly one piece of data: "{battery.percent}%" is 电量.
 const wchar_t *DataLabel(const std::wstring &value) {
-    static const struct {
-        const wchar_t *value, *label;
-    } known[] = {{L"{time}", L"时间"},      {L"{ampm}", L"上午/下午"}, {L"{date}", L"日期"},
-                 {L"{date.long}", L"日期"}, {L"{weekday}", L"星期"},   {L"{month}", L"月份"},
-                 {L"{day}", L"日"},         {L"{year}", L"年份"}};
-    for (const auto &k : known)
-        if (value == k.value) return k.label;
-    return nullptr;
+    const size_t open = value.find(L'{');
+    if (open == std::wstring::npos || value.find(L'{', open + 1) != std::wstring::npos) return nullptr;
+    const size_t close = value.find(L'}', open);
+    if (close == std::wstring::npos) return nullptr;
+    const data::Variable *v = data::Find(value.substr(open + 1, close - open - 1));
+    return v && *v->label ? v->label : nullptr;
+}
+
+std::optional<data::Condition> ConditionOf(const xml::Element &e) {
+    data::Condition c;
+    const std::wstring *when = e.Find(L"when");
+    if (!when || !data::ParseCondition(*when, &c)) return std::nullopt;
+    return c;
 }
 
 }  // namespace
@@ -512,9 +555,30 @@ bool IsSettingId(const std::wstring &id) {
 }
 
 bool IsDataName(const std::wstring &name) {
-    for (const wchar_t *d : kDataNames)
-        if (name == d) return true;
-    return false;
+    const data::Variable *v = data::Find(name);
+    return v && v->kind == data::Kind::Text;
+}
+
+std::vector<data::Source> SourcesOf(const Skin &skin) {
+    std::set<data::Source> found;
+    auto names = [&](const std::wstring &value) {
+        for (size_t i = value.find(L'{'); i != std::wstring::npos; i = value.find(L'{', i + 1)) {
+            const size_t end = value.find(L'}', i);
+            if (end == std::wstring::npos) break;
+            if (const data::Variable *v = data::Find(value.substr(i + 1, end - i - 1))) found.insert(v->source);
+        }
+    };
+    std::vector<const xml::Element *> pending{&skin.document};
+    while (!pending.empty()) {
+        const xml::Element *e = pending.back();
+        pending.pop_back();
+        if (const std::wstring *v = e->Find(L"value"); v && (e->name == L"text" || e->name == L"bar")) names(*v);
+        if (const auto c = ConditionOf(*e)) found.insert(data::Find(c->name)->source);
+        if (e->name == L"panel" && e->Find(L"until")) found.insert(data::Source::Until);
+        for (const xml::Element &c : e->children) pending.push_back(&c);
+    }
+    found.erase(data::Source::Clock);
+    return {found.begin(), found.end()};
 }
 
 bool IsValue(const Setting &setting, const std::wstring &value) {
@@ -529,6 +593,10 @@ bool IsValue(const Setting &setting, const std::wstring &value) {
     case SettingKind::Number: return ParseNumber(value, &v) && v >= setting.min && v <= setting.max;
     case SettingKind::Color: return ParseRgba(value, &c);
     case SettingKind::Font: return value.empty() || IsFontFamilyName(value);
+    case SettingKind::Date: {
+        data::Date d;
+        return data::ParseDate(value, &d);
+    }
     }
     return false;
 }
@@ -565,21 +633,26 @@ std::vector<Part> Parts(const Skin &skin) {
         Part panel{pk, label ? *label : panelCount == 1 ? L"整体" : Format(L"面板 %zu", panels), {}};
         offer(panel, L"panel", pk);
         parts.push_back(std::move(panel));
-        size_t lines = 0, shadows = 0, texts = 0;
+        size_t lines = 0, shadows = 0, texts = 0, bars = 0;
         for (const xml::Element &e : p.children) {
             if (e.name == L"line") {
                 const std::wstring lk = pk + L".l" + std::to_wstring(++lines);
-                size_t t = 0;
+                size_t t = 0, r = 0;
                 for (const xml::Element &x : e.children) {
-                    const std::wstring tk = lk + L".t" + std::to_wstring(++t);
+                    const bool isBar = x.name == L"bar";
+                    const bool first = &x == &e.children.front();
+                    const std::wstring tk = lk + (isBar ? L".r" + std::to_wstring(++r) : L".t" + std::to_wstring(++t));
                     const std::wstring *own = x.Find(L"label"), *value = x.Find(L"value");
                     const wchar_t *data = value ? DataLabel(*value) : nullptr;
-                    ++texts;
-                    Part text{tk, own ? *own : data ? std::wstring(data) : Format(L"文字 %zu", texts), {}};
-                    offer(text, L"text", tk);
-                    // The line's distance from the one above goes with its first text.
-                    if (lines > 1 && t == 1) offer(text, L"line", lk);
-                    if (t == 1) {  // and space before a text only means something after another
+                    if (isBar) ++bars;
+                    else ++texts;
+                    std::wstring called = own ? *own : data ? std::wstring(data) : L"";
+                    if (called.empty()) called = isBar ? Format(L"进度条 %zu", bars) : Format(L"文字 %zu", texts);
+                    Part text{tk, called, {}};
+                    offer(text, isBar ? L"bar" : L"text", tk);
+                    // The line's distance from the one above goes with its first text or bar.
+                    if (lines > 1 && first) offer(text, L"line", lk);
+                    if (first) {  // and space before one only means something after another
                         auto &adj = text.adjustments;
                         adj.erase(std::remove_if(adj.begin(), adj.end(),
                                                  [](const Adjustment &a) {
@@ -690,6 +763,8 @@ Resolved Resolve(const Skin &skin, const Values &values) {
         const std::wstring align = a.String(L"align", L"auto");
         panel.align = align == L"left" ? Align::Left : align == L"center" ? Align::Center : align == L"right" ? Align::Right
                                                                                                            : Align::Auto;
+        panel.when = ConditionOf(p);
+        data::ParseDate(a.String(L"until"), &panel.until);
         size_t lines = 0, shadows = 0;
         for (const xml::Element &e : p.children) {
             const std::wstring key = e.name == L"line"     ? pk + L".l" + std::to_wstring(++lines)
@@ -699,11 +774,27 @@ Resolved Resolve(const Skin &skin, const Values &values) {
             if (e.name == L"line") {
                 Line line;
                 line.gap = c.Number(L"gap", line.gap);
-                size_t texts = 0;
+                line.when = ConditionOf(e);
+                size_t texts = 0, bars = 0;
                 for (const xml::Element &t : e.children) {
-                    Applied ta(skin, values, t, key + L".t" + std::to_wstring(++texts));
                     Text text;
+                    text.bar = t.name == L"bar";
+                    text.name = text.bar ? L"r" + std::to_wstring(++bars) : L"t" + std::to_wstring(++texts);
+                    Applied ta(skin, values, t, key + L"." + text.name);
+                    text.when = ConditionOf(t);
                     text.value = ta.String(L"value");
+                    if (text.bar) {
+                        text.length = ta.Number(L"length", text.length);
+                        text.thickness = ta.Number(L"thickness", text.thickness);
+                        text.radius = ta.Number(L"radius", text.radius);
+                        text.color = ta.Color(L"color", text.color);
+                        text.opacity = ta.Number(L"opacity", 1.0f);
+                        text.track = ta.Color(L"track", text.track);
+                        text.trackOpacity = ta.Number(L"track-opacity", text.trackOpacity);
+                        text.space = ta.Number(L"space", 0.0f);
+                        line.texts.push_back(std::move(text));
+                        continue;
+                    }
                     text.font = ta.String(L"font");
                     text.size = ta.Number(L"size", 1.0f);
                     const int weight = WeightOf(ta.String(L"weight", L"regular"));

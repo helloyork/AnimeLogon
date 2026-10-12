@@ -14,6 +14,8 @@ namespace animelogon::secure {
 // Administrators and SYSTEM: full control. Users: read. Owner: Administrators. Protected.
 constexpr const wchar_t *kDirSddl = L"O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)";
 constexpr const wchar_t *kFileSddl = L"O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FR;;;BU)";
+// The same without the Users read: for what somebody's own session reported (live.ini).
+constexpr const wchar_t *kPrivateFileSddl = L"O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)";
 
 // True when the owner is SYSTEM, Administrators or TrustedInstaller, no other account may
 // write the file or replace it, and none of it is a reparse point. For anything inside
@@ -35,8 +37,8 @@ DWORD SecureDirectory(const std::wstring &dir);
 DWORD GrantUsersWrite(const std::wstring &file);
 
 // Writes `bytes` to `file` through a new administrators-only file in the same directory,
-// then renames it over `file`.
-DWORD WriteBytes(const std::wstring &file, const void *bytes, size_t size);
+// then renames it over `file`. `sddl` is the new file's security descriptor.
+DWORD WriteBytes(const std::wstring &file, const void *bytes, size_t size, const wchar_t *sddl = kFileSddl);
 
 // Opens an existing file for reading and keeps writers out until it is closed. Refuses
 // reparse points, directories, files with more than one name, and a path that resolves

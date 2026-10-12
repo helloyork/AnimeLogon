@@ -4,8 +4,10 @@ add_library(animelogon_common STATIC
     src/bitmap.cpp
     src/clock.cpp
     src/components.cpp
+    src/data.cpp
     src/image.cpp
     src/instance.cpp
+    src/live.cpp
     src/log.cpp
     src/machine.cpp
     src/monitors.cpp
