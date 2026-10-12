@@ -628,6 +628,31 @@ TEST(ImportPictureStagesATheme) {
     secure::RemoveTree(scratch);
 }
 
+TEST(ImportPictureStagesAWallpaperAlone) {
+    const std::wstring scratch = ScratchDir();
+    PlainTarget t(scratch + L"\\data");
+    const image::Picture p = Pixels(40, 30, 9);
+    std::vector<uint8_t> png;
+    CHECK(image::EncodePng(p.width, p.height, p.bgra.data(), p.bgra.size(), &png, nullptr));
+    const std::wstring source = scratch + L"\\Harbour at night.png";
+    WriteAll(source, png);
+    const std::wstring dir = ImportDir(scratch);
+    std::atomic<bool> cancel{false};
+    const staging::Result s = staging::Wallpaper(source, dir, cancel, nullptr);
+    CHECK(s.ok && s.name == L"Harbour at night");
+    // Exactly what --commit-wallpaper takes, and no theme.
+    CHECK(!Exists(dir + L"\\theme.xml") && !Exists(dir + L"\\wallpaper"));
+    CHECK(store::CommitWallpaper(t, kIdA, dir) == commit::kOk);
+    WallpaperInfo w;
+    CHECK(ParseWallpaperInfo(FromUtf8(Text(ReadAll(store::In(t, WallpaperInfoPath(kIdA))))), &w));
+    CHECK(w.kind == WallpaperKind::Image && w.width == 40 && w.height == 30 && w.name == L"Harbour at night");
+    CHECK(ReadAll(store::In(t, WallpaperImagePath(kIdA))) == Bmp(p));
+    // Not a picture: nothing is staged.
+    WriteAll(scratch + L"\\notes.png", std::string("hello"));
+    CHECK(!staging::Wallpaper(scratch + L"\\notes.png", ImportDir(scratch), cancel, nullptr).ok);
+    secure::RemoveTree(scratch);
+}
+
 namespace {
 
 // A zip with one entry stored as deflate (method 8), the way most zip tools write by default.

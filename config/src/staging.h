@@ -31,6 +31,11 @@ bool LooksLikePicture(const std::wstring &path);
 Result Media(const std::wstring &source, const std::wstring &dir, const std::atomic<bool> &cancel,
              const Progress &progress);
 
+// A video or a picture as a wallpaper alone, staged for --commit-wallpaper: normalised as Media
+// does, into dir itself, and named after the file.
+Result Wallpaper(const std::wstring &source, const std::wstring &dir, const std::atomic<bool> &cancel,
+                 const Progress &progress);
+
 // An .altheme, staged for --commit-package. The archive must pass package::Reader; its
 // theme.xml must parse; the wallpaper file it carries must be the one theme.xml names (or none
 // when theme.xml names a built-in wallpaper or none), and its component files exactly those

@@ -53,7 +53,9 @@ private:
     bool Save();
 
     // --- what needs the elevated helper
-    void Import();
+    // A theme from a picture, video or .altheme; with `wallpaper`, a picture or video as a
+    // wallpaper alone, for the open theme.
+    void Import(bool wallpaper);
     void FinishImport();
     void ImportComponent(bool add);
     void NewTheme(const std::wstring &name, const std::wstring &wallpaper);
@@ -95,6 +97,7 @@ private:
     std::atomic<bool> importing_{false};
     std::atomic<int> importPermille_{0};
     std::wstring importDir_, importLabel_;
+    bool importWallpaper_ = false;
     staging::Result importResult_;
 };
 

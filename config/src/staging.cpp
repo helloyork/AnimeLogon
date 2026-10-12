@@ -139,6 +139,27 @@ Result StageVideo(const std::wstring &source, const std::wstring &dir, const std
     return r;
 }
 
+// The picture or video at `source` as a wallpaper in `dir`; `picture` says which it turned out
+// to be. A file whose extension names neither is a picture if WIC can read it.
+Result StageWallpaper(const std::wstring &source, const std::wstring &dir, const std::wstring &name,
+                      const std::atomic<bool> &cancel, const Progress &progress, bool *picture) {
+    *picture = LooksLikePicture(source);
+    if (*picture || !OneOf(Extension(source), kVideoExtensions, ARRAYSIZE(kVideoExtensions))) {
+        image::Picture p;
+        std::wstring why;
+        const image::Status status = image::Normalize(source, &p, &why);
+        if (status == image::Status::Ok) {
+            *picture = true;
+            return StageImage(p, dir, name, FileName(source));
+        }
+        if (*picture || status != image::Status::NotAnImage) {
+            ALOG(L"import: %s %s", source.c_str(), why.c_str());
+            return Error(PictureProblem(status));
+        }
+    }
+    return StageVideo(source, dir, name, cancel, progress);
+}
+
 // The package name a staged wallpaper goes by: only its kind matters to the elevated side.
 std::wstring PackageWallpaperName(const std::wstring &source, bool picture) {
     if (!picture) return L"wallpaper.mp4";
@@ -168,24 +189,8 @@ bool LooksLikePicture(const std::wstring &path) {
 Result Media(const std::wstring &source, const std::wstring &dir, const std::atomic<bool> &cancel,
              const Progress &progress) {
     const std::wstring name = ThemeName(FileStem(source));
-    const std::wstring wallpaperDir = dir + L"\\wallpaper";
-    const std::wstring ext = Extension(source);
-    bool picture = LooksLikePicture(source);
-    Result r;
-    if (picture || !OneOf(ext, kVideoExtensions, ARRAYSIZE(kVideoExtensions))) {
-        // A picture, or a file whose extension says nothing: a picture if WIC can read it.
-        image::Picture p;
-        std::wstring why;
-        const image::Status status = image::Normalize(source, &p, &why);
-        if (status == image::Status::Ok) {
-            picture = true;
-            r = StageImage(p, wallpaperDir, name, FileName(source));
-        } else if (picture || status != image::Status::NotAnImage) {
-            ALOG(L"import: %s %s", source.c_str(), why.c_str());
-            return Error(PictureProblem(status));
-        }
-    }
-    if (!picture) r = StageVideo(source, wallpaperDir, name, cancel, progress);
+    bool picture = false;
+    Result r = StageWallpaper(source, dir + L"\\wallpaper", name, cancel, progress, &picture);
     if (!r.ok) return r;
 
     theme::Theme t;
@@ -194,6 +199,17 @@ Result Media(const std::wstring &source, const std::wstring &dir, const std::ato
     t.fit = Scaling::Fill;
     t.components.push_back({kClockComponent, kClockComponent, true, {}});
     if (!WriteNew(dir + L"\\theme.xml", theme::Normalize(t))) return Error(L"无法写入临时文件。");
+    if (progress) progress(1.0);
+    r.name = name;
+    return r;
+}
+
+Result Wallpaper(const std::wstring &source, const std::wstring &dir, const std::atomic<bool> &cancel,
+                 const Progress &progress) {
+    const std::wstring name = ThemeName(FileStem(source));
+    bool picture = false;
+    Result r = StageWallpaper(source, dir, name, cancel, progress, &picture);
+    if (!r.ok) return r;
     if (progress) progress(1.0);
     r.name = name;
     return r;

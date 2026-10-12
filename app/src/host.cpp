@@ -610,7 +610,9 @@ void Host::OnMessage(const json::Value &m) {
         SendState();
         if (!library_.open().empty()) SendPreview(seq);
     } else if (op == L"import") {
-        Import();
+        Import(false);
+    } else if (op == L"importWallpaper") {
+        Import(true);
     } else if (op == L"importComponent") {
         ImportComponent(m[L"add"].Bool());
     } else if (op == L"newTheme") {
@@ -635,24 +637,32 @@ void Host::OnMessage(const json::Value &m) {
 
 // --- what needs the elevated helper ----------------------------------------------------------
 
-void Host::Import() {
+void Host::Import(bool wallpaper) {
     if (importing_) return;
     const std::wstring source =
-        PickFile(hwnd_,
-                 L"主题、图片和视频\0*.altheme;*.png;*.jpg;*.jpeg;*.webp;*.bmp;*.gif;*.tif;*.tiff;*.heic;*.heif;*.avif;"
-                 L"*.mp4;*.mkv;*.mov;*.webm;*.avi;*.m4v;*.wmv\0"
-                 L"主题包 (*.altheme)\0*.altheme\0"
-                 L"图片\0*.png;*.jpg;*.jpeg;*.webp;*.bmp;*.gif;*.tif;*.tiff;*.heic;*.heif;*.avif\0"
-                 L"视频\0*.mp4;*.mkv;*.mov;*.webm;*.avi;*.m4v;*.wmv\0"
-                 L"所有文件\0*.*\0",
-                 nullptr, false, L"");
+        wallpaper ? PickFile(hwnd_,
+                             L"图片和视频\0*.png;*.jpg;*.jpeg;*.webp;*.bmp;*.gif;*.tif;*.tiff;*.heic;*.heif;*.avif;"
+                             L"*.mp4;*.mkv;*.mov;*.webm;*.avi;*.m4v;*.wmv\0"
+                             L"图片\0*.png;*.jpg;*.jpeg;*.webp;*.bmp;*.gif;*.tif;*.tiff;*.heic;*.heif;*.avif\0"
+                             L"视频\0*.mp4;*.mkv;*.mov;*.webm;*.avi;*.m4v;*.wmv\0"
+                             L"所有文件\0*.*\0",
+                             nullptr, false, L"")
+                  : PickFile(hwnd_,
+                             L"主题、图片和视频\0*.altheme;*.png;*.jpg;*.jpeg;*.webp;*.bmp;*.gif;*.tif;*.tiff;*.heic;*.heif;*.avif;"
+                             L"*.mp4;*.mkv;*.mov;*.webm;*.avi;*.m4v;*.wmv\0"
+                             L"主题包 (*.altheme)\0*.altheme\0"
+                             L"图片\0*.png;*.jpg;*.jpeg;*.webp;*.bmp;*.gif;*.tif;*.tiff;*.heic;*.heif;*.avif\0"
+                             L"视频\0*.mp4;*.mkv;*.mov;*.webm;*.avi;*.m4v;*.wmv\0"
+                             L"所有文件\0*.*\0",
+                             nullptr, false, L"");
     if (source.empty()) return;
     importDir_ = staging::NewImportDir();
     if (importDir_.empty()) {
         Problem(L"无法创建临时目录 " + paths::UserDataDir() + L"\\import。");
         return;
     }
-    const bool package = EndsWith(source, L".altheme");
+    importWallpaper_ = wallpaper;
+    const bool package = !wallpaper && EndsWith(source, L".altheme");
     importLabel_ = package ? L"正在读取「" + FileStem(source) + L"」"
                    : staging::LooksLikePicture(source) ? L"正在处理「" + FileStem(source) + L"」"
                                                        : L"正在转码「" + FileStem(source) + L"」";
@@ -660,7 +670,7 @@ void Host::Import() {
     importing_ = true;
     importPermille_ = 0;
     Busy(importLabel_, 0);
-    worker_ = std::thread([this, source, package, dir = importDir_] {
+    worker_ = std::thread([this, source, package, wallpaper, dir = importDir_] {
         const HRESULT co = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
         auto progressed = [this](double f) {
             importPermille_ = (int)(f * 1000);
@@ -668,7 +678,9 @@ void Host::Import() {
         };
         staging::Result r;
         if (SUCCEEDED(co)) {
-            r = package ? staging::Package(source, dir, cancel_, progressed) : staging::Media(source, dir, cancel_, progressed);
+            r = package     ? staging::Package(source, dir, cancel_, progressed)
+                : wallpaper ? staging::Wallpaper(source, dir, cancel_, progressed)
+                            : staging::Media(source, dir, cancel_, progressed);
             CoUninitialize();
         } else {
             r.error = L"无法初始化 COM，无法导入。";
@@ -683,7 +695,22 @@ void Host::FinishImport() {
     importing_ = false;
     Busy(L"", 0);
     const staging::Result r = importResult_;
-    if (r.ok) {
+    bool edited = false;
+    if (r.ok && importWallpaper_) {
+        const std::wstring id = NewWallpaperId();
+        const int code = commit::RunElevated(hwnd_, L"--commit-wallpaper " + id + L" " + commit::Quote(importDir_));
+        if (code == commit::kOk) {
+            library_.Reload();
+            pictures_.Forget();
+            // Brought in from a theme's page, for that theme.
+            edited = !library_.open().empty() && library_.SetWallpaper(id);
+            Toast(L"已导入壁纸「" + r.name + L"」");
+        } else if (code == commit::kDeclined) {
+            Toast(L"已取消，没有导入");
+        } else {
+            Problem(L"导入失败：无法把壁纸写入受保护的目录。详细原因记录在 " + paths::LogPath(L"config.log") + L"。");
+        }
+    } else if (r.ok) {
         const std::set<std::wstring> before = InstalledThemeIds();
         const int code = commit::RunElevated(hwnd_, L"--commit-package " + commit::Quote(importDir_));
         if (code == commit::kOk) {
@@ -705,7 +732,8 @@ void Host::FinishImport() {
         Problem(r.error.empty() ? std::wstring(L"导入失败。") : r.error);
     }
     secure::RemoveTree(importDir_);  // best effort; it holds only this import's staging
-    SendState();
+    if (edited) Edited(true, false, 0);
+    else SendState();
 }
 
 void Host::ImportComponent(bool add) {

@@ -718,7 +718,8 @@ function fontPicker(current, onPick) {
 function pickWallpaper() {
   let close;
   close = modal('更换壁纸', [wallpaperGrid(T.wallpaper.ref, ref => { close(); send('wallpaper', { ref, seq: ++PV.seq }); }),
-    h('p', { class: 'muted small' }, '要用新的图片或视频，请用「导入…」把它导入成主题。')]);
+    h('p', { class: 'muted small' }, '从文件导入的图片或视频会加入壁纸库，其他主题也可以用。')],
+    [h('button', { class: 'btn', onclick: () => { close(); send('importWallpaper'); } }, [shield(), '从文件导入…'])]);
 }
 function addMenu() {
   let close;
