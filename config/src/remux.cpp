@@ -12,7 +12,7 @@
 #include <cstring>
 #include <vector>
 
-// mfplat.dll is delay-loaded by the settings app; see config/CMakeLists.txt.
+// mfplat.dll is delay-loaded by the settings app; see app/CMakeLists.txt.
 #pragma comment(lib, "mfplat.lib")
 #pragma comment(lib, "mfuuid.lib")
 #pragma comment(lib, "wmcodecdspuuid.lib")

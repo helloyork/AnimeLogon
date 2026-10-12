@@ -6,7 +6,7 @@
 //   import_cli component <file.xml> [<import dir>]
 //       Stages the file as the settings window does, as the user running this, into <import dir>
 //       or a new %LOCALAPPDATA%\AnimeLogon\import\<12 hex digits>, and prints that directory.
-//       The elevated helper then installs it: config.exe --commit-package <dir> (or
+//       The elevated helper then installs it: animelogon.exe --commit-package <dir> (or
 //       --commit-component <id> <dir>).
 //   import_cli export <theme id> <out.altheme>
 //       Exports an installed theme with this machine's settings.ini overrides, as the settings

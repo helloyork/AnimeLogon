@@ -17,7 +17,7 @@
 #include "animelogon/paths.h"
 #include "animelogon/text.h"
 
-// mfplat.dll and mfreadwrite.dll are delay-loaded; see config/CMakeLists.txt.
+// mfplat.dll and mfreadwrite.dll are delay-loaded; see app/CMakeLists.txt.
 #pragma comment(lib, "mfplat.lib")
 #pragma comment(lib, "mfreadwrite.lib")
 #pragma comment(lib, "mfuuid.lib")

@@ -1,5 +1,5 @@
 # animelogon.exe, the settings app: a WebView2 page over the stores. The importer, the exporter
-# and the elevated helper are the ones config.exe has (config/src), with the same command line.
+# and the elevated helper's commands are in config/src.
 set(APP_WEB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/web)
 configure_file(src/web.rc.in ${CMAKE_CURRENT_BINARY_DIR}/web.rc @ONLY)
 set_source_files_properties(${CMAKE_CURRENT_BINARY_DIR}/web.rc PROPERTIES

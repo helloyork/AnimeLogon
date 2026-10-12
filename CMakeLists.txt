@@ -40,7 +40,6 @@ include(cmake/AnimeLogon.cmake)
 add_subdirectory(common)
 add_subdirectory(render)
 add_subdirectory(overlay)
-add_subdirectory(config)
 add_subdirectory(app)
 add_subdirectory(installer)
 

@@ -1,5 +1,6 @@
-// The command line of config.exe's elevated child: what the unelevated settings window runs to
-// change the administrators-only stores (store.h) and the on/off switch.
+// The command line of the settings app's elevated child (animelogon.exe run again with these
+// arguments): what the unelevated window runs to change the administrators-only stores (store.h)
+// and the on/off switch.
 //
 //   --commit-wallpaper <id> <dir>    install a staged wallpaper as wallpapers\<id>
 //   --remove-wallpaper <id>
@@ -49,7 +50,7 @@ int Run(const std::vector<std::wstring> &args);
 // An argument as CommandLineToArgvW reads it back: quoted when it has spaces or quotes.
 std::wstring Quote(const std::wstring &arg);
 
-// Runs config.exe elevated with `args` and waits, returning its exit code, or kDeclined if
+// Runs this program elevated with `args` and waits, returning its exit code, or kDeclined if
 // the user declined the prompt.
 int RunElevated(HWND owner, const std::wstring &args);
 
