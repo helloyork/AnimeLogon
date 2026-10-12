@@ -891,8 +891,8 @@ function lockPreview(id, ratio) {
   // it, and the components come in last. Over a video they are a layer of their own.
   const still = h('img', { src: `${ORIGIN}lock/${id}/still.bmp?${q}`, alt: '' });
   const full = h('img', { class: 'full', src: vid ? layerUrl(t, w, ratio ? hh : 0) : `${ORIGIN}lock/${id}/full.bmp?${q}`, alt: '' });
-  let video = null, loaded = false, started = !vid;
-  const fadeIn = () => { if (loaded && started) setTimeout(() => { full.style.opacity = '1'; }, 300); };
+  let video = null, loaded = false, started = !vid, woke = false;
+  const fadeIn = () => { if (loaded && started) setTimeout(() => { if (!woke) full.style.opacity = '1'; }, 300); };
   full.addEventListener('load', () => { loaded = true; fadeIn(); });
   if (vid) {
     video = videoEl(t.wallpaperRef, t.fit, 'lv');
@@ -906,8 +906,8 @@ function lockPreview(id, ratio) {
   const exit = h('button', { class: 'btn exit', onclick: e => { e.stopPropagation(); close(); } }, '退出预览 (Esc)');
   ov.append(frame, hint, exit);
   document.body.append(ov); ov.focus();
-  let woke = false;
-  const wake = () => { if (woke) return; woke = true; for (const n of [still, video, full]) if (n) n.classList.add('fading'); hint.textContent = '之后是 Windows 的登录界面'; };
+  // Everything over the sign-in screen fades out, the components with the rest.
+  const wake = () => { if (woke) return; woke = true; for (const n of [still, video, full]) if (n) { n.style.opacity = ''; n.classList.add('fading'); } hint.textContent = '之后是 Windows 的登录界面'; };
   ov.addEventListener('pointerdown', e => { if (e.target !== exit) wake(); });
   const key = e => { e.stopPropagation(); e.preventDefault(); if (e.key === 'Escape') close(); else wake(); };
   document.addEventListener('keydown', key, true);
