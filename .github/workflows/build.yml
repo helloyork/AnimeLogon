@@ -16,6 +16,8 @@ jobs:
   build:
     name: ${{ matrix.arch }}
     runs-on: windows-latest
+    # A build and test take a few minutes; anything stuck is ended well before GitHub's six hours.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:

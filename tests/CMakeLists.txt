@@ -7,6 +7,9 @@ target_sources(animelogon_tests PRIVATE overlay_tests.cpp ${PROJECT_SOURCE_DIR}/
 target_include_directories(animelogon_tests PRIVATE ${PROJECT_SOURCE_DIR}/overlay/src)
 target_link_libraries(animelogon_tests PRIVATE animelogon_common)
 add_test(NAME animelogon_tests COMMAND animelogon_tests)
+# The whole run takes seconds. A test stuck in a graphics driver or in Media Foundation is ended
+# after ten minutes and counts as a failure, rather than holding a CI runner for hours.
+set_tests_properties(animelogon_tests PROPERTIES TIMEOUT 600)
 
 # The settings app's elevated commands, importer and exporter, run against scratch directories.
 target_sources(animelogon_tests PRIVATE config_tests.cpp

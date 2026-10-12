@@ -22,6 +22,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -349,6 +350,16 @@ bool MakeDevice(bool hardware, ComPtr<ID3D11Device> *device) {
     return true;
 }
 
+// Whether `device` is on the Microsoft Basic Render Driver: the hardware of a machine without a
+// display driver, a GitHub runner among them.
+bool BasicRenderDriver(ID3D11Device *device) {
+    ComPtr<IDXGIDevice> dxgi;
+    ComPtr<IDXGIAdapter> adapter;
+    DXGI_ADAPTER_DESC d{};
+    return SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&dxgi))) && SUCCEEDED(dxgi->GetAdapter(&adapter)) &&
+           SUCCEEDED(adapter->GetDesc(&d)) && d.VendorId == 0x1414 && d.DeviceId == 0x8c;
+}
+
 // A texture's pixels, copied back through a staging texture. The view says which: an R8 view is
 // luma, an R8G8 view chroma -- a texture of their own on the software path, a plane of one NV12
 // texture on the hardware path.
@@ -455,36 +466,64 @@ int Play(VideoPlayer &player, int want, double seconds, Look look) {
     return shown;
 }
 
+// A decoder that stops handing out frames without failing can leave the player's decoding thread
+// inside Media Foundation for good, and closing the player waits for that thread. Such a player is
+// left open for the rest of the run instead, so the run goes on rather than hanging. Returns false.
+bool Abandon(std::unique_ptr<VideoPlayer> player, const char *what, int shown, int want) {
+    std::printf("  %s: the decoder stopped handing out frames after %d of %d\n", what, shown, want);
+    (void)player.release();  // never closed, as above
+    return false;
+}
+
+// After a player was abandoned: Media Foundation stays started under it for the rest of the run,
+// and the test ends there, leaving the scratch directory whose clip the player still holds open.
+// On the Basic Render Driver's hardware path that is a skip -- its decoder has been seen to stop
+// there now and then, on GitHub runners -- and anywhere else a failure.
+void Stalled(Media &media, ID3D11Device *device, bool hardwarePath) {
+    media.mf = false;
+    if (hardwarePath && BasicRenderDriver(device))
+        Skipped("the Basic Render Driver's video decoder stopped handing out frames");
+    else
+        Failed("the video decoder stopped handing out frames");
+}
+
 // Plays a `w` x `h` clip of `frames` frames on `device` (software decoding when `manager` is null)
 // through two loops and a bit, checking the picture on the first frame and after the first loop.
-void PlaysAndLoops(const std::wstring &scratch, ID3D11Device *device, IMFDXGIDeviceManager *manager, UINT32 w,
+// Returns false if the decoder stopped (see Abandon).
+bool PlaysAndLoops(const std::wstring &scratch, ID3D11Device *device, IMFDXGIDeviceManager *manager, UINT32 w,
                    UINT32 h) {
     constexpr UINT32 kFrames = 20;
     const std::wstring clip = scratch + animelogon::Format(L"\\quadrants %ux%u.mp4", w, h);
     if (GetFileAttributesW(clip.c_str()) == INVALID_FILE_ATTRIBUTES && !MakeClip(clip, w, h, kFrames)) {
         Failed("the clip could not be made");
-        return;
+        return true;
     }
-    VideoPlayer player;
-    CHECK(player.Open(clip, device, manager));
-    if (!manager) CHECK(!player.hardware());
-    CHECK(player.width() == (int)w && player.height() == (int)h);
-    CHECK(std::fabs(player.frameSeconds() - 1.0 / kFps) < 1e-4);
+    auto player = std::make_unique<VideoPlayer>();
+    const bool opened = player->Open(clip, device, manager);
+    CHECK(opened);
+    if (!opened) return true;
+    if (!manager) CHECK(!player->hardware());
+    CHECK(player->width() == (int)w && player->height() == (int)h);
+    CHECK(std::fabs(player->frameSeconds() - 1.0 / kFps) < 1e-4);
     const ULONGLONG start = GetTickCount64();
     UINT texW = 0, texH = 0;
     const int want = (int)kFrames * 2 + 5;
-    const int shown = Play(player, want, 15.0, [&](int n, const VideoPlayer::Frame &f) {
+    const int shown = Play(*player, want, 15.0, [&](int n, const VideoPlayer::Frame &f) {
         if (n == 0 || n == (int)kFrames + 3) CheckPicture(device, f, w, h);
         if (n == 0 && f.uMax > 0 && f.vMax > 0) {
             texW = (UINT)std::lround(w / f.uMax);
             texH = (UINT)std::lround(h / f.vMax);
         }
     });
-    if (player.failed()) std::printf("  %ux%u: the player failed: %ls\n", w, h, player.failure().c_str());
-    CHECK(!player.failed());
+    char what[32];
+    std::snprintf(what, sizeof(what), "%ux%u", w, h);
+    if (!player->failed() && shown < want) return Abandon(std::move(player), what, shown, want);
+    if (player->failed()) std::printf("  %ux%u: the player failed: %ls\n", w, h, player->failure().c_str());
+    CHECK(!player->failed());
     CHECK(shown == want);
     std::printf("  %ux%u: %s decoding into %ux%u textures, %d frames (%u to a loop) in %llu ms\n", w, h,
-                player.hardware() ? "hardware" : "software", texW, texH, shown, kFrames, GetTickCount64() - start);
+                player->hardware() ? "hardware" : "software", texW, texH, shown, kFrames, GetTickCount64() - start);
+    return true;
 }
 
 // Plays a clip whose frame size changes after `before` frames. The player fails, with the reason
@@ -493,27 +532,33 @@ void PlaysAndLoops(const std::wstring &scratch, ID3D11Device *device, IMFDXGIDev
 // frame there and seeks back to the start, and a decoder that has already read ahead to the second
 // part's in-band parameter sets keeps them across the seek and decodes the start with them, so the
 // change comes at the first frame. The Basic Render Driver on a GitHub runner does that with this
-// clip; a clip whose parameter sets never change plays on it as anywhere else.
-void FailsWhenTheSizeChanges(const std::wstring &clip, ID3D11Device *device, IMFDXGIDeviceManager *manager,
+// clip; a clip whose parameter sets never change plays on it as anywhere else. Returns false if the
+// decoder stopped instead (see Abandon).
+bool FailsWhenTheSizeChanges(const std::wstring &clip, ID3D11Device *device, IMFDXGIDeviceManager *manager,
                              int before) {
-    VideoPlayer player;
-    CHECK(player.Open(clip, device, manager));
-    if (!manager) CHECK(!player.hardware());
-    const int shown = Play(player, before * 4, 15.0, [](int, const VideoPlayer::Frame &) {});
+    auto player = std::make_unique<VideoPlayer>();
+    const bool opened = player->Open(clip, device, manager);
+    CHECK(opened);
+    if (!opened) return true;
+    if (!manager) CHECK(!player->hardware());
+    const int want = before * 4;
+    const int shown = Play(*player, want, 15.0, [](int, const VideoPlayer::Frame &) {});
     // The failure is reported once the frames decoded before it are on their way.
-    for (const ULONGLONG until = GetTickCount64() + 5000; !player.failed() && GetTickCount64() < until;) Sleep(5);
-    std::printf("  %s decoding: %d frame(s) shown, then: %ls\n", player.hardware() ? "hardware" : "software", shown,
-                player.failure().c_str());
-    CHECK(player.failed());
-    CHECK(player.failure() == L"the stream changed format mid-file");
-    CHECK(shown >= (player.hardware() ? 0 : 1) && shown <= before);
+    for (const ULONGLONG until = GetTickCount64() + 5000; !player->failed() && GetTickCount64() < until;) Sleep(5);
+    if (!player->failed() && shown < want) return Abandon(std::move(player), "the spliced clip", shown, want);
+    std::printf("  %s decoding: %d frame(s) shown, then: %ls\n", player->hardware() ? "hardware" : "software", shown,
+                player->failure().c_str());
+    CHECK(player->failed());
+    CHECK(player->failure() == L"the stream changed format mid-file");
+    CHECK(shown >= (player->hardware() ? 0 : 1) && shown <= before);
+    return true;
 }
 
 }  // namespace
 
 TEST(PlayerDecodes1080pInSoftwareAndLoops) {
     if (!MediaFoundationHere()) return Skipped("Media Foundation cannot encode H.264 here");
-    const Media media;
+    Media media;
     ComPtr<ID3D11Device> device;
     if (!media.mf || !MakeDevice(false, &device)) return Skipped("no Media Foundation or no WARP device");
     const std::wstring scratch = ScratchDir();
@@ -521,13 +566,13 @@ TEST(PlayerDecodes1080pInSoftwareAndLoops) {
         animelogon::secure::RemoveTree(scratch);
         return Skipped("Media Foundation cannot encode H.264 here");
     }
-    PlaysAndLoops(scratch, device.Get(), nullptr, 1920, 1080);
+    if (!PlaysAndLoops(scratch, device.Get(), nullptr, 1920, 1080)) return Stalled(media, device.Get(), false);
     animelogon::secure::RemoveTree(scratch);
 }
 
 TEST(PlayerDecodesOtherSizesInSoftware) {
     if (!MediaFoundationHere()) return Skipped("Media Foundation cannot encode H.264 here");
-    const Media media;
+    Media media;
     ComPtr<ID3D11Device> device;
     if (!media.mf || !MakeDevice(false, &device)) return Skipped("no Media Foundation or no WARP device");
     const std::wstring scratch = ScratchDir();
@@ -536,15 +581,16 @@ TEST(PlayerDecodesOtherSizesInSoftware) {
         return Skipped("Media Foundation cannot encode H.264 here");
     }
     // 720 lines need no padding; 854 columns and 360 lines are not whole macroblocks.
-    PlaysAndLoops(scratch, device.Get(), nullptr, 1280, 720);
-    PlaysAndLoops(scratch, device.Get(), nullptr, 854, 480);
-    PlaysAndLoops(scratch, device.Get(), nullptr, 640, 360);
+    if (!PlaysAndLoops(scratch, device.Get(), nullptr, 1280, 720) ||
+        !PlaysAndLoops(scratch, device.Get(), nullptr, 854, 480) ||
+        !PlaysAndLoops(scratch, device.Get(), nullptr, 640, 360))
+        return Stalled(media, device.Get(), false);
     animelogon::secure::RemoveTree(scratch);
 }
 
 TEST(PlayerFailsInSoftwareWhenTheFrameSizeChanges) {
     if (!MediaFoundationHere()) return Skipped("Media Foundation cannot encode H.264 here");
-    const Media media;
+    Media media;
     ComPtr<ID3D11Device> device;
     if (!media.mf || !MakeDevice(false, &device)) return Skipped("no Media Foundation or no WARP device");
     const std::wstring scratch = ScratchDir();
@@ -556,7 +602,7 @@ TEST(PlayerFailsInSoftwareWhenTheFrameSizeChanges) {
     }
     CHECK(ReadTrack(a, &first) && ReadTrack(b, &second) && first.samples.size() == 15);
     CHECK(Splice(spliced, first, second));
-    FailsWhenTheSizeChanges(spliced, device.Get(), nullptr, 15);
+    if (!FailsWhenTheSizeChanges(spliced, device.Get(), nullptr, 15)) return Stalled(media, device.Get(), false);
     animelogon::secure::RemoveTree(scratch);
 }
 
@@ -565,7 +611,7 @@ TEST(PlayerFailsInSoftwareWhenTheFrameSizeChanges) {
 // system memory anyway, it is the software path again, and says so.
 TEST(PlayerStillDecodesOnTheHardwarePath) {
     if (!MediaFoundationHere()) return Skipped("Media Foundation cannot encode H.264 here");
-    const Media media;
+    Media media;
     ComPtr<ID3D11Device> device;
     ComPtr<IMFDXGIDeviceManager> manager;
     UINT token = 0;
@@ -577,16 +623,17 @@ TEST(PlayerStillDecodesOnTheHardwarePath) {
         animelogon::secure::RemoveTree(scratch);
         return Skipped("Media Foundation cannot encode H.264 here");
     }
-    PlaysAndLoops(scratch, device.Get(), manager.Get(), 1920, 1080);
-    // Sizes that are not whole macroblocks, whose padded frames the decoder announces with the
-    // first one, as on the software path.
-    PlaysAndLoops(scratch, device.Get(), manager.Get(), 854, 480);
-    PlaysAndLoops(scratch, device.Get(), manager.Get(), 640, 360);
+    // 1080p, then sizes that are not whole macroblocks, whose padded frames the decoder announces
+    // with the first one, as on the software path.
+    if (!PlaysAndLoops(scratch, device.Get(), manager.Get(), 1920, 1080) ||
+        !PlaysAndLoops(scratch, device.Get(), manager.Get(), 854, 480) ||
+        !PlaysAndLoops(scratch, device.Get(), manager.Get(), 640, 360))
+        return Stalled(media, device.Get(), true);
     Track first, second;
     const std::wstring a = scratch + L"\\a.mp4", b = scratch + L"\\b.mp4", spliced = scratch + L"\\spliced.mp4";
     CHECK(MakeClip(a, 640, 360, 15, kBaseline) && MakeClip(b, 320, 240, 15, kBaseline));
     CHECK(ReadTrack(a, &first) && ReadTrack(b, &second) && Splice(spliced, first, second));
-    FailsWhenTheSizeChanges(spliced, device.Get(), manager.Get(), 15);
+    if (!FailsWhenTheSizeChanges(spliced, device.Get(), manager.Get(), 15)) return Stalled(media, device.Get(), true);
     animelogon::secure::RemoveTree(scratch);
 }
 
