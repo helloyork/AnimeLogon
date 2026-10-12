@@ -1,0 +1,8 @@
+Microsoft.Web.WebView2 (NuGet)
+version 1.0.4191.47
+files  build/native/include/WebView2.h, WebView2EnvironmentOptions.h -> include/
+       build/native/{x64,arm64}/WebView2Loader.dll, WebView2Loader.dll.lib -> {x64,arm64}/
+       LICENSE.txt -> LICENSE, NOTICE.txt -> NOTICE
+
+Vendored so a plain clone builds with nothing else to fetch. The loader DLL ships beside the
+settings app. To update, take the same files from the new package and change the version line.
