@@ -243,6 +243,8 @@ input[type="range"] { width: 100%; accent-color: var(--accent); margin: 0; heigh
 .hd.hne { right: -6px; top: -6px; cursor: nesw-resize; }
 .hd.hsw { left: -6px; bottom: -6px; cursor: nesw-resize; }
 .hd.hse { right: -6px; bottom: -6px; cursor: nwse-resize; }
+.selbox.whole .hd { display: none; }
+.hoverbox { position: absolute; border: 1px dashed var(--mark); border-radius: 2px; pointer-events: none; z-index: 3; box-shadow: 0 0 0 1px var(--mark-edge); opacity: .8; }
 .anchors { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 3; overflow: visible; }
 .readout { position: absolute; z-index: 5; font-size: 12px; font-variant-numeric: tabular-nums; background: rgba(0, 0, 0, .78); color: #fff; padding: 2px 8px; border-radius: 4px; pointer-events: none; white-space: nowrap; }
 

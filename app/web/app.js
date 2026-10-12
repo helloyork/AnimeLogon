@@ -50,7 +50,7 @@ const COMMON_TEXT = ['font', 'weight', 'size', 'color'];
 let L = null;  // the library: shared settings, themes, wallpapers, components
 let T = null;  // the theme open on its page, in detail
 let ENV = { monitors: [], fonts: [], devices: [], on: false, installed: false };
-const UI = { view: 'library', tab: 'mine', sel: { inst: null, part: null }, more: false, busy: null, tick: 0 };
+const UI = { view: 'library', tab: 'mine', sel: { inst: null, part: null }, hover: null, more: false, busy: null, tick: 0 };
 // The open theme's picture and the edits on their way to it. Edits made while a picture is being
 // drawn wait, and only the newest of them is sent.
 const PV = { rev: 0, shown: 0, seq: 0, width: 0, height: 0, bounds: [], asked: '', waiting: false, pending: null, commit: false };
@@ -293,11 +293,12 @@ function themePage() {
   const head = h('div', { class: 'phd', id: 'phd' });
   const st = h('div', { class: 'stage', id: 'stage' });
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); svg.setAttribute('class', 'anchors'); svg.id = 'anchors';
-  st.append(h('img', { class: 'pv', id: 'pv', alt: '', draggable: 'false' }), svg,
+  st.append(h('img', { class: 'pv', id: 'pv', alt: '', draggable: 'false' }), svg, h('div', { id: 'hovers' }),
     h('div', { class: 'selbox', id: 'selbox', hidden: true }, ['hnw', 'hne', 'hsw', 'hse'].map(c => h('span', { class: 'hd ' + c }))),
     h('div', { class: 'partbox', id: 'partbox', hidden: true }), h('div', { class: 'readout', id: 'readout', hidden: true }));
   st.addEventListener('pointerdown', onStageDown);
   st.addEventListener('pointermove', onStageHover);
+  st.addEventListener('pointerleave', () => setHover(null));
   new ResizeObserver(() => { fitPreview(); updateSel(); }).observe(st);
   const notice = h('p', { class: 'notice', id: 'notice', hidden: true }, '组件已在设置里关闭，锁屏上只显示壁纸。');
   return h('div', { class: 'view' }, appTop(), busyBar(), head,
@@ -372,6 +373,8 @@ function clearValues(inst, keys) { send('clear', { instance: inst, keys, seq: ++
 const instOf = id => T && T.instances.find(i => i.id === id);
 const partOf = (inst, key) => inst && inst.parts && inst.parts.find(p => p.key === key);
 const panelKey = sel => sel.part ? sel.part.split('.')[0] : 'p1';
+// A component with several panels has no position of its own: each panel is placed by itself.
+const multiPanel = instId => { const inst = instOf(instId); return !!inst && inst.panels > 1; };
 function adjustment(inst, key) {
   if (!inst || !inst.parts) return null;
   for (const p of inst.parts) for (const a of p.adjustments) if (a.key === key) return a;
@@ -394,10 +397,26 @@ function geometry(instId, pk) {
     bx: [M, W / 2, W - M][col], by: [M, H / 2, H - M][row], rx: [r.left, r.left + r.width / 2, r.left + r.width][col], ry: [r.top, r.top + r.height / 2, r.top + r.height][row] };
 }
 let dragShift = null;  // while dragging, the selection box moves ahead of the picture
+const panelBounds = instId => PV.bounds.filter(b => b.instance === instId && !b.key.includes('.'));
+function unionOf(bs) {
+  return bs.reduce((u, b) => ({ left: Math.min(u.left, b.left), top: Math.min(u.top, b.top), right: Math.max(u.right, b.right), bottom: Math.max(u.bottom, b.bottom) }),
+    { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity });
+}
 function updateSel() {
   const sel = $('#selbox'), part = $('#partbox'), svg = $('#anchors');
   if (!sel) return;
   svg.replaceChildren();
+  updateHover();
+  // A component of several panels, selected as a whole: one box around all of them. Each panel
+  // is moved and sized by itself, so the box has no handles.
+  const whole = !!UI.sel.inst && multiPanel(UI.sel.inst) && !UI.sel.part;
+  sel.classList.toggle('whole', whole);
+  if (whole) {
+    const all = panelBounds(UI.sel.inst);
+    part.hidden = true;
+    if (all.length) place(sel, rectOf(unionOf(all)), 6); else sel.hidden = true;
+    return;
+  }
   const pk = panelKey(UI.sel), b = UI.sel.inst && boundOf(UI.sel.inst, pk);
   if (!b) { sel.hidden = true; part.hidden = true; return; }
   const r = rectOf(b);
@@ -434,17 +453,41 @@ function hitTest(e) {
   }
   return best;
 }
-function onStageHover(e) { if (!dragShift) $('#stage').classList.toggle('over', !!hitTest(e)); }
-// The first click on a component selects it as a whole; a second click on one of its texts selects that text.
+// A dashed outline around what the pointer is over, on the picture or in the list: one panel,
+// or every panel of a component. What is selected already has its own box.
+function setHover(over) {
+  const same = (a, b) => a === b || (a && b && a.inst === b.inst && a.pk === b.pk);
+  if (same(UI.hover, over)) return;
+  UI.hover = over; updateHover();
+}
+function updateHover() {
+  const box = $('#hovers'); if (!box) return;
+  box.replaceChildren();
+  const hv = UI.hover; if (!hv || dragShift || !instOf(hv.inst)) return;
+  for (const b of panelBounds(hv.inst)) {
+    if (hv.pk && b.key !== hv.pk) continue;
+    if (UI.sel.inst === hv.inst && (!multiPanel(hv.inst) || !UI.sel.part || panelKey(UI.sel) === b.key)) continue;
+    const r = rectOf(b), d = h('div', { class: 'hoverbox' });
+    place(d, r, 4); box.append(d);
+  }
+}
+function onStageHover(e) {
+  if (dragShift) return;
+  const hit = hitTest(e);
+  $('#stage').classList.toggle('over', !!hit);
+  setHover(hit ? { inst: hit.instance, pk: hit.key.split('.')[0] } : null);
+}
+// The first click on a component selects it -- one of several panels, that panel -- and a second
+// click on one of its texts selects that text.
 function onStageDown(e) {
   if (e.button !== 0) return;
   if (e.target.closest('.hd')) { e.preventDefault(); startResize(e); return; }
   const hit = hitTest(e);
   if (!hit) { selectSel(null); return; }
   e.preventDefault();
-  const was = UI.sel.inst === hit.instance;
-  if (!was) selectSel(hit.instance, null, true);
-  const pk = hit.key.split('.')[0];
+  const pk = hit.key.split('.')[0], multi = multiPanel(hit.instance);
+  const was = UI.sel.inst === hit.instance && (!multi || (!!UI.sel.part && panelKey(UI.sel) === pk));
+  if (!was) selectSel(hit.instance, multi ? pk : null, true);
   startDrag(e, hit.instance, pk, was && hit.key.includes('.') ? hit.key : null);
 }
 const posText = (g, anchor, ox, oy) => `${ANCHOR_NAMES[Math.max(0, ANCHORS.indexOf(anchor))]} · 水平 ${signed(ox)}% · 垂直 ${signed(oy)}%`;
@@ -536,6 +579,8 @@ function compEntry(inst) {
       toggle(inst.visible, v => send('visible', { instance: inst.id, on: v, seq: ++PV.seq }), `在锁屏上显示「${inst.label}」`, `vis-${inst.id}`),
       h('button', { class: 'chev', 'aria-expanded': String(open), 'aria-label': (open ? '收起' : '展开') + inst.label, html: ICON.down, onclick: toggleOpen })));
   if (open && !inst.missing) { const body = h('div'); fillEntry(body, inst); entry.append(body); }
+  entry.addEventListener('pointerenter', () => setHover({ inst: inst.id }));
+  entry.addEventListener('pointerleave', () => setHover(null));
   return entry;
 }
 const group = (title, rows) => h('section', { class: 'igroup' }, h('h3', null, title), rows);
@@ -793,7 +838,7 @@ document.addEventListener('keydown', e => {
     return;
   }
   const step = e.shiftKey ? 1 : .1, d = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[e.key];
-  if (!d) return;
+  if (!d || (multiPanel(inst.id) && !UI.sel.part)) return;  // several panels: the arrows move one at a time
   e.preventDefault();
   const pk = panelKey(UI.sel), now = performance.now();
   if (now - nudge.at > 700) nudge.gesture = ++gestures;
