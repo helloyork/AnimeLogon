@@ -29,3 +29,8 @@ target_sources(animelogon_tests PRIVATE export_sound_tests.cpp ${PROJECT_SOURCE_
 # where there is one, on a hardware device with video support.
 target_sources(animelogon_tests PRIVATE player_tests.cpp ${PROJECT_SOURCE_DIR}/overlay/src/player.cpp)
 target_link_libraries(animelogon_tests PRIVATE d3d11)
+
+# The new settings app's library and its messages, against stores in memory.
+target_sources(animelogon_tests PRIVATE app_tests.cpp ${PROJECT_SOURCE_DIR}/app/src/json.cpp
+                                        ${PROJECT_SOURCE_DIR}/app/src/library.cpp)
+target_include_directories(animelogon_tests PRIVATE ${PROJECT_SOURCE_DIR}/app/src)
