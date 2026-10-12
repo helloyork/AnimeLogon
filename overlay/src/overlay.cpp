@@ -34,6 +34,7 @@
 #include "bake.h"
 #include "clocktext.h"
 #include "componentlayer.h"
+#include "datafeed.h"
 #include "events.h"
 #include "inputsink.h"
 #include "keyhook.h"
@@ -487,6 +488,8 @@ LiveEnd GoLiveOnce(Presenter &presenter, const Options &opt, HINSTANCE instance)
     // are set up after the cover and fade in once the wallpaper is up, so the cover never waits
     // for them. Instances drawn alike on several displays share one view, with a cache per window.
     ComponentLayer layer;
+    DataFeed feed(g_overlay.session, settings.media);
+    animelogon::data::Snapshot snapshot;
     bool withComponents = false;
     {
         bool any = false;
@@ -511,6 +514,7 @@ LiveEnd GoLiveOnce(Presenter &presenter, const Options &opt, HINSTANCE instance)
                 }
             }
             withComponents = layer.size() > 0;
+            if (withComponents && feed.Poll(&snapshot)) layer.SetData(snapshot);
             if (withComponents) {
                 presenter.SetComponents(&layer, perTarget);
                 presenter.SetComponentOpacity(0.0f);
@@ -684,6 +688,7 @@ LiveEnd GoLiveOnce(Presenter &presenter, const Options &opt, HINSTANCE instance)
         }
 
         audio.Tick();
+        if (withComponents && feed.Poll(&snapshot)) layer.SetData(snapshot);
         const bool componentsChanged = withComponents && layer.Tick();
 
         double t = 0.0;

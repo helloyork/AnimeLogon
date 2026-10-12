@@ -1,5 +1,6 @@
 // animelogon.exe: the settings app. Runs as the user; whatever needs administrator rights runs in
-// a short elevated child of itself, with the command line commit.h describes.
+// a short elevated child of itself, with the command line commit.h describes. With --agent it is
+// instead the service's agent in the signed-in person's session (agent.h).
 
 #include <windows.h>
 #include <shellapi.h>
@@ -11,6 +12,7 @@
 #include "animelogon/log.h"
 #include "animelogon/paths.h"
 
+#include "agent.h"
 #include "commit.h"
 #include "host.h"
 
@@ -19,6 +21,10 @@ using namespace animelogon;
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, wchar_t *, int show) {
     int argc = 0;
     wchar_t **argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+    if (argv && argc == 2 && std::wstring(argv[1]) == L"--agent") {
+        LocalFree(argv);
+        return app::RunAgent();
+    }
     if (argv && argc >= 2 && argv[1][0] == L'-') {
         // The elevated child.
         const std::vector<std::wstring> args(argv + 1, argv + argc);

@@ -12,6 +12,7 @@
 
 #include "animelogon/background.h"
 #include "animelogon/components.h"
+#include "animelogon/live.h"
 #include "animelogon/log.h"
 #include "animelogon/machine.h"
 #include "animelogon/paths.h"
@@ -374,9 +375,12 @@ Report Uninstall(bool keepData) {
         else step(L"删除数据目录");
     } else {
         // The themes, their wallpapers and components, and settings.ini stay for a later install.
+        // What somebody's session last reported is not kept; the service deletes it when it
+        // stops, and this covers a service that could not.
         secure::RemoveTree(paths::LogDir());
         RemoveOldStores();
         machine::ClearPausedMarker();
+        DeleteFileW(live::Path().c_str());
     }
     // A failed restore keeps its recorded originals for the next uninstall.
     e = machine::RemoveInstallRecord(restored != ERROR_SUCCESS || signIn != ERROR_SUCCESS);

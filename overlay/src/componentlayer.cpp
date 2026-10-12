@@ -61,6 +61,10 @@ bool ComponentLayer::Add(const animelogon::skin::Resolved &drawing, const animel
     return true;
 }
 
+void ComponentLayer::SetData(const animelogon::data::Snapshot &snapshot) {
+    for (auto &view : views_) view->SetData(snapshot);
+}
+
 bool ComponentLayer::Tick() {
     bool changed = false;
     for (auto &view : views_) changed = view->Tick() || changed;

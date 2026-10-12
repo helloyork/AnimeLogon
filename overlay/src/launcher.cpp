@@ -19,6 +19,7 @@
 #include "animelogon/paths.h"
 
 #include "events.h"
+#include "livedata.h"
 
 namespace {
 
@@ -114,6 +115,9 @@ void Supervise() {
     bool dismissed = false;  // the next overlay starts parked until the screen is used
     bool saidPaused = false;
     ULONGLONG signInCheckedAt = 0;
+    // What the signed-in person's session reports for the components: what is playing.
+    LiveData live;
+    live.Start();
 
     while (WaitForSingleObject(g_stopEvent, 0) != WAIT_OBJECT_0) {
         const DWORD session = WTSGetActiveConsoleSessionId();
@@ -159,8 +163,10 @@ void Supervise() {
             spawnedAt = now;
             if (!child) nextTry = now + (backoff = backoff ? (backoff * 2 > 30000 ? 30000 : backoff * 2) : 2000);
         }
+        live.Tick(session);
         WaitForSingleObject(g_stopEvent, 100);
     }
+    live.Stop();
 
     if (child) {
         // Ask the overlay to leave, then wait briefly before ending it.

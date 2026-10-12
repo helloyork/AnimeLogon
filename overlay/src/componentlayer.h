@@ -25,6 +25,8 @@ public:
              const animelogon::RegionalFormat &format, size_t *index);
     size_t size() const { return views_.size(); }
 
+    // The battery and what is playing, for every instance.
+    void SetData(const animelogon::data::Snapshot &snapshot);
     // Reads the time; returns true when the words of any instance changed.
     bool Tick();
 

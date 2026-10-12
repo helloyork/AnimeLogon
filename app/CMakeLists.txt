@@ -10,6 +10,7 @@ animelogon_add_executable(app WIN32
     OUTPUT_NAME animelogon
     SOURCES
         src/main.cpp
+        src/agent.cpp
         src/host.cpp
         src/library.cpp
         src/pictures.cpp
@@ -26,7 +27,7 @@ animelogon_add_executable(app WIN32
         ${config_src}/fonts.cpp
     DESCRIPTION "AnimeLogon 设置"
     LIBS animelogon_render webview2::loader mfplat mfreadwrite mfuuid mmdevapi ole32 shell32 shlwapi comdlg32
-         dwmapi delayimp)
+         dwmapi delayimp windowsapp)
 target_include_directories(app PRIVATE src ${config_src})
 # Windows N has no Media Foundation without the Media Feature Pack, and the elevated helper needs
 # no browser: both are loaded only when used, so the app can say what is missing.
