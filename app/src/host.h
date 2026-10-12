@@ -67,8 +67,12 @@ private:
     // Installs `theme` as a new theme (and runs `then` on the same command line); its new id, or empty.
     std::wstring CommitTheme(const animelogon::theme::Theme &theme, const std::wstring &then = L"");
 
-    // The proportions of the display a theme is shown on, for its pictures.
+    // The proportions of what a theme is shown on, for its pictures (wall.h): the wall of every
+    // display when spanning, otherwise the display (the theme's own in per-monitor mode, else
+    // the main one).
     void Shape(const std::wstring &themeId, UINT width, UINT *height) const;
+    // Where the displays are in a picture `width` x `height` when spanning; empty otherwise.
+    std::vector<Screen> Wall(UINT width, UINT height) const { return app::Wall(library_.settings(), monitors_, width, height); }
 
     HWND hwnd_ = nullptr;
     int show_ = SW_SHOWNORMAL;
@@ -84,10 +88,13 @@ private:
     Pictures pictures_;
     std::vector<animelogon::MonitorInfo> monitors_;
 
-    // The open theme's picture, at the size the page shows it.
+    // The open theme's picture, at the size the page shows it. When the page may play video and
+    // the wallpaper is one, the picture is the components alone (a PNG) to lay over the video.
     UINT previewW_ = 0, previewH_ = 0;
-    std::vector<uint8_t> previewBmp_;
+    bool previewMotion_ = false, previewLayer_ = false;
+    std::vector<uint8_t> previewBytes_;
     std::vector<Bound> bounds_;
+    std::vector<Screen> screens_;
     unsigned previewRev_ = 0;
     bool saveFailed_ = false;
 

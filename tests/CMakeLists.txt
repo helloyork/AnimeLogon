@@ -34,3 +34,8 @@ target_link_libraries(animelogon_tests PRIVATE d3d11)
 target_sources(animelogon_tests PRIVATE app_tests.cpp ${PROJECT_SOURCE_DIR}/app/src/json.cpp
                                         ${PROJECT_SOURCE_DIR}/app/src/library.cpp)
 target_include_directories(animelogon_tests PRIVATE ${PROJECT_SOURCE_DIR}/app/src)
+
+# The settings app's pictures of themes: the wall of displays when spanning, and the components
+# alone as a layer, drawn by the logon screen's renderer.
+target_sources(animelogon_tests PRIVATE app_picture_tests.cpp ${PROJECT_SOURCE_DIR}/app/src/pictures.cpp)
+target_link_libraries(animelogon_tests PRIVATE animelogon_render)

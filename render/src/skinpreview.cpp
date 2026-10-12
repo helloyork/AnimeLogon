@@ -92,7 +92,7 @@ bool SkinPreview::Ready() {
 
 bool SkinPreview::Render(const Picture &background, const skin::Resolved &skin, const ClockStyle &style,
                          const RegionalFormat &format, const SYSTEMTIME &now, Picture *out,
-                         std::vector<SkinView::Bound> *bounds) {
+                         std::vector<SkinView::Bound> *bounds, bool transparent) {
     if (!background.width || !background.height || !Ready()) return false;
     D3D11_TEXTURE2D_DESC desc{};
     desc.Width = background.width;
@@ -105,9 +105,9 @@ bool SkinPreview::Render(const Picture &background, const skin::Resolved &skin, 
     ComPtr<ID3D11Texture2D> target, staging;
     ComPtr<IDXGISurface> surface;
     ComPtr<ID2D1Bitmap1> bitmap;
-    const D2D1_BITMAP_PROPERTIES1 props =
-        D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
-                                D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE));
+    const D2D1_BITMAP_PROPERTIES1 props = D2D1::BitmapProperties1(
+        D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
+        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, transparent ? D2D1_ALPHA_MODE_PREMULTIPLIED : D2D1_ALPHA_MODE_IGNORE));
     if (FAILED(device_->CreateTexture2D(&desc, &init, &target)) || FAILED(target.As(&surface)) ||
         FAILED(view_.context()->CreateBitmapFromDxgiSurface(surface.Get(), &props, &bitmap)))
         return false;
@@ -129,7 +129,8 @@ bool SkinPreview::Render(const Picture &background, const skin::Resolved &skin, 
     for (UINT y = 0; y < out->height; ++y) {
         uint8_t *row = out->bgra.data() + (size_t)y * out->width * 4;
         memcpy(row, (const uint8_t *)map.pData + (size_t)y * map.RowPitch, (size_t)out->width * 4);
-        for (UINT x = 0; x < out->width; ++x) row[x * 4 + 3] = 0xFF;  // the target ignores alpha
+        if (!transparent)
+            for (UINT x = 0; x < out->width; ++x) row[x * 4 + 3] = 0xFF;  // the target ignores alpha
     }
     context_->Unmap(staging.Get(), 0);
     return true;

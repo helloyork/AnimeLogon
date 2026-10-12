@@ -4,6 +4,7 @@
    and draws its marks (selection, anchors) over the pictures. */
 
 const ORIGIN = 'https://animelogon.invalid/';
+const MEDIA = 'https://wallpapers.animelogon.invalid/';  // the wallpaper store, for playing videos
 const native = window.chrome && window.chrome.webview;
 
 /* ================= helpers ================= */
@@ -50,10 +51,10 @@ const COMMON_TEXT = ['font', 'weight', 'size', 'color'];
 let L = null;  // the library: shared settings, themes, wallpapers, components
 let T = null;  // the theme open on its page, in detail
 let ENV = { monitors: [], fonts: [], devices: [], on: false, installed: false };
-const UI = { view: 'library', tab: 'mine', sel: { inst: null, part: null }, hover: null, more: false, busy: null, tick: 0 };
+const UI = { view: 'library', tab: 'mine', sel: { inst: null, part: null }, screen: 0, hover: null, noVideo: false, more: false, busy: null, tick: 0 };
 // The open theme's picture and the edits on their way to it. Edits made while a picture is being
 // drawn wait, and only the newest of them is sent.
-const PV = { rev: 0, shown: 0, seq: 0, width: 0, height: 0, bounds: [], asked: '', waiting: false, pending: null, commit: false };
+const PV = { rev: 0, shown: 0, seq: 0, width: 0, height: 0, bounds: [], screens: [], layer: false, asked: '', waiting: false, pending: null, commit: false };
 let gestures = 0;
 
 function send(op, args) { if (native) native.postMessage(Object.assign({ op }, args || {})); }
@@ -81,11 +82,39 @@ if (native) native.addEventListener('message', e => receive(e.data));
 /* ================= what the library says ================= */
 const theme = id => L.themes.find(t => t.id === id);
 const perMonitor = () => L.settings.monitorMode === 'per-monitor';
+const spanning = () => L.settings.monitorMode === 'span' && ENV.monitors.length > 1;
 const mainMonitor = () => ENV.monitors.find(m => m.primary) || ENV.monitors[0] || { key: '', name: '显示器', width: 16, height: 9 };
 const screenTheme = m => L.settings.screens[m.key] && theme(L.settings.screens[m.key]) ? L.settings.screens[m.key] : L.current;
 // The display a theme is shown on: the one it is applied to in per-monitor mode, otherwise the main one.
 function screenOf(id) { return (perMonitor() && ENV.monitors.find(m => L.settings.screens[m.key] === id)) || mainMonitor(); }
-function shapeVars(id) { const m = screenOf(id); return { '--arw': String(m.width), '--arh': String(m.height) }; }
+// What a theme's pictures are shaped like: the wall of every display when spanning, else its display.
+function wallSize() {
+  const ms = ENV.monitors, left = Math.min(...ms.map(m => m.left)), top = Math.min(...ms.map(m => m.top));
+  return { width: Math.max(...ms.map(m => m.left + m.width)) - left, height: Math.max(...ms.map(m => m.top + m.height)) - top };
+}
+function shapeOf(id) { return spanning() ? wallSize() : screenOf(id); }
+function shapeVars(id) { const s = shapeOf(id); return { '--arw': String(s.width), '--arh': String(s.height) }; }
+
+/* --- video wallpapers play in the page; the components come over them as a layer drawn natively --- */
+const OBJECT_FIT = { fill: 'cover', fit: 'contain', stretch: 'fill' };  // as the logon screen fits a wallpaper
+const videoUrl = ref => `${MEDIA}${ref}/video.mp4`;
+// Not when the person asked for less motion, nor once a video would not play here.
+const motion = () => !UI.noVideo && !matchMedia('(prefers-reduced-motion: reduce)').matches;
+const plays = t => !!t && t.wallpaperKind === 'video' && motion();
+const layerUrl = (t, w, hh) => `${ORIGIN}layer/${t.id}.png?w=${w}${hh ? '&h=' + hh : ''}&r=${t.revision}.${UI.tick}`;
+function videoEl(ref, fit, cls) {
+  const v = h('video', { class: cls, muted: true, loop: true, playsinline: true, preload: 'auto', 'aria-hidden': 'true', src: videoUrl(ref) });
+  v.muted = true;
+  v.style.objectFit = OBJECT_FIT[fit] || 'cover';
+  v.addEventListener('error', () => {
+    v.remove();
+    if (UI.noVideo) return;
+    UI.noVideo = true;  // stills from here on
+    if (UI.view === 'theme') { PV.asked = ''; fitPreview(); } else render();
+  });
+  return v;
+}
+const live = { key: '', video: null };  // the current theme's video, kept across renders so it does not restart
 function usedOn(id) {
   if (!perMonitor()) return L.current === id ? ['使用中'] : [];
   const ms = ENV.monitors.filter(m => screenTheme(m) === id);
@@ -172,6 +201,17 @@ function card(t) {
   thumb.append(h('div', { class: 'acts' }, h('button', { class: 'btn sm', onclick: e => { e.stopPropagation(); openTheme(t.id); } }, '自定义'), more));
   thumb.addEventListener('click', () => applyFlow(t.id));
   thumb.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target === thumb) applyFlow(t.id); });
+  // A video wallpaper moves while the pointer is on its card.
+  if (t.wallpaperKind === 'video') {
+    thumb.addEventListener('pointerenter', () => {
+      if (!plays(t) || thumb.querySelector('video')) return;
+      const v = videoEl(t.wallpaperRef, t.fit, 'tv');
+      thumb.querySelector('.shot').after(v);
+      if (L.settings.components) v.after(h('img', { class: 'tl', src: layerUrl(t, 480), alt: '', draggable: 'false' }));
+      v.play().catch(() => {});
+    });
+    thumb.addEventListener('pointerleave', () => thumb.querySelectorAll('video.tv, img.tl').forEach(n => n.remove()));
+  }
   const facts = [kindName(t.wallpaperKind), t.summary, t.modifications ? '已修改' : null, t.author && !t.builtIn ? t.author : null].filter(Boolean).join(' · ');
   return h('article', { class: 'card' }, thumb, h('div', { class: 'meta' }, h('div', null,
     h('h3', null, t.name), h('p', null, used.length ? h('span', { class: 'inuse' }, used.join('、') + ' · ') : null, facts))));
@@ -187,7 +227,15 @@ function currentView() {
   }
   const t = theme(L.current);
   const wallpaper = ['image', 'video'].includes(t.wallpaperKind) ? `${t.wallpaper}（${kindName(t.wallpaperKind)}）` : t.wallpaper;
-  return h('div', { class: 'box current' }, h('img', { class: 'shot', src: thumbUrl(t, 960), alt: '', vars: shapeVars(t.id) }), h('div', { class: 'cinfo' },
+  const shown = h('div', { class: 'vbox' }, h('img', { class: 'shot', src: thumbUrl(t, 960), alt: '', vars: shapeVars(t.id) }));
+  if (plays(t)) {
+    const key = t.wallpaperRef + '/' + t.fit;
+    if (live.key !== key) { live.key = key; live.video = videoEl(t.wallpaperRef, t.fit, 'tv'); }
+    shown.append(live.video);
+    if (L.settings.components) shown.append(h('img', { class: 'tl', src: layerUrl(t, 960), alt: '', draggable: 'false' }));
+    setTimeout(() => live.video && live.video.isConnected && live.video.play().catch(() => {}));
+  }
+  return h('div', { class: 'box current' }, shown, h('div', { class: 'cinfo' },
     h('h3', null, t.name),
     h('p', null, `${wallpaper} · ${L.settings.components ? t.summary : '组件已关闭'}`),
     h('div', { class: 'actions' }, h('button', { class: 'btn accent', onclick: () => openTheme(t.id) }, '自定义'), h('button', { class: 'btn', onclick: () => lockPreview(t.id) }, '锁屏预览'))));
@@ -321,7 +369,7 @@ function renderPreviewParts() {
   const st = $('#stage');
   for (const [k, v] of Object.entries(shapeVars(T.id))) st.style.setProperty(k, v);
   const m = screenOf(T.id);
-  $('#pvcap').replaceChildren(h('span', null, `按${m.name} 的比例（${ratioLabel(m.width, m.height)}）显示`), h('span', null, '拖动组件可以移动，拖四角可以缩放'),
+  $('#pvcap').replaceChildren(h('span', null, spanning() ? '横跨所有显示器显示，虚线是各显示器的边界' : `按${m.name} 的比例（${ratioLabel(m.width, m.height)}）显示`), h('span', null, '拖动组件可以移动，拖四角可以缩放'),
     h('button', { class: 'link', onclick: e => ratioMenu(e.currentTarget) }, '用其他比例预览…'));
   $('#notice').hidden = L.settings.components;
 }
@@ -335,10 +383,11 @@ function fitPreview() {
   const w = Math.round(r.width * k), hh = Math.round(r.height * k), key = w + 'x' + hh;
   if (w < 16 || hh < 16 || key === PV.asked) return;
   clearTimeout(fitTimer);
-  fitTimer = setTimeout(() => { PV.asked = key; send('preview', { width: w, height: hh, seq: ++PV.seq }); }, PV.asked ? 120 : 0);
+  fitTimer = setTimeout(() => { PV.asked = key; send('preview', { width: w, height: hh, motion: motion(), seq: ++PV.seq }); }, PV.asked ? 120 : 0);
 }
 function onPreview(m) {
   PV.rev = m.rev; PV.width = m.width; PV.height = m.height; PV.bounds = m.bounds || [];
+  PV.layer = !!m.layer; PV.screens = m.screens || [];
   PV.waiting = false;
   showPreview(); updateSel();
   if (PV.pending) pump();
@@ -346,9 +395,23 @@ function onPreview(m) {
 }
 function showPreview() {
   const img = $('#pv'); if (!img || !PV.width) return;
-  const rev = PV.rev, url = `${ORIGIN}preview.bmp?r=${rev}`, next = new Image();
+  const rev = PV.rev, layer = PV.layer, url = `${ORIGIN}preview?r=${rev}`, next = new Image();
   next.src = url;
-  next.decode().then(() => { if (rev >= PV.shown && $('#pv') === img) { img.src = url; PV.shown = rev; } }, () => {});
+  next.decode().then(() => { if (rev >= PV.shown && $('#pv') === img) { img.src = url; PV.shown = rev; stageVideo(layer); } }, () => {});
+}
+// With a layer, the picture is the components alone: the theme's video plays under it.
+function stageVideo(layer) {
+  const st = $('#stage'); if (!st || !T) return;
+  let v = $('#pvv');
+  if (!layer) { if (v) v.remove(); return; }
+  if (!v || v.dataset.ref !== T.wallpaper.ref) {
+    if (v) v.remove();
+    v = videoEl(T.wallpaper.ref, T.fit, 'pvv');
+    v.id = 'pvv'; v.dataset.ref = T.wallpaper.ref;
+    st.prepend(v);
+    v.play().catch(() => {});
+  }
+  v.style.objectFit = OBJECT_FIT[T.fit] || 'cover';
 }
 // Live edits during a drag or while a slider moves: the picture follows, settings.ini waits for the end.
 function liveSet(inst, values, gesture) {
@@ -382,19 +445,38 @@ function adjustment(inst, key) {
 }
 const valueOf = (inst, key) => { const a = adjustment(inst, key); return a ? a.value : ''; };
 function scale() { const st = $('#stage'); return st && PV.width ? st.getBoundingClientRect().width / PV.width : 0; }
-function boundOf(instId, key) { return PV.bounds.find(b => b.instance === instId && b.key === key); }
+// Spanning with components on every display, an instance is drawn once per display: the marks
+// follow the copy last clicked.
+function boundOf(instId, key) {
+  const all = PV.bounds.filter(b => b.instance === instId && b.key === key);
+  return all.find(b => b.screen === UI.screen) || all[0];
+}
 function rectOf(b) { const k = scale(); return { left: b.left * k, top: b.top * k, width: (b.right - b.left) * k, height: (b.bottom - b.top) * k }; }
 function place(box, r, pad) { Object.assign(box.style, { left: (r.left - pad) + 'px', top: (r.top - pad) + 'px', width: (r.width + pad * 2) + 'px', height: (r.height + pad * 2) + 'px' }); box.hidden = false; }
+// The display a mark is placed on, in the stage's pixels: one of the wall's when spanning, else all of it.
+function frameOf(b) {
+  const st = $('#stage').getBoundingClientRect(), k = scale(), s = b && PV.screens[b.screen];
+  return s ? { left: s.left * k, top: s.top * k, width: (s.right - s.left) * k, height: (s.bottom - s.top) * k } : { left: 0, top: 0, width: st.width, height: st.height };
+}
 // The panel's anchor point and the point of the panel it holds, in the stage's pixels.
 function geometry(instId, pk) {
   const st = $('#stage'), inst = instOf(instId), b = boundOf(instId, pk);
   if (!st || !inst || !b) return null;
-  const s = st.getBoundingClientRect(), r = rectOf(b), W = s.width, H = s.height;
+  const f = frameOf(b), r = rectOf(b), W = f.width, H = f.height;
   const idx = Math.max(0, ANCHORS.indexOf(valueOf(inst, pk + '.anchor'))), col = idx % 3, row = Math.floor(idx / 3);
   const M = (+valueOf(inst, pk + '.margin') || 0) / 100 * Math.min(W, H);
-  return { W, H, M, col, row, L: r.left, T: r.top, w: r.width, h: r.height,
+  return { f, W, H, M, col, row, L: r.left, T: r.top, w: r.width, h: r.height,
     ox: +valueOf(inst, pk + '.offset-x') || 0, oy: +valueOf(inst, pk + '.offset-y') || 0,
-    bx: [M, W / 2, W - M][col], by: [M, H / 2, H - M][row], rx: [r.left, r.left + r.width / 2, r.left + r.width][col], ry: [r.top, r.top + r.height / 2, r.top + r.height][row] };
+    bx: f.left + [M, W / 2, W - M][col], by: f.top + [M, H / 2, H - M][row], rx: [r.left, r.left + r.width / 2, r.left + r.width][col], ry: [r.top, r.top + r.height / 2, r.top + r.height][row] };
+}
+// The edges of the displays when the picture is a wall of them.
+function drawScreens(svg, el) {
+  if (PV.screens.length < 2) return;
+  const k = scale();
+  for (const s of PV.screens) {
+    const a = { x: s.left * k + .5, y: s.top * k + .5, width: Math.max(0, (s.right - s.left) * k - 1), height: Math.max(0, (s.bottom - s.top) * k - 1), fill: 'none' };
+    svg.append(el('rect', Object.assign({ stroke: 'rgba(0,0,0,.45)', 'stroke-width': 3 }, a)), el('rect', Object.assign({ stroke: 'rgba(255,255,255,.7)', 'stroke-width': 1, 'stroke-dasharray': '6 4' }, a)));
+  }
 }
 let dragShift = null;  // while dragging, the selection box moves ahead of the picture
 const panelBounds = instId => PV.bounds.filter(b => b.instance === instId && !b.key.includes('.'));
@@ -405,7 +487,9 @@ function unionOf(bs) {
 function updateSel() {
   const sel = $('#selbox'), part = $('#partbox'), svg = $('#anchors');
   if (!sel) return;
+  const NS = 'http://www.w3.org/2000/svg', el = (tag, a) => { const e = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(a)) e.setAttribute(k, v); return e; };
   svg.replaceChildren();
+  drawScreens(svg, el);
   updateHover();
   // A component of several panels, selected as a whole: one box around all of them. Each panel
   // is moved and sized by itself, so the box has no handles.
@@ -425,9 +509,8 @@ function updateSel() {
   const pb = UI.sel.part && UI.sel.part.includes('.') && boundOf(UI.sel.inst, UI.sel.part);
   if (pb && !dragShift) place(part, rectOf(pb), 2); else part.hidden = true;
   const g = geometry(UI.sel.inst, pk); if (!g) return;
-  const NS = 'http://www.w3.org/2000/svg', el = (tag, a) => { const e = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(a)) e.setAttribute(k, v); return e; };
   if (dragShift) for (let rr = 0; rr < 3; rr++) for (let cc = 0; cc < 3; cc++)
-    svg.append(el('circle', { cx: [g.M, g.W / 2, g.W - g.M][cc], cy: [g.M, g.H / 2, g.H - g.M][rr], r: 3, fill: 'rgba(255,255,255,.7)', stroke: 'rgba(0,0,0,.4)' }));
+    svg.append(el('circle', { cx: g.f.left + [g.M, g.W / 2, g.W - g.M][cc], cy: g.f.top + [g.M, g.H / 2, g.H - g.M][rr], r: 3, fill: 'rgba(255,255,255,.7)', stroke: 'rgba(0,0,0,.4)' }));
   const rx = dragShift ? [r.left, r.left + r.width / 2, r.left + r.width][g.col] : g.rx, ry = dragShift ? [r.top, r.top + r.height / 2, r.top + r.height][g.row] : g.ry;
   if (Math.hypot(rx - g.bx, ry - g.by) > 2) {
     svg.append(el('line', { x1: g.bx, y1: g.by, x2: rx, y2: ry, stroke: 'rgba(0,0,0,.45)', 'stroke-width': 3 }));
@@ -485,6 +568,7 @@ function onStageDown(e) {
   const hit = hitTest(e);
   if (!hit) { selectSel(null); return; }
   e.preventDefault();
+  UI.screen = hit.screen;
   const pk = hit.key.split('.')[0], multi = multiPanel(hit.instance);
   const was = UI.sel.inst === hit.instance && (!multi || (!!UI.sel.part && panelKey(UI.sel) === pk));
   if (!was) selectSel(hit.instance, multi ? pk : null, true);
@@ -500,9 +584,11 @@ function startDrag(e, instId, pk, partOnClick) {
     const dx = ev.clientX - p.x, dy = ev.clientY - p.y;
     if (!p.moved && Math.hypot(dx, dy) < 3) return;
     p.moved = true; st.classList.add('dragging');
-    const L0 = g0.L + dx, T0 = g0.T + dy, cx = L0 + g0.w / 2, cy = T0 + g0.h / 2, W = g0.W, H = g0.H, M = g0.M;
-    const col = cx < W / 3 ? 0 : cx < W * 2 / 3 ? 1 : 2, row = cy < H / 3 ? 0 : cy < H * 2 / 3 ? 1 : 2;
-    const bx = [M, W / 2, W - M][col], by = [M, H / 2, H - M][row], rx = [L0, cx, L0 + g0.w][col], ry = [T0, cy, T0 + g0.h][row];
+    // Measured on the panel's own display: the whole picture, or one display of the wall.
+    const L0 = g0.L + dx, T0 = g0.T + dy, cx = L0 + g0.w / 2, cy = T0 + g0.h / 2, W = g0.W, H = g0.H, M = g0.M, f = g0.f;
+    const fx = cx - f.left, fy = cy - f.top;
+    const col = fx < W / 3 ? 0 : fx < W * 2 / 3 ? 1 : 2, row = fy < H / 3 ? 0 : fy < H * 2 / 3 ? 1 : 2;
+    const bx = f.left + [M, W / 2, W - M][col], by = f.top + [M, H / 2, H - M][row], rx = [L0, cx, L0 + g0.w][col], ry = [T0, cy, T0 + g0.h][row];
     // On the same anchor, the offset moves by exactly what the pointer did.
     let ox = col === g0.col ? g0.ox + dx / W * 100 : (rx - bx) / W * 100;
     let oy = row === g0.row ? g0.oy + dy / H * 100 : (ry - by) / H * 100;
@@ -794,24 +880,34 @@ function menu(anchor, items) {
 // ratio: as a display of that shape would show it, with black bars around it.
 function lockPreview(id, ratio) {
   closeMenu();
-  const m = screenOf(id), w = Math.min(2560, Math.round(screen.width * (window.devicePixelRatio || 1)));
-  const shape = ratio || m.width / m.height, hh = Math.round(w / shape), t = theme(id);
+  const s = shapeOf(id), w = Math.min(2560, Math.round(screen.width * (window.devicePixelRatio || 1)));
+  const shape = ratio || s.width / s.height, hh = Math.round(w / shape), t = theme(id), vid = plays(t);
   const q = `w=${w}${ratio ? '&h=' + hh : ''}&r=${t.revision}.${UI.tick}`;
   const ov = h('div', { class: 'lockpv', role: 'dialog', 'aria-label': '锁屏预览', tabindex: '-1' });
   const frame = h('div', { class: 'frame', style: { width: `min(100vw, ${(100 * shape).toFixed(2)}vh)`, height: `min(100vh, ${(100 / shape).toFixed(2)}vw)` } });
   const signin = h('div', { class: 'signin' }, h('img', { src: `${ORIGIN}lock/${id}/still.bmp?${q}`, alt: '' }),
     h('div', { class: 'sbox' }, h('div', { class: 'avatar' }, 'A'), h('div', { class: 'uname' }, '用户'), h('div', { class: 'pin' }, 'PIN'), h('small', null, 'Windows 登录界面（示意）')));
-  // The still covers the screen at once; the components come in over it.
+  // As the logon screen goes: the still covers the screen at once, a video wallpaper starts over
+  // it, and the components come in last. Over a video they are a layer of their own.
   const still = h('img', { src: `${ORIGIN}lock/${id}/still.bmp?${q}`, alt: '' });
-  const full = h('img', { class: 'full', src: `${ORIGIN}lock/${id}/full.bmp?${q}`, alt: '' });
-  full.addEventListener('load', () => setTimeout(() => { full.style.opacity = '1'; }, 300));
-  frame.append(signin, still, full);
+  const full = h('img', { class: 'full', src: vid ? layerUrl(t, w, ratio ? hh : 0) : `${ORIGIN}lock/${id}/full.bmp?${q}`, alt: '' });
+  let video = null, loaded = false, started = !vid;
+  const fadeIn = () => { if (loaded && started) setTimeout(() => { full.style.opacity = '1'; }, 300); };
+  full.addEventListener('load', () => { loaded = true; fadeIn(); });
+  if (vid) {
+    video = videoEl(t.wallpaperRef, t.fit, 'lv');
+    const go = () => { if (started) return; started = true; video.classList.add('on'); fadeIn(); };
+    video.addEventListener('playing', go, { once: true });
+    video.addEventListener('error', go, { once: true });
+    video.play().catch(() => {});
+  }
+  frame.append(signin, still, ...(video ? [video] : []), full);
   const hint = h('div', { class: 'lhint' }, '按任意键或单击，模拟唤醒');
   const exit = h('button', { class: 'btn exit', onclick: e => { e.stopPropagation(); close(); } }, '退出预览 (Esc)');
   ov.append(frame, hint, exit);
   document.body.append(ov); ov.focus();
   let woke = false;
-  const wake = () => { if (woke) return; woke = true; still.classList.add('fading'); full.classList.add('fading'); hint.textContent = '之后是 Windows 的登录界面'; };
+  const wake = () => { if (woke) return; woke = true; for (const n of [still, video, full]) if (n) n.classList.add('fading'); hint.textContent = '之后是 Windows 的登录界面'; };
   ov.addEventListener('pointerdown', e => { if (e.target !== exit) wake(); });
   const key = e => { e.stopPropagation(); e.preventDefault(); if (e.key === 'Escape') close(); else wake(); };
   document.addEventListener('keydown', key, true);
@@ -859,7 +955,7 @@ let shownMinute = new Date().getMinutes();
 setInterval(() => {
   const m = new Date().getMinutes(); if (m === shownMinute) return; shownMinute = m;
   UI.tick++;
-  if (UI.view === 'theme' && T && PV.asked) { const [w, hh] = PV.asked.split('x').map(Number); send('preview', { width: w, height: hh, seq: ++PV.seq }); }
+  if (UI.view === 'theme' && T && PV.asked) { const [w, hh] = PV.asked.split('x').map(Number); send('preview', { width: w, height: hh, motion: motion(), seq: ++PV.seq }); }
   else if (L) send('refresh');
 }, 1000);
 

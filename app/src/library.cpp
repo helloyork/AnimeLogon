@@ -563,6 +563,7 @@ void Library::WriteLibrary(json::Writer &w) const {
         w.BeginObject();
         w.Member(L"id", e.id).Member(L"name", e.name).Member(L"author", e.author).Member(L"builtIn", e.builtIn);
         w.Member(L"wallpaper", WallpaperName(edited.wallpaper)).Member(L"wallpaperKind", WallpaperKindName(*this, edited.wallpaper));
+        w.Member(L"wallpaperRef", edited.wallpaper).Member(L"fit", ToString(edited.fit));
         w.Member(L"summary", summary.empty() ? std::wstring(L"只有壁纸") : summary);
         w.Member(L"modifications", Modifications(e.id)).Key(L"revision").Int(Revision(e.id));
         w.EndObject();

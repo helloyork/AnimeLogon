@@ -35,6 +35,8 @@ namespace {
 
 constexpr wchar_t kClass[] = L"AnimeLogonApp";
 constexpr wchar_t kOrigin[] = L"https://animelogon.invalid/";
+// The wallpaper store, read-only, so the page can play a video wallpaper itself.
+constexpr wchar_t kWallpaperHost[] = L"wallpapers.animelogon.invalid";
 constexpr UINT kImportProgress = WM_APP + 10;
 constexpr UINT kImportDone = WM_APP + 11;
 constexpr UINT kPageMessage = WM_APP + 12;
@@ -118,6 +120,13 @@ std::wstring Param(const std::wstring &query, const wchar_t *name) {
 UINT ParamSize(const std::wstring &query, const wchar_t *name, UINT fallback, UINT most) {
     const UINT v = (UINT)wcstoul(Param(query, name).c_str(), nullptr, 10);
     return v ? std::min(v, most) : fallback;
+}
+
+// Whether `ref` names an installed video wallpaper.
+bool IsVideo(const Library &library, const std::wstring &ref) {
+    for (const WallpaperInfo &w : library.wallpapers())
+        if (w.id == ref && !w.builtIn) return w.kind == WallpaperKind::Video;
+    return false;
 }
 
 // What the clock says now, in the words the logon screen will use.
@@ -288,6 +297,14 @@ void Host::StartWebView() {
                                    if (SUCCEEDED(controller_.As(&c2)))
                                        c2->put_DefaultBackgroundColor(dark_ ? COREWEBVIEW2_COLOR{255, 32, 32, 32}
                                                                             : COREWEBVIEW2_COLOR{255, 243, 243, 243});
+                                   // Media only: the page's own origin may play these files but
+                                   // not read them.
+                                   ComPtr<ICoreWebView2_3> view3;
+                                   if (SUCCEEDED(view_.As(&view3)) &&
+                                       FAILED(view3->SetVirtualHostNameToFolderMapping(
+                                           kWallpaperHost, WallpapersDir().c_str(),
+                                           COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_DENY_CORS)))
+                                       ALOG(L"WebView2: the wallpaper store cannot be mapped; videos show as stills");
                                    EventRegistrationToken token{};
                                    view_->AddWebResourceRequestedFilter((std::wstring(kOrigin) + L"*").c_str(),
                                                                         COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL);
@@ -379,6 +396,7 @@ void Host::SendEnvironment() {
     int n = 0;
     for (const MonitorInfo &m : monitors_) {
         w.BeginObject().Member(L"key", m.key).Member(L"name", Format(L"显示器 %d", ++n)).Member(L"model", m.name);
+        w.Member(L"left", (int)m.rect.left).Member(L"top", (int)m.rect.top);
         w.Member(L"width", (int)(m.rect.right - m.rect.left)).Member(L"height", (int)(m.rect.bottom - m.rect.top));
         w.Member(L"primary", m.primary).EndObject();
     }
@@ -398,12 +416,20 @@ void Host::SendEnvironment() {
 void Host::SendPreview(int seq) {
     json::Writer w;
     w.BeginObject().Member(L"type", L"preview").Key(L"rev").Int(previewRev_).Key(L"seq").Int(seq);
-    w.Member(L"width", (int)previewW_).Member(L"height", (int)previewH_);
+    w.Member(L"width", (int)previewW_).Member(L"height", (int)previewH_).Member(L"layer", previewLayer_);
     w.Key(L"bounds").BeginArray();
     for (const Bound &b : bounds_) {
-        w.BeginObject().Member(L"instance", b.instance).Member(L"key", b.key);
+        w.BeginObject().Member(L"instance", b.instance).Member(L"key", b.key).Member(L"screen", (int)b.screen);
         w.Member(L"left", (double)b.rect.left).Member(L"top", (double)b.rect.top);
         w.Member(L"right", (double)b.rect.right).Member(L"bottom", (double)b.rect.bottom).EndObject();
+    }
+    w.EndArray();
+    // Several only when spanning: the displays, in the picture's pixels.
+    w.Key(L"screens").BeginArray();
+    for (const Screen &s : screens_) {
+        w.BeginObject().Member(L"left", (int)s.rect.left).Member(L"top", (int)s.rect.top);
+        w.Member(L"right", (int)s.rect.right).Member(L"bottom", (int)s.rect.bottom).Member(L"components", s.components);
+        w.EndObject();
     }
     w.EndArray().EndObject();
     Send(w);
@@ -442,10 +468,18 @@ bool Host::Save() {
 
 void Host::RenderPreview() {
     bounds_.clear();
-    previewBmp_.clear();
+    previewBytes_.clear();
+    screens_.clear();
+    previewLayer_ = false;
     if (library_.open().empty() || previewW_ < 16 || previewH_ < 16) return;
+    const theme::Theme t = library_.Edited(library_.open());
+    // A video wallpaper plays in the page itself, under the components drawn here.
+    previewLayer_ = previewMotion_ && IsVideo(library_, t.wallpaper);
+    screens_ = Wall(previewW_, previewH_);
     Picture p;
-    if (pictures_.Theme(library_.Edited(library_.open()), previewW_, previewH_, true, &p, &bounds_)) previewBmp_ = Bmp(p);
+    if (pictures_.Theme(t, previewW_, previewH_, previewLayer_ ? Draw::ComponentsOnly : Draw::Everything, &p, &bounds_,
+                        &screens_))
+        previewBytes_ = previewLayer_ ? Png(p) : Bmp(p);
     ++previewRev_;
 }
 
@@ -472,8 +506,7 @@ void Host::Shape(const std::wstring &themeId, UINT width, UINT *height) const {
             break;
         }
     }
-    const LONG w = shown ? shown->rect.right - shown->rect.left : 16, h = shown ? shown->rect.bottom - shown->rect.top : 9;
-    *height = std::max<UINT>(1, (UINT)((uint64_t)width * (UINT)std::max<LONG>(1, h) / (UINT)std::max<LONG>(1, w)));
+    *height = PictureHeight(library_.settings(), monitors_, shown, width);
 }
 
 void Host::OnResource(ICoreWebView2WebResourceRequestedEventArgs *args) {
@@ -495,18 +528,34 @@ void Host::OnResource(ICoreWebView2WebResourceRequestedEventArgs *args) {
     Picture p;
     if (WebFile(path, &body, &type)) {
         // one of the page's own files
-    } else if (path == L"preview.bmp") {
-        body = previewBmp_;
-        type = L"image/bmp";
+    } else if (path == L"preview") {
+        body = previewBytes_;
+        type = previewLayer_ ? L"image/png" : L"image/bmp";
     } else if (path.rfind(L"thumb/", 0) == 0 && EndsWith(path, L".bmp")) {
         const std::wstring id = path.substr(6, path.size() - 10);
         if (library_.Entry(id)) {
             const UINT w = ParamSize(query, L"w", 384, 1920);
             UINT h = 0;
             Shape(id, w, &h);
-            if (pictures_.Theme(library_.Edited(id), w, h, library_.settings().components, &p)) body = Bmp(p);
+            const std::vector<Screen> wall = Wall(w, h);
+            if (pictures_.Theme(library_.Edited(id), w, h,
+                                library_.settings().components ? Draw::Everything : Draw::WallpaperOnly, &p, nullptr,
+                                &wall))
+                body = Bmp(p);
         }
         type = L"image/bmp";
+    } else if (path.rfind(L"layer/", 0) == 0 && EndsWith(path, L".png")) {
+        // A theme's components alone, to lay over its video wallpaper playing in the page.
+        const std::wstring id = path.substr(6, path.size() - 10);
+        if (library_.Entry(id) && library_.settings().components) {
+            const UINT w = ParamSize(query, L"w", 960, 3840);
+            UINT h = ParamSize(query, L"h", 0, 3840);
+            const bool shaped = h == 0;
+            if (shaped) Shape(id, w, &h);
+            const std::vector<Screen> wall = shaped ? Wall(w, h) : std::vector<Screen>();
+            if (pictures_.Theme(library_.Edited(id), w, h, Draw::ComponentsOnly, &p, nullptr, &wall)) body = Png(p);
+        }
+        type = L"image/png";
     } else if (path.rfind(L"wallpaper/", 0) == 0 && EndsWith(path, L".bmp")) {
         const std::wstring ref = path.substr(10, path.size() - 14);
         if (IsWallpaperRef(ref) && pictures_.Wallpaper(ref, Scaling::Fill, 256, 144, &p)) body = Bmp(p);
@@ -516,12 +565,17 @@ void Host::OnResource(ICoreWebView2WebResourceRequestedEventArgs *args) {
         const bool full = EndsWith(path, L"/full.bmp");
         const std::wstring id = path.substr(5, path.size() - 5 - (full ? 9 : 10));
         if (library_.Entry(id)) {
-            // As the theme's display shows it, or as a display of another shape would.
+            // As the theme's display (or wall of displays) shows it, or as one display of another
+            // shape would.
             const UINT w = ParamSize(query, L"w", 1920, 3840);
             UINT h = ParamSize(query, L"h", 0, 3840);
-            if (!h) Shape(id, w, &h);
+            const bool shaped = h == 0;
+            if (shaped) Shape(id, w, &h);
+            const std::vector<Screen> wall = shaped ? Wall(w, h) : std::vector<Screen>();
             const theme::Theme t = library_.Edited(id);
-            if (pictures_.Theme(t, w, h, full && library_.settings().components, &p)) body = Bmp(p);
+            if (pictures_.Theme(t, w, h, full && library_.settings().components ? Draw::Everything : Draw::WallpaperOnly, &p,
+                                nullptr, &wall))
+                body = Bmp(p);
         }
         type = L"image/bmp";
     }
@@ -563,6 +617,7 @@ void Host::OnMessage(const json::Value &m) {
     } else if (op == L"preview") {
         previewW_ = (UINT)std::clamp(m[L"width"].Num(), 0.0, 3840.0);
         previewH_ = (UINT)std::clamp(m[L"height"].Num(), 0.0, 2400.0);
+        previewMotion_ = m[L"motion"].Bool();
         RenderPreview();
         SendPreview(seq);
     } else if (op == L"set") {

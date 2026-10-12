@@ -67,6 +67,32 @@ Picture Black(UINT width, UINT height) {
     return p;
 }
 
+Picture Clear(UINT width, UINT height) {
+    Picture p;
+    p.width = width;
+    p.height = height;
+    p.bgra.assign((size_t)width * height * 4, 0);
+    return p;
+}
+
+// The part of `picture` inside `r`, and that part written back.
+Picture Crop(const Picture &picture, const RECT &r) {
+    Picture p;
+    p.width = (UINT)(r.right - r.left);
+    p.height = (UINT)(r.bottom - r.top);
+    p.bgra.resize((size_t)p.width * p.height * 4);
+    for (UINT y = 0; y < p.height; ++y)
+        memcpy(&p.bgra[(size_t)y * p.width * 4], &picture.bgra[(((size_t)r.top + y) * picture.width + r.left) * 4],
+               (size_t)p.width * 4);
+    return p;
+}
+
+void Paste(Picture *picture, const Picture &part, const RECT &r) {
+    for (UINT y = 0; y < part.height; ++y)
+        memcpy(&picture->bgra[(((size_t)r.top + y) * picture->width + r.left) * 4], &part.bgra[(size_t)y * part.width * 4],
+               (size_t)part.width * 4);
+}
+
 Picture Gradient(UINT width, UINT height) {
     Picture p;
     p.width = width;
@@ -189,29 +215,48 @@ bool Pictures::Wallpaper(const std::wstring &ref, Scaling fit, UINT width, UINT 
     return true;
 }
 
-bool Pictures::Theme(const theme::Theme &theme, UINT width, UINT height, bool components, Picture *out,
-                     std::vector<Bound> *bounds) {
+bool Pictures::Theme(const theme::Theme &theme, UINT width, UINT height, Draw draw, Picture *out,
+                     std::vector<Bound> *bounds, const std::vector<Screen> *screens) {
+    if (!width || !height) return false;
     Picture drawn;
-    if (!Wallpaper(theme.wallpaper, theme.fit, width, height, &drawn)) return false;
-    if (components) {
+    if (draw == Draw::ComponentsOnly) drawn = Clear(width, height);
+    else if (!Wallpaper(theme.wallpaper, theme.fit, width, height, &drawn)) return false;
+    if (draw != Draw::WallpaperOnly) {
+        const RECT all{0, 0, (LONG)width, (LONG)height};
+        const std::vector<Screen> one{{all, true}};
+        const std::vector<Screen> &where = screens && !screens->empty() ? *screens : one;
         SYSTEMTIME now{};
         GetLocalTime(&now);
         const RegionalFormat format = UserFormat();
-        for (const theme::Instance &i : theme.components) {
-            skin::Skin skin;
-            if (!i.visible || !library_.LoadSkin(i.ref, &skin)) continue;
-            // Only the values the component takes, as the logon screen resolves them.
-            skin::Values values;
-            for (const auto &[key, value] : i.sets)
-                if (skin::Accepts(skin, key, value)) values[key] = value;
-            Picture next;
-            std::vector<SkinView::Bound> placed;
-            if (!preview_.Render(drawn, skin::Resolve(skin, values), library_.settings().clock, format, now, &next,
-                                 bounds ? &placed : nullptr))
-                continue;
-            drawn = std::move(next);
-            if (bounds)
-                for (const SkinView::Bound &b : placed) bounds->push_back({i.id, b.key, b.rect});
+        for (size_t s = 0; s < where.size(); ++s) {
+            if (!where[s].components) continue;
+            RECT r{};
+            if (!IntersectRect(&r, &where[s].rect, &all)) continue;
+            // Each screen is drawn on as a display of its own size.
+            const bool whole = EqualRect(&r, &all);
+            Picture part = whole ? std::move(drawn) : Crop(drawn, r);
+            for (const theme::Instance &i : theme.components) {
+                skin::Skin skin;
+                if (!i.visible || !library_.LoadSkin(i.ref, &skin)) continue;
+                // Only the values the component takes, as the logon screen resolves them.
+                skin::Values values;
+                for (const auto &[key, value] : i.sets)
+                    if (skin::Accepts(skin, key, value)) values[key] = value;
+                Picture next;
+                std::vector<SkinView::Bound> placed;
+                if (!preview_.Render(part, skin::Resolve(skin, values), library_.settings().clock, format, now, &next,
+                                     bounds ? &placed : nullptr, draw == Draw::ComponentsOnly))
+                    continue;
+                part = std::move(next);
+                if (bounds)
+                    for (const SkinView::Bound &b : placed) {
+                        const D2D1_RECT_F at = D2D1::RectF(b.rect.left + r.left, b.rect.top + r.top, b.rect.right + r.left,
+                                                           b.rect.bottom + r.top);
+                        bounds->push_back({i.id, b.key, at, s});
+                    }
+            }
+            if (whole) drawn = std::move(part);
+            else Paste(&drawn, part, r);
         }
     }
     *out = std::move(drawn);
@@ -236,6 +281,41 @@ std::vector<uint8_t> Bmp(const Picture &picture) {
     memcpy(out.data(), &file, sizeof(file));
     memcpy(out.data() + sizeof(file), &info, sizeof(info));
     if (pixels) memcpy(out.data() + file.bfOffBits, picture.bgra.data(), pixels);
+    return out;
+}
+
+std::vector<uint8_t> Png(const Picture &premultiplied) {
+    // WIC's PNG encoder takes straight alpha.
+    std::vector<uint8_t> straight = premultiplied.bgra;
+    for (size_t i = 0; i + 3 < straight.size(); i += 4) {
+        const unsigned a = straight[i + 3];
+        if (!a || a == 255) continue;
+        for (size_t c = 0; c < 3; ++c) straight[i + c] = (uint8_t)std::min(255u, (straight[i + c] * 255u + a / 2) / a);
+    }
+    const UINT pitch = premultiplied.width * 4;
+    ComPtr<IWICImagingFactory> wic;
+    ComPtr<IStream> stream;
+    ComPtr<IWICBitmapEncoder> encoder;
+    ComPtr<IWICBitmapFrameEncode> frame;
+    WICPixelFormatGUID format = GUID_WICPixelFormat32bppBGRA;
+    if (!premultiplied.width || !premultiplied.height ||
+        FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&wic))) ||
+        FAILED(CreateStreamOnHGlobal(nullptr, TRUE, &stream)) ||
+        FAILED(wic->CreateEncoder(GUID_ContainerFormatPng, nullptr, &encoder)) ||
+        FAILED(encoder->Initialize(stream.Get(), WICBitmapEncoderNoCache)) || FAILED(encoder->CreateNewFrame(&frame, nullptr)) ||
+        FAILED(frame->Initialize(nullptr)) || FAILED(frame->SetSize(premultiplied.width, premultiplied.height)) ||
+        FAILED(frame->SetPixelFormat(&format)) || format != GUID_WICPixelFormat32bppBGRA ||
+        FAILED(frame->WritePixels(premultiplied.height, pitch, (UINT)straight.size(), straight.data())) ||
+        FAILED(frame->Commit()) || FAILED(encoder->Commit()))
+        return {};
+    STATSTG stat{};
+    HGLOBAL memory = nullptr;
+    if (FAILED(stream->Stat(&stat, STATFLAG_NONAME)) || FAILED(GetHGlobalFromStream(stream.Get(), &memory))) return {};
+    std::vector<uint8_t> out((size_t)stat.cbSize.QuadPart);
+    const void *bytes = GlobalLock(memory);
+    if (!bytes) return {};
+    memcpy(out.data(), bytes, out.size());
+    GlobalUnlock(memory);
     return out;
 }
 
