@@ -28,10 +28,11 @@ public:
     // Draws the skin over `background` as on a display of the background's size. `bounds`, if
     // given, says where each panel and text landed. With `transparent`, the background's alpha
     // is kept, premultiplied in and out: a layer for laying over a picture drawn elsewhere.
-    // Otherwise the result is opaque.
+    // Otherwise the result is opaque. `data`, if given, is the battery and what is playing.
     bool Render(const Picture &background, const skin::Resolved &skin, const ClockStyle &style,
                 const RegionalFormat &format, const SYSTEMTIME &now, Picture *out,
-                std::vector<SkinView::Bound> *bounds = nullptr, bool transparent = false);
+                std::vector<SkinView::Bound> *bounds = nullptr, bool transparent = false,
+                const data::Snapshot *data = nullptr);
 
 private:
     bool Ready();

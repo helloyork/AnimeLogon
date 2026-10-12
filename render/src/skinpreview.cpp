@@ -92,7 +92,7 @@ bool SkinPreview::Ready() {
 
 bool SkinPreview::Render(const Picture &background, const skin::Resolved &skin, const ClockStyle &style,
                          const RegionalFormat &format, const SYSTEMTIME &now, Picture *out,
-                         std::vector<SkinView::Bound> *bounds, bool transparent) {
+                         std::vector<SkinView::Bound> *bounds, bool transparent, const data::Snapshot *data) {
     if (!background.width || !background.height || !Ready()) return false;
     D3D11_TEXTURE2D_DESC desc{};
     desc.Width = background.width;
@@ -112,6 +112,7 @@ bool SkinPreview::Render(const Picture &background, const skin::Resolved &skin, 
         FAILED(view_.context()->CreateBitmapFromDxgiSurface(surface.Get(), &props, &bitmap)))
         return false;
     view_.Set(skin, style, format);
+    view_.SetData(data ? *data : data::Snapshot{});
     view_.Tick(now);
     if (!view_.Draw(bitmap.Get(), background.width, background.height, 0)) return false;
     if (bounds) *bounds = view_.Bounds(0);

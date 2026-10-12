@@ -5,8 +5,10 @@
 #include <dwrite_1.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cfloat>
 #include <cmath>
+#include <cwchar>
 
 #include "animelogon/log.h"
 
@@ -29,6 +31,72 @@ bool HasFamily(IDWriteFactory *write, const std::wstring &family) {
     BOOL exists = FALSE;
     return SUCCEEDED(write->GetSystemFontCollection(&fonts)) &&
            SUCCEEDED(fonts->FindFamilyName(family.c_str(), &index, &exists)) && exists;
+}
+
+// A bar among a line's texts. DirectWrite lays it out like a character; Direct2D draws it into
+// the panel's bitmap while the line is drawn. `lead` is the space before it.
+class Bar : public IDWriteInlineObject {
+public:
+    Bar(ID2D1DeviceContext *dc, const skin::Text &t, float px, float axis, float fraction)
+        : dc_(dc), t_(t), lead_(t.space * px), length_(t.length * px), height_(std::max(1.0f, t.thickness * px)),
+          axis_(axis), fraction_(fraction) {}
+
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id, void **out) override {
+        if (id == __uuidof(IUnknown) || id == __uuidof(IDWriteInlineObject)) {
+            *out = static_cast<IDWriteInlineObject *>(this);
+            AddRef();
+            return S_OK;
+        }
+        *out = nullptr;
+        return E_NOINTERFACE;
+    }
+    ULONG STDMETHODCALLTYPE AddRef() override { return ++refs_; }
+    ULONG STDMETHODCALLTYPE Release() override {
+        const ULONG left = --refs_;
+        if (!left) delete this;
+        return left;
+    }
+
+    HRESULT STDMETHODCALLTYPE Draw(void *, IDWriteTextRenderer *, FLOAT x, FLOAT y, BOOL, BOOL, IUnknown *) override {
+        const float left = std::round(x + lead_), top = std::round(y);
+        const float radius = std::min(t_.radius, 0.5f) * height_;
+        auto fill = [&](float width, uint32_t color, float opacity) {
+            if (width <= 0.0f || opacity <= 0.0f) return;
+            ComPtr<ID2D1SolidColorBrush> brush;
+            if (FAILED(dc_->CreateSolidColorBrush(ColorOf(color, opacity), &brush))) return;
+            const float r = std::min(radius, width / 2.0f);
+            dc_->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(left, top, left + width, top + height_), r, r),
+                                      brush.Get());
+        };
+        fill(length_, t_.track, t_.trackOpacity);
+        fill(length_ * fraction_, t_.color, t_.opacity);
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE GetMetrics(DWRITE_INLINE_OBJECT_METRICS *m) override {
+        // Centred `axis` above the line's baseline.
+        *m = {lead_ + length_, height_, axis_ + height_ / 2.0f, FALSE};
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE GetOverhangMetrics(DWRITE_OVERHANG_METRICS *o) override {
+        *o = {};
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE GetBreakConditions(DWRITE_BREAK_CONDITION *before, DWRITE_BREAK_CONDITION *after) override {
+        *before = *after = DWRITE_BREAK_CONDITION_NEUTRAL;
+        return S_OK;
+    }
+
+private:
+    virtual ~Bar() = default;
+    std::atomic<ULONG> refs_{1};
+    ID2D1DeviceContext *dc_;
+    skin::Text t_;
+    float lead_, length_, height_, axis_, fraction_;
+};
+
+// A text's words: "{media.position}" and "{media.progress}" move every second while playing.
+bool FollowsPlayback(const std::wstring &value) {
+    return value.find(L"{media.position}") != std::wstring::npos || value.find(L"{media.progress}") != std::wstring::npos;
 }
 
 std::wstring Cased(const std::wstring &text, skin::Case textCase, const std::wstring &locale) {
@@ -78,9 +146,18 @@ void SkinView::Set(const skin::Resolved &skin, const ClockStyle &style, const Re
     skin_ = skin;
     style_ = style;
     format_ = FormatFor(format, style.locale);
+    everySecond_ = false;
+    for (const skin::Panel &p : skin_.panels)
+        for (const skin::Line &l : p.lines)
+            for (const skin::Text &t : l.texts) everySecond_ = everySecond_ || FollowsPlayback(t.value);
     words_.clear();
     ++version_;
     Tick();
+}
+
+void SkinView::SetData(const data::Snapshot &snapshot) {
+    data_ = snapshot;
+    ++dataVersion_;
 }
 
 bool SkinView::Tick() {
@@ -89,18 +166,40 @@ bool SkinView::Tick() {
     return Tick(now);
 }
 
-bool SkinView::Tick(const SYSTEMTIME &now) {
-    if (!words_.empty() && now.wMinute == shown_.wMinute && now.wHour == shown_.wHour && now.wDay == shown_.wDay &&
-        now.wMonth == shown_.wMonth && now.wYear == shown_.wYear)
+bool SkinView::Tick(const SYSTEMTIME &now, uint64_t utc) {
+    const bool playing = everySecond_ && data_.media.state == data::MediaState::Playing;
+    if (!words_.empty() && dataShown_ == dataVersion_ && now.wMinute == shown_.wMinute && now.wHour == shown_.wHour &&
+        now.wDay == shown_.wDay && now.wMonth == shown_.wMonth && now.wYear == shown_.wYear &&
+        (!playing || now.wSecond == shown_.wSecond))
         return false;
     shown_ = now;
+    dataShown_ = dataVersion_;
+    if (!utc) {
+        FILETIME ft{};
+        GetSystemTimeAsFileTime(&ft);
+        utc = (uint64_t)ft.dwHighDateTime << 32 | ft.dwLowDateTime;
+    }
     std::vector<std::vector<std::vector<std::wstring>>> words;
     for (const skin::Panel &p : skin_.panels) {
         auto &panel = words.emplace_back();
+        const data::Context context{&data_, p.until, utc};
+        auto holds = [&](const std::optional<data::Condition> &when) {
+            return !when || Holds(*when, format_, style_, now, &context);
+        };
+        const bool panelShown = holds(p.when);
         for (const skin::Line &l : p.lines) {
             auto &line = panel.emplace_back();
-            for (const skin::Text &t : l.texts)
-                line.push_back(Cased(FillText(t.value, format_, style_, now), t.textCase, format_.locale));
+            const bool lineShown = panelShown && holds(l.when);
+            for (const skin::Text &t : l.texts) {
+                std::wstring w;
+                if (lineShown && holds(t.when)) {
+                    double f = 0.0;
+                    if (!t.bar) w = Cased(FillText(t.value, format_, style_, now, &context), t.textCase, format_.locale);
+                    else if (t.value.size() > 2 && data::FractionOf(t.value.substr(1, t.value.size() - 2), context, &f))
+                        w = std::to_wstring((int)std::lround(f * 10000.0));  // in ten-thousandths
+                }
+                line.push_back(std::move(w));
+            }
         }
     }
     if (words == words_) return false;
@@ -111,6 +210,9 @@ bool SkinView::Tick(const SYSTEMTIME &now) {
 
 std::wstring SkinView::Family(const std::wstring &wanted) const {
     if (!wanted.empty() && HasFamily(write_.Get(), wanted)) return wanted;
+    // The icon fonts of Windows 11 and Windows 10 put the same icons at the same code points.
+    if (wanted == L"Segoe Fluent Icons" && HasFamily(write_.Get(), L"Segoe MDL2 Assets")) return L"Segoe MDL2 Assets";
+    if (wanted == L"Segoe MDL2 Assets" && HasFamily(write_.Get(), L"Segoe Fluent Icons")) return L"Segoe Fluent Icons";
     return HasFamily(write_.Get(), L"Segoe UI Variable Display") ? L"Segoe UI Variable Display" : L"Segoe UI";
 }
 
@@ -122,17 +224,22 @@ bool SkinView::Lay(Line &line, const skin::Panel &, const skin::Line &source,
     };
     std::wstring s;
     std::vector<Run> runs;
+    float largest = 0.0f;  // the largest text beside a bar, which it is centred on
     for (size_t i = 0; i < source.texts.size() && i < words.size(); ++i) {
         if (words[i].empty()) continue;
-        runs.push_back({&source.texts[i], (UINT32)s.size(), (UINT32)words[i].size()});
-        s += words[i];
+        const skin::Text &t = source.texts[i];
+        runs.push_back({&t, (UINT32)s.size(), t.bar ? 1u : (UINT32)words[i].size()});
+        s += t.bar ? std::wstring(1, (wchar_t)0xFFFC) : words[i];
+        if (!t.bar) largest = std::max(largest, t.size);
     }
     line.layout.Reset();
     line.runs.clear();
     if (runs.empty()) return true;  // nothing to say on this line
     for (const Run &r : runs) line.runs.push_back({(size_t)(r.text - source.texts.data()), {r.start, r.length}});
 
-    const skin::Text &first = *runs.front().text;
+    // The layout's own font is the first text's; a bar has none.
+    const auto firstText = std::find_if(runs.begin(), runs.end(), [](const Run &r) { return !r.text->bar; });
+    const skin::Text &first = firstText != runs.end() ? *firstText->text : *runs.front().text;
     const std::wstring &locale = format_.locale;
     ComPtr<IDWriteTextFormat> format;
     if (FAILED(write_->CreateTextFormat(Family(first.font).c_str(), nullptr, (DWRITE_FONT_WEIGHT)first.weight,
@@ -147,6 +254,16 @@ bool SkinView::Lay(Line &line, const skin::Panel &, const skin::Line &source,
     for (const Run &r : runs) {
         const skin::Text &t = *r.text;
         const DWRITE_TEXT_RANGE range{r.start, r.length};
+        if (t.bar) {
+            const size_t index = (size_t)(r.text - source.texts.data());
+            const float fraction = std::clamp((float)std::wcstod(words[index].c_str(), nullptr) / 10000.0f, 0.0f, 1.0f);
+            // About the middle of the figures beside it.
+            const float axis = 0.35f * px * (largest > 0.0f ? largest : 1.0f);
+            ComPtr<IDWriteInlineObject> bar;
+            bar.Attach(new Bar(dc_.Get(), t, px, axis, fraction));
+            line.layout->SetInlineObject(bar.Get(), range);
+            continue;
+        }
         ComPtr<ID2D1SolidColorBrush> brush;
         if (FAILED(dc_->CreateSolidColorBrush(ColorOf(t.color, t.opacity), &brush))) return false;
         line.layout->SetFontFamilyName(Family(t.font).c_str(), range);
@@ -297,7 +414,7 @@ bool SkinView::Build(Built &built, size_t index, UINT width, UINT height) {
                 !count)
                 continue;
             const float x = built.at.x + origins[i].x + hit.left, y = built.at.y + origins[i].y + hit.top;
-            built.bounds.push_back({pk + L".l" + std::to_wstring(i + 1) + L".t" + std::to_wstring(r.text + 1),
+            built.bounds.push_back({pk + L".l" + std::to_wstring(i + 1) + L"." + panel.lines[i].texts[r.text].name,
                                     D2D1::RectF(x, y, x + hit.width, y + hit.height)});
         }
     }

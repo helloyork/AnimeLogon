@@ -1,8 +1,10 @@
 // Draws a skin over a still image, for judging its look without a lock screen:
 // skin_preview <background> <out.png> [--skin skin.xml] [--locale ll-CC] [--time HH:MM] [--date YYYY-MM-DD]
 //              [--hours auto|12|24] [--ampm on|off] [--date-style weekday|long|none] [--language ll-CC]
+//              [--component battery|media|countdown] [--data sample|paused|charging]
 //              [setting=value ...] [p1.l1.t1.weight=300 ...]
-// Without --skin it draws the default clock. --locale stands in for the regional format.
+// Without --skin or --component it draws the default clock. --locale stands in for the regional
+// format. Without --data there is no battery and nothing playing.
 #include <windows.h>
 
 #include <fcntl.h>
@@ -15,6 +17,8 @@
 #include <string>
 
 #include "animelogon/clock.h"
+#include "animelogon/components.h"
+#include "animelogon/data.h"
 #include "animelogon/skin.h"
 #include "animelogon/skinpreview.h"
 #include "animelogon/text.h"
@@ -39,6 +43,8 @@ int wmain(int argc, wchar_t **argv) {
     GetUserDefaultLocaleName(user, ARRAYSIZE(user));
     std::wstring locale = user;
     ClockStyle style;
+    bool withData = false;
+    data::Snapshot snapshot;
     for (int i = 3; i < argc; ++i) {
         const std::wstring arg = argv[i];
         const bool more = i + 1 < argc;
@@ -67,6 +73,19 @@ int wmain(int argc, wchar_t **argv) {
                 std::fwprintf(stderr, L"%s: %s\n", argv[i], error.c_str());
                 return 1;
             }
+        } else if (arg == L"--component" && more) {
+            if (!BuiltInComponent(argv[++i], &s)) {
+                std::fwprintf(stderr, L"no built-in component %s\n", argv[i]);
+                return 2;
+            }
+        } else if (arg == L"--data" && more) {
+            FILETIME ft;
+            GetSystemTimeAsFileTime(&ft);
+            snapshot = data::Sample((uint64_t)ft.dwHighDateTime << 32 | ft.dwLowDateTime);
+            const std::wstring kind = argv[++i];
+            if (kind == L"paused") snapshot.media.state = data::MediaState::Paused;
+            if (kind == L"charging") snapshot.battery = {data::BatteryState::Charging, 42, -1};
+            withData = true;
         } else if (arg.find(L'=') != std::wstring::npos) {
             const size_t eq = arg.find(L'=');
             values[arg.substr(0, eq)] = arg.substr(eq + 1);
@@ -88,7 +107,8 @@ int wmain(int argc, wchar_t **argv) {
         return 1;
     }
     SkinPreview preview;
-    if (!preview.Render(background, skin::Resolve(s, values), style, StandardFormat(locale), now, &out)) {
+    if (!preview.Render(background, skin::Resolve(s, values), style, StandardFormat(locale), now, &out, nullptr, false,
+                        withData ? &snapshot : nullptr)) {
         std::fwprintf(stderr, L"the skin could not be drawn\n");
         return 1;
     }

@@ -45,6 +45,9 @@ struct Snapshot {
 
 // The battery as Windows reports it now.
 Battery ReadBattery();
+// What previews show in place of the real thing: a battery at 76% with 3:25 left, and a song
+// partway through, read at `now` (UTC FILETIME ticks).
+Snapshot Sample(uint64_t now);
 
 struct Date {
     int year = 0, month = 0, day = 0;  // 0: no date

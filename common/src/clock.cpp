@@ -272,6 +272,34 @@ std::wstring FillText(const std::wstring &text, const RegionalFormat &format, co
     return out;
 }
 
+bool Holds(const data::Condition &condition, const RegionalFormat &format, const ClockStyle &style, const SYSTEMTIME &t,
+           const data::Context *context) {
+    const data::Variable *v = data::Find(condition.name);
+    if (!v) return false;
+    const data::Context c = context ? *context : data::Context{};
+    std::wstring state;
+    bool has = false;
+    switch (v->kind) {
+    case data::Kind::State:
+        state = data::StateOf(condition.name, c, t);
+        has = !state.empty() && state != L"none";
+        break;
+    case data::Kind::Fraction: {
+        double f = 0.0;
+        has = data::FractionOf(condition.name, c, &f);
+        break;
+    }
+    case data::Kind::Text: has = !FillText(L"{" + condition.name + L"}", format, style, t, context).empty(); break;
+    }
+    switch (condition.op) {
+    case data::Condition::Op::Has: return has;
+    case data::Condition::Op::HasNot: return !has;
+    case data::Condition::Op::Is: return state == condition.value;
+    case data::Condition::Op::IsNot: return state != condition.value;
+    }
+    return false;
+}
+
 const wchar_t *ToString(ClockHours hours) { return kHours[(int)hours]; }
 bool Parse(const std::wstring &text, ClockHours *out) { return ParseName(text, kHours, out); }
 const wchar_t *ToString(ClockDate date) { return kDates[(int)date]; }

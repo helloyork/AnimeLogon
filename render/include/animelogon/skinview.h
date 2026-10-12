@@ -1,5 +1,7 @@
 // Draws a skin with Direct2D. Each panel's text is laid out when its words change -- once a
-// minute for a clock -- into a cached bitmap; drawing composites the bitmaps with their shadows.
+// minute for a clock, when the data changes, and every second for a playback position -- into a
+// cached bitmap; drawing composites the bitmaps with their shadows. Bars are laid out with the
+// text, as inline objects.
 #pragma once
 
 #include <windows.h>
@@ -23,10 +25,13 @@ public:
 
     // `format` is the regional format; the style may put the words in another language.
     void Set(const skin::Resolved &skin, const ClockStyle &style, const RegionalFormat &format);
+    // The battery and what is playing, for the next Tick.
+    void SetData(const data::Snapshot &snapshot);
 
-    // Reads the time; returns true when the words changed.
+    // Reads the time; returns true when the words changed. `utc` is the same moment as UTC
+    // FILETIME ticks, for playback positions; 0 reads the clock.
     bool Tick();
-    bool Tick(const SYSTEMTIME &now);
+    bool Tick(const SYSTEMTIME &now, uint64_t utc = 0);
 
     // Draws onto `target` as the skin appears on a display of that size. `slot` keeps one
     // cache per display.
@@ -78,9 +83,13 @@ private:
     skin::Resolved skin_;
     ClockStyle style_;
     RegionalFormat format_;  // in the style's language
-    std::vector<std::vector<std::vector<std::wstring>>> words_;  // panel, line, text
+    // Panel, line, text: the words, or for a bar its fraction; empty where nothing is drawn.
+    std::vector<std::vector<std::vector<std::wstring>>> words_;
     unsigned version_ = 0;
     SYSTEMTIME shown_{};
+    data::Snapshot data_;
+    unsigned dataVersion_ = 0, dataShown_ = 0;
+    bool everySecond_ = false;  // a text or bar follows a playback position
 
     Microsoft::WRL::ComPtr<ID2D1DeviceContext> dc_;
     Microsoft::WRL::ComPtr<IDWriteFactory> write_;

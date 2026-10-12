@@ -59,6 +59,10 @@ RegionalFormat FormatFor(const RegionalFormat &user, const std::wstring &locale)
 // one they are empty.
 std::wstring FillText(const std::wstring &text, const RegionalFormat &format, const ClockStyle &style,
                       const SYSTEMTIME &t, const data::Context *context = nullptr);
+// Whether a component's `when` holds now: a text-like name has a value when its words are not
+// empty, a fraction when there is one, a state when it is not "none".
+bool Holds(const data::Condition &condition, const RegionalFormat &format, const ClockStyle &style, const SYSTEMTIME &t,
+           const data::Context *context = nullptr);
 
 const wchar_t *ToString(ClockHours hours);
 bool Parse(const std::wstring &text, ClockHours *out);

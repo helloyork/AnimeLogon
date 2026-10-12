@@ -103,6 +103,20 @@ Battery ReadBattery() {
     return b;
 }
 
+Snapshot Sample(uint64_t now) {
+    Snapshot s;
+    s.battery = {BatteryState::Discharging, 76, 3 * 3600 + 25 * 60};
+    s.media.state = MediaState::Playing;
+    s.media.title = L"示例歌曲";
+    s.media.artist = L"示例歌手";
+    s.media.album = L"示例专辑";
+    s.media.app = L"音乐";
+    s.media.position = 83.0;
+    s.media.duration = 214.0;
+    s.media.at = now;
+    return s;
+}
+
 bool ParseDate(const std::wstring &text, Date *out) {
     if (text.size() != 10 || text[4] != L'-' || text[7] != L'-') return false;
     int parts[3] = {0, 0, 0};
