@@ -103,6 +103,5 @@ Planned:
 
 MIT © 2026 Nomen (helloyork). See [LICENSE](LICENSE).
 
-Includes [Micula](https://github.com/helloyork/micula) (MIT) in `vendor/micula`, and the headers
-and loader of the Microsoft Edge WebView2 SDK (BSD 3-Clause) in `vendor/webview2`. The loader,
-`WebView2Loader.dll`, is installed with AnimeLogon.
+Includes the headers and loader of the Microsoft Edge WebView2 SDK (BSD 3-Clause) in
+`vendor/webview2`. The loader, `WebView2Loader.dll`, is installed with AnimeLogon.

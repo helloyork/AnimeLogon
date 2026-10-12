@@ -32,7 +32,6 @@ add_link_options(/MANIFESTUAC:NO "$<$<CONFIG:Release>:/DEBUG;/OPT:REF;/OPT:ICF>"
 
 configure_file(res/version.h.in ${PROJECT_BINARY_DIR}/include/animelogon/version.h @ONLY)
 
-add_subdirectory(vendor/micula EXCLUDE_FROM_ALL)
 add_subdirectory(vendor/webview2)
 
 include(cmake/AnimeLogon.cmake)

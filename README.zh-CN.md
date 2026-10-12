@@ -92,4 +92,4 @@ cmake --build --preset x64-release
 
 MIT © 2026 Nomen (helloyork)。详见 [LICENSE](LICENSE)。
 
-`vendor/micula` 中包含 [Micula](https://github.com/helloyork/micula)（MIT）。`vendor/webview2` 中包含 Microsoft Edge WebView2 SDK 的头文件和加载器（BSD 3-Clause），加载器 `WebView2Loader.dll` 随 AnimeLogon 一起安装。
+`vendor/webview2` 中包含 Microsoft Edge WebView2 SDK 的头文件和加载器（BSD 3-Clause），加载器 `WebView2Loader.dll` 随 AnimeLogon 一起安装。
