@@ -7,6 +7,7 @@
 #include <wrl/client.h>
 
 #include <atomic>
+#include <deque>
 #include <string>
 #include <thread>
 #include <vector>
@@ -73,6 +74,9 @@ private:
     Microsoft::WRL::ComPtr<ICoreWebView2Environment> env_;
     Microsoft::WRL::ComPtr<ICoreWebView2Controller> controller_;
     Microsoft::WRL::ComPtr<ICoreWebView2> view_;
+
+    // Messages from the page, in order, waiting for the message loop to answer them.
+    std::deque<json::Value> inbox_;
 
     Library library_;
     Pictures pictures_;

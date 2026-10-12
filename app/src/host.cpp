@@ -37,6 +37,7 @@ constexpr wchar_t kClass[] = L"AnimeLogonApp";
 constexpr wchar_t kOrigin[] = L"https://animelogon.invalid/";
 constexpr UINT kImportProgress = WM_APP + 10;
 constexpr UINT kImportDone = WM_APP + 11;
+constexpr UINT kPageMessage = WM_APP + 12;
 
 std::wstring PickFile(HWND owner, const wchar_t *filter, const wchar_t *extension, bool save,
                       const std::wstring &suggested) {
@@ -210,6 +211,13 @@ LRESULT Host::Handle(UINT msg, WPARAM wp, LPARAM lp) {
     case kImportDone:
         FinishImport();
         return 0;
+    case kPageMessage:
+        if (!inbox_.empty()) {
+            const json::Value m = std::move(inbox_.front());
+            inbox_.pop_front();
+            OnMessage(m);
+        }
+        return 0;
     case WM_CLOSE:
         if (importing_) cancel_ = true;
         DestroyWindow(hwnd_);
@@ -300,7 +308,14 @@ void Host::StartWebView() {
                                                    wcsncmp(source, kOrigin, wcslen(kOrigin)) == 0 &&
                                                    SUCCEEDED(args->get_WebMessageAsJson(&text)) && text) {
                                                    json::Value m;
-                                                   if (json::Parse(text, &m)) OnMessage(m);
+                                                   // Answered from the window's message loop, not
+                                                   // inside this event: while WebView2 is
+                                                   // delivering it, ShellExecuteEx cannot start the
+                                                   // elevated helper and shows an error box instead.
+                                                   if (json::Parse(text, &m)) {
+                                                       inbox_.push_back(std::move(m));
+                                                       PostMessageW(hwnd_, kPageMessage, 0, 0);
+                                                   }
                                                }
                                                CoTaskMemFree(source);
                                                CoTaskMemFree(text);
