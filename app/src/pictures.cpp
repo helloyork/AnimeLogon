@@ -245,6 +245,11 @@ bool Pictures::Theme(const theme::Theme &theme, UINT width, UINT height, Draw dr
         SYSTEMTIME now{};
         GetLocalTime(&now);
         const RegionalFormat format = UserFormat();
+        // Components that show the battery or what is playing show it with made-up values, so
+        // that they can be seen and placed on any machine.
+        FILETIME utc{};
+        GetSystemTimeAsFileTime(&utc);
+        const data::Snapshot sample = data::Sample((uint64_t)utc.dwHighDateTime << 32 | utc.dwLowDateTime);
         for (size_t s = 0; s < where.size(); ++s) {
             if (!where[s].components) continue;
             RECT r{};
@@ -262,7 +267,7 @@ bool Pictures::Theme(const theme::Theme &theme, UINT width, UINT height, Draw dr
                 Picture next;
                 std::vector<SkinView::Bound> placed;
                 if (!preview_.Render(part, skin::Resolve(skin, values), library_.settings().clock, format, now, &next,
-                                     bounds ? &placed : nullptr, draw == Draw::ComponentsOnly))
+                                     bounds ? &placed : nullptr, draw == Draw::ComponentsOnly, &sample))
                     continue;
                 part = std::move(next);
                 if (bounds)

@@ -324,6 +324,7 @@ function settingsView() {
     group('组件', null, [
       srow('显示组件', '关闭后所有主题只显示壁纸。', toggle(s.components, v => global('components', v), '显示组件', 'set-components')),
       srow('组件显示在', '壁纸显示在每块屏幕上，组件只显示在这里。', select([['auto', '密码框所在的屏幕'], ['primary', '主屏幕'], ['all', '所有屏幕']], s.componentDisplays, v => global('componentDisplays', v), '组件显示在', 'set-component-displays')),
+      srow('显示正在播放', '「正在播放」这类组件显示歌名和歌手。只在你自己锁屏时显示，别的账户和开机登录界面上看不到。', toggle(s.media, v => global('media', v), '显示正在播放', 'set-media')),
     ]),
     group('屏幕', null, screenRows),
     group('声音', null, audioRows),
@@ -658,7 +659,8 @@ function componentSection() {
 // One component in the list. Its entry is open while it is selected.
 function compEntry(inst) {
   const open = UI.sel.inst === inst.id, toggleOpen = () => selectSel(open ? null : inst.id, null);
-  const sub = [inst.missing ? '组件缺失' : inst.builtIn ? '内置组件' : inst.author ? `作者 ${inst.author}` : '导入的组件', inst.modified ? '已修改' : null, inst.visible ? null : '已隐藏'].filter(Boolean).join(' · ');
+  const shows = inst.sources && inst.sources.length ? `显示${inst.sources.join('、')}` : null;
+  const sub = [inst.missing ? '组件缺失' : inst.builtIn ? '内置组件' : inst.author ? `作者 ${inst.author}` : '导入的组件', shows, inst.modified ? '已修改' : null, inst.visible ? null : '已隐藏'].filter(Boolean).join(' · ');
   const entry = h('div', { class: 'ccard' + (open ? ' open' : ''), 'data-card': inst.id },
     h('div', { class: 'chead' },
       h('button', { class: 'cname', 'aria-expanded': String(open), onclick: toggleOpen }, h('span', null, inst.label), h('small', null, sub)),
@@ -760,6 +762,11 @@ function control(o) {
     options.length > 4 ? select(options.map(x => [x.value, x.label]), value, v => write(v), label, id) : seg(options.map(x => [x.value, x.label]), value, v => write(v), label, id));
   if (kind === 'toggle') return h('div', { class: 'row' }, h('div', { class: 'lab' }, h('label', { for: id, title: detail || null }, label),
     modified ? h('button', { class: 'rst', title: '恢复这一项', html: ICON.reset, onclick: reset }) : null, toggle(value === 'on', v => write(v ? 'on' : 'off'), label, id)));
+  if (kind === 'date') {
+    const inp = h('input', { type: 'date', class: 'textin datein', id, value, min: '1601-01-01', max: '9999-12-31' });
+    inp.addEventListener('change', () => { if (/^\d{4}-\d{2}-\d{2}$/.test(inp.value)) write(inp.value); else inp.value = value; });
+    return h('div', { class: 'row' }, labRow(id, label, detail, null, modified, reset), inp);
+  }
   if (kind === 'font') return h('div', { class: 'row' }, labRow(id, label, detail, null, modified, reset),
     h('button', { class: 'fontbtn', id, onclick: () => fontPicker(value, v => write(v)) }, h('span', { style: { fontFamily: fontStack(value) } }, fontLabel(value)), h('span', { html: ICON.chev })));
   if (kind === 'color') {

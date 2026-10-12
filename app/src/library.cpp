@@ -84,6 +84,7 @@ const wchar_t *KindName(skin::SettingKind kind) {
     case skin::SettingKind::Number: return L"number";
     case skin::SettingKind::Color: return L"color";
     case skin::SettingKind::Font: return L"font";
+    case skin::SettingKind::Date: return L"date";
     default: return L"choice";
     }
 }
@@ -455,6 +456,8 @@ bool Library::SetGlobal(const std::wstring &key, const std::wstring &value) {
     } else if (key == L"componentDisplays") {
         ComponentDisplays d;
         if ((ok = Parse(value, &d))) set_.componentDisplays = d;
+    } else if (key == L"media") {
+        ok = flag(&set_.media);
     } else if (key == L"monitorMode") {
         for (MonitorMode m : {MonitorMode::Duplicate, MonitorMode::Span, MonitorMode::PerMonitor})
             if (value == ToString(m)) set_.monitorMode = m, ok = true;
@@ -539,6 +542,7 @@ void Library::WriteLibrary(json::Writer &w) const {
     for (const auto &[monitor, theme] : set_.screens) w.Member(monitor, theme);
     w.EndObject();
     w.Member(L"components", set_.components).Member(L"componentDisplays", ToString(set_.componentDisplays));
+    w.Member(L"media", set_.media);
     w.Key(L"clock").BeginObject();
     w.Member(L"hours", ToString(set_.clock.hours)).Member(L"ampm", set_.clock.ampm);
     w.Member(L"date", ToString(set_.clock.date)).Member(L"language", set_.clock.locale);
@@ -623,6 +627,11 @@ void Library::WriteOpen(json::Writer &w) const {
         w.Member(L"base", own.Find(i.id) != nullptr).Member(L"visible", i.visible).Member(L"missing", !loaded);
         w.Member(L"modified", !mine.empty()).Member(L"builtIn", IsBuiltInComponent(i.ref));
         w.Member(L"author", loaded ? skin.author : L"");
+        // What it shows besides the clock: 电量, 正在播放, 倒计时.
+        w.Key(L"sources").BeginArray();
+        if (loaded)
+            for (data::Source s : skin::SourcesOf(skin)) w.String(data::LabelOf(s));
+        w.EndArray();
         if (loaded) {
             // The settings each adjustment takes its value from, when the setting is overridden.
             std::map<std::wstring, bool> fedModified;
