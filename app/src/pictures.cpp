@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 
 #include "animelogon/background.h"
@@ -161,19 +162,35 @@ bool FirstFrame(const std::wstring &path, Picture *out) {
             w = std::min<UINT32>((UINT32)area.Area.cx, width - left);
             h = std::min<UINT32>((UINT32)area.Area.cy, height - top);
         }
+        // The video processor's buffer may be a 2-D one, which knows its pitch, or a plain one,
+        // whose rows are as the media type's stride says: negative when they run bottom up.
         ComPtr<IMFMediaBuffer> buffer;
         ComPtr<IMF2DBuffer> twoD;
         BYTE *scan0 = nullptr;
         LONG pitch = 0;
-        if (FAILED(sample->ConvertToContiguousBuffer(&buffer)) || FAILED(buffer.As(&twoD)) ||
-            FAILED(twoD->Lock2D(&scan0, &pitch)))
-            return false;
+        if (FAILED(sample->ConvertToContiguousBuffer(&buffer))) return false;
+        if (SUCCEEDED(buffer.As(&twoD))) {
+            if (FAILED(twoD->Lock2D(&scan0, &pitch))) return false;
+        } else {
+            UINT32 stride = 0;
+            pitch = SUCCEEDED(type->GetUINT32(MF_MT_DEFAULT_STRIDE, &stride)) ? (LONG)(INT32)stride : (LONG)(width * 4);
+            BYTE *base = nullptr;
+            DWORD length = 0;
+            if (FAILED(buffer->Lock(&base, nullptr, &length))) return false;
+            const size_t span = (size_t)std::abs(pitch);
+            if (span < (size_t)width * 4 || length < span * height) {
+                buffer->Unlock();
+                return false;
+            }
+            scan0 = pitch < 0 ? base + span * (height - 1) : base;
+        }
         out->width = w;
         out->height = h;
         out->bgra.resize((size_t)w * h * 4);
         for (UINT32 y = 0; y < h; ++y)
             memcpy(&out->bgra[(size_t)y * w * 4], scan0 + (ptrdiff_t)(top + y) * pitch + (size_t)left * 4, (size_t)w * 4);
-        twoD->Unlock2D();
+        if (twoD) twoD->Unlock2D();
+        else buffer->Unlock();
         for (size_t i = 3; i < out->bgra.size(); i += 4) out->bgra[i] = 0xFF;
         return true;
     }

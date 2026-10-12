@@ -4,8 +4,14 @@
 #include "check.h"
 
 #include <windows.h>
+#include <mfapi.h>
+#include <mfidl.h>
+#include <mfreadwrite.h>
 #include <objbase.h>
+#include <wrl/client.h>
 
+#include <cstdio>
+#include <cstring>
 #include <map>
 #include <string>
 #include <vector>
@@ -20,6 +26,7 @@
 #include "pictures.h"
 #include "wall.h"
 
+using Microsoft::WRL::ComPtr;
 using namespace animelogon;
 
 namespace {
@@ -48,11 +55,12 @@ public:
 class OneThemeStores : public app::Stores {
 public:
     OneThemeStore store;
+    std::vector<WallpaperInfo> wallpapers;
     const ThemeStore &Store() const override { return store; }
     std::vector<ThemeEntry> Themes() const override {
         return {{kDefaultTheme, L"默认", L"AnimeLogon", true}, {kTheme, L"W", L"", false}};
     }
-    std::vector<WallpaperInfo> Wallpapers() const override { return {}; }
+    std::vector<WallpaperInfo> Wallpapers() const override { return wallpapers; }
     std::vector<ComponentEntry> Components() const override { return {{kClockComponent, L"时钟", L"AnimeLogon", true}}; }
     Settings ReadSettings() const override { return ParseSettings(L"theme = " + kTheme + L"\r\n"); }
     bool WriteSettings(const std::wstring &) const override { return true; }
@@ -74,6 +82,48 @@ std::vector<MonitorInfo> TwoDisplays() {
 bool Within(const D2D1_RECT_F &r, const RECT &screen) {
     return r.left >= screen.left - 0.5f && r.top >= screen.top - 0.5f && r.right <= screen.right + 0.5f &&
            r.bottom <= screen.bottom + 0.5f && r.right > r.left && r.bottom > r.top;
+}
+
+// A second of one colour as H.264, 320 x 180: not whole macroblocks, so the decoded frame is
+// taller than the picture. False where Media Foundation cannot encode H.264.
+bool SolidClip(const std::wstring &path) {
+    constexpr UINT32 w = 320, h = 180, fps = 10;
+    auto type = [&](const GUID &subtype) {
+        ComPtr<IMFMediaType> t;
+        MFCreateMediaType(&t);
+        t->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
+        t->SetGUID(MF_MT_SUBTYPE, subtype);
+        t->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive);
+        MFSetAttributeSize(t.Get(), MF_MT_FRAME_SIZE, w, h);
+        MFSetAttributeRatio(t.Get(), MF_MT_FRAME_RATE, fps, 1);
+        MFSetAttributeRatio(t.Get(), MF_MT_PIXEL_ASPECT_RATIO, 1, 1);
+        if (subtype == MFVideoFormat_H264) t->SetUINT32(MF_MT_AVG_BITRATE, 500000);
+        return t;
+    };
+    ComPtr<IMFSinkWriter> writer;
+    DWORD stream = 0;
+    if (FAILED(MFCreateSinkWriterFromURL(path.c_str(), nullptr, nullptr, &writer)) ||
+        FAILED(writer->AddStream(type(MFVideoFormat_H264).Get(), &stream)) ||
+        FAILED(writer->SetInputMediaType(stream, type(MFVideoFormat_NV12).Get(), nullptr)) || FAILED(writer->BeginWriting()))
+        return false;
+    // Y 150, U 60, V 200: a strong orange.
+    std::vector<uint8_t> nv12(w * h * 3 / 2, 150);
+    for (size_t i = w * h; i < nv12.size(); i += 2) nv12[i] = 60, nv12[i + 1] = 200;
+    for (UINT32 f = 0; f < fps; ++f) {
+        ComPtr<IMFMediaBuffer> buffer;
+        ComPtr<IMFSample> sample;
+        BYTE *p = nullptr;
+        if (FAILED(MFCreateMemoryBuffer((DWORD)nv12.size(), &buffer)) || FAILED(buffer->Lock(&p, nullptr, nullptr))) return false;
+        memcpy(p, nv12.data(), nv12.size());
+        buffer->Unlock();
+        buffer->SetCurrentLength((DWORD)nv12.size());
+        if (FAILED(MFCreateSample(&sample))) return false;
+        sample->AddBuffer(buffer.Get());
+        sample->SetSampleTime((LONGLONG)f * 10000000 / fps);
+        sample->SetSampleDuration(10000000 / fps);
+        if (FAILED(writer->WriteSample(stream, sample.Get()))) return false;
+    }
+    return SUCCEEDED(writer->Finalize());
 }
 
 }  // namespace
@@ -134,6 +184,38 @@ TEST(AppPicturesDrawComponentsOnEachScreenOfTheWall) {
     CHECK(pictures.Theme(t, 640, 216, app::Draw::Everything, &p, &bounds, &mainOnly));
     CHECK(!bounds.empty());
     for (const app::Bound &b : bounds) CHECK(b.screen == 0 && Within(b.rect, mainOnly[0].rect));
+    if (SUCCEEDED(co)) CoUninitialize();
+}
+
+TEST(AppPicturesShowAVideoWallpapersFirstFrame) {
+    const HRESULT co = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    const bool mf = SUCCEEDED(MFStartup(MF_VERSION));
+    wchar_t temp[MAX_PATH] = L"";
+    GetTempPathW(MAX_PATH, temp);
+    const std::wstring path = std::wstring(temp) + L"animelogon-solid-" + std::to_wstring(GetCurrentProcessId()) + L".mp4";
+    if (!mf || !SolidClip(path)) {
+        std::printf("  skipped: Media Foundation cannot encode H.264 here\n");
+    } else {
+        OneThemeStores stores;
+        WallpaperInfo w;
+        w.id = L"dddddddddddddddd";
+        w.kind = WallpaperKind::Video;
+        w.videoPath = path;
+        w.width = 320;
+        w.height = 180;
+        stores.wallpapers.push_back(w);
+        app::Library library(stores);
+        app::Pictures pictures(library);
+        Picture p;
+        CHECK(pictures.Wallpaper(w.id, Scaling::Fill, 64, 36, &p) && p.width == 64 && p.height == 36);
+        // Orange, not the dark built-in wallpaper shown in place of one that cannot be read; down to
+        // the last row, which comes from the picture and not from the padding the decoder adds.
+        const uint8_t *mid = &p.bgra[((size_t)18 * 64 + 32) * 4], *low = &p.bgra[((size_t)35 * 64 + 32) * 4];
+        CHECK(mid[2] > 180 && mid[0] < 90);
+        CHECK(low[2] > 180 && low[0] < 90);
+    }
+    DeleteFileW(path.c_str());
+    if (mf) MFShutdown();
     if (SUCCEEDED(co)) CoUninitialize();
 }
 
