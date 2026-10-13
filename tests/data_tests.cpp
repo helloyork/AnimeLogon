@@ -12,8 +12,26 @@
 #include "animelogon/live.h"
 #include "animelogon/settings.h"
 #include "animelogon/skin.h"
+#include "agentlogon.h"
 
 using namespace animelogon;
+
+TEST(AgentDoesNotRestartIntoALogonThatIsSigningOut) {
+    AgentLogonGuard guard;
+    CHECK(guard.CanStart(123));
+    CHECK(guard.Ended(0x40010004, 123));
+    CHECK(!guard.CanStart(123));
+    CHECK(!guard.CanStart(0));
+    // A fresh authentication id works even for the same user and terminal-session id.
+    CHECK(guard.CanStart(124));
+    CHECK(!guard.Ended(0xC0000005, 124));
+    CHECK(guard.CanStart(124));
+    CHECK(!guard.Ended(0, 124));
+    CHECK(guard.CanStart(124));
+    CHECK(guard.Ended(0xC000026B, 124));
+    CHECK(!guard.CanStart(124));
+    CHECK(guard.CanStart(125));
+}
 
 namespace {
 

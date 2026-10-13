@@ -18,14 +18,20 @@ constexpr DWORD kNoSession = 0xFFFFFFFF;
 constexpr ULONGLONG kTickMs = 1000;      // how often the console's user and the agent are looked at
 constexpr ULONGLONG kSettingsMs = 5000;  // how often settings.ini's `media` is read again
 constexpr ULONGLONG kWriteMs = 250;      // live.ini is written at most this often
-// How long after an agent ends before another is started. Signing out ends the agent while the
-// console session still has its user for a moment; by now the session is gone, so no agent is
-// started into it only to fail.
+// A minimum delay for ordinary exits, in addition to the longer backoff for repeated failures.
 constexpr ULONGLONG kRestartMs = 3000;
 // Interactive users may connect and write; nobody else, and nobody may make another instance.
 constexpr const wchar_t *kPipeSddl = L"D:P(A;;GA;;;SY)(A;;0x12019f;;;IU)";
 
 std::wstring AgentPath() { return paths::ModuleDir() + L"animelogon.exe"; }
+
+uint64_t LogonOf(HANDLE token) {
+    TOKEN_STATISTICS statistics{};
+    DWORD bytes = 0;
+    if (!GetTokenInformation(token, TokenStatistics, &statistics, sizeof(statistics), &bytes)) return 0;
+    return (static_cast<uint64_t>(static_cast<uint32_t>(statistics.AuthenticationId.HighPart)) << 32) |
+           statistics.AuthenticationId.LowPart;
+}
 
 std::vector<unsigned char> SidOf(HANDLE token) {
     std::vector<unsigned char> buffer(256);
@@ -106,13 +112,15 @@ void LiveData::Tick(DWORD consoleSession) {
     HANDLE token = nullptr;
     const bool signedIn = consoleSession != kNoSession && WTSQueryUserToken(consoleSession, &token);
     const std::vector<unsigned char> sid = signedIn ? SidOf(token) : std::vector<unsigned char>{};
-    const bool want = signedIn && media_ && !sid.empty();
+    const uint64_t logon = signedIn ? LogonOf(token) : 0;
 
     if (agent_ && WaitForSingleObject(agent_, 0) == WAIT_OBJECT_0) {
         DWORD code = 0;
         GetExitCodeProcess(agent_, &code);
         const ULONGLONG lived = now - agentAt_;
         ALOG(L"live: the agent exited (%lu) after %llu ms", code, lived);
+        if (logonGuard_.Ended(code, agentLogon_))
+            ALOG(L"live: the agent's logon ended -- waiting for a new logon");
         CloseHandle(agent_);
         agent_ = nullptr;
         agentSession_ = kNoSession;
@@ -121,12 +129,13 @@ void LiveData::Tick(DWORD consoleSession) {
         nextTry_ = now + (backoff_ > kRestartMs ? backoff_ : kRestartMs);
         Forget(L"the agent ended");
     }
+    const bool want = signedIn && media_ && !sid.empty() && logonGuard_.CanStart(logon);
     bool sameUser = false;
     {
         std::lock_guard<std::mutex> hold(lock_);
         sameUser = sid == userSid_;
     }
-    if (agent_ && (!want || agentSession_ != consoleSession || !sameUser)) {
+    if (agent_ && (!want || agentSession_ != consoleSession || agentLogon_ != logon || !sameUser)) {
         EndAgent();
         backoff_ = 0;
         nextTry_ = 0;
@@ -154,6 +163,7 @@ void LiveData::Tick(DWORD consoleSession) {
             CloseHandle(pi.hThread);
             agent_ = pi.hProcess;
             agentSession_ = consoleSession;
+            agentLogon_ = logon;
             agentAt_ = now;
         } else {
             ALOG(L"live: cannot start the agent (%lu)", GetLastError());

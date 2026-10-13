@@ -11,6 +11,7 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include "agentlogon.h"
 
 class LiveData {
 public:
@@ -44,6 +45,8 @@ private:
 
     HANDLE agent_ = nullptr;
     DWORD agentSession_ = 0xFFFFFFFF;
+    uint64_t agentLogon_ = 0;
+    AgentLogonGuard logonGuard_;
     ULONGLONG agentAt_ = 0, nextTry_ = 0, settingsAt_ = 0, tickAt_ = 0;
     DWORD backoff_ = 0;
     bool media_ = true;  // settings.ini's `media`
