@@ -1,4 +1,5 @@
 #include "host.h"
+#include "sceneimport.h"
 
 #include <commdlg.h>
 #include <dwmapi.h>
@@ -696,16 +697,16 @@ void Host::Import(bool wallpaper) {
     if (importing_) return;
     const std::wstring source =
         wallpaper ? PickFile(hwnd_,
-                             L"图片和视频\0*.png;*.jpg;*.jpeg;*.webp;*.bmp;*.gif;*.tif;*.tiff;*.heic;*.heif;*.avif;"
+                             L"场景、图片和视频\0*.alscene;*.png;*.jpg;*.jpeg;*.webp;*.bmp;*.gif;*.tif;*.tiff;*.heic;*.heif;*.avif;"
                              L"*.mp4;*.mkv;*.mov;*.webm;*.avi;*.m4v;*.wmv\0"
                              L"图片\0*.png;*.jpg;*.jpeg;*.webp;*.bmp;*.gif;*.tif;*.tiff;*.heic;*.heif;*.avif\0"
                              L"视频\0*.mp4;*.mkv;*.mov;*.webm;*.avi;*.m4v;*.wmv\0"
                              L"所有文件\0*.*\0",
                              nullptr, false, L"")
                   : PickFile(hwnd_,
-                             L"主题、图片和视频\0*.altheme;*.png;*.jpg;*.jpeg;*.webp;*.bmp;*.gif;*.tif;*.tiff;*.heic;*.heif;*.avif;"
+                             L"主题、场景、图片和视频\0*.altheme;*.alscene;*.png;*.jpg;*.jpeg;*.webp;*.bmp;*.gif;*.tif;*.tiff;*.heic;*.heif;*.avif;"
                              L"*.mp4;*.mkv;*.mov;*.webm;*.avi;*.m4v;*.wmv\0"
-                             L"主题包 (*.altheme)\0*.altheme\0"
+                             L"主题包 (*.altheme)\0*.altheme\0场景 (*.alscene)\0*.alscene\0"
                              L"图片\0*.png;*.jpg;*.jpeg;*.webp;*.bmp;*.gif;*.tif;*.tiff;*.heic;*.heif;*.avif\0"
                              L"视频\0*.mp4;*.mkv;*.mov;*.webm;*.avi;*.m4v;*.wmv\0"
                              L"所有文件\0*.*\0",
@@ -716,7 +717,8 @@ void Host::Import(bool wallpaper) {
         Problem(L"无法创建临时目录 " + paths::UserDataDir() + L"\\import。");
         return;
     }
-    importWallpaper_ = wallpaper;
+    const bool scene = EndsWith(source, L".alscene");
+    importWallpaper_ = wallpaper && !scene;
     const bool package = !wallpaper && EndsWith(source, L".altheme");
     importLabel_ = package ? L"正在读取「" + FileStem(source) + L"」"
                    : staging::LooksLikePicture(source) ? L"正在处理「" + FileStem(source) + L"」"
@@ -725,7 +727,7 @@ void Host::Import(bool wallpaper) {
     importing_ = true;
     importPermille_ = 0;
     Busy(importLabel_, 0);
-    worker_ = std::thread([this, source, package, wallpaper, dir = importDir_] {
+    worker_ = std::thread([this, source, package, wallpaper, scene, dir = importDir_] {
         const HRESULT co = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
         auto progressed = [this](double f) {
             importPermille_ = (int)(f * 1000);
@@ -733,7 +735,8 @@ void Host::Import(bool wallpaper) {
         };
         staging::Result r;
         if (SUCCEEDED(co)) {
-            r = package     ? staging::Package(source, dir, cancel_, progressed)
+            r = scene       ? staging::Scene(source, dir, cancel_, progressed)
+                : package   ? staging::Package(source, dir, cancel_, progressed)
                 : wallpaper ? staging::Wallpaper(source, dir, cancel_, progressed)
                             : staging::Media(source, dir, cancel_, progressed);
             CoUninitialize();

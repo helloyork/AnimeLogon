@@ -17,6 +17,12 @@ Wallpaper WallpaperOf(const ResolvedTheme &theme) {
     w.id = info.id;
     if (info.builtIn) {
         w.source = Source::Gradient;
+    } else if (info.kind == animelogon::WallpaperKind::Scene) {
+        w.source = Source::Scene;
+        w.path = info.imagePath;
+        w.sceneDir = info.scenePath.substr(0, info.scenePath.find_last_of(L'\\'));
+        w.videoPath = info.videoPath;
+        w.audioPath = info.audioPath;
     } else if (info.kind == animelogon::WallpaperKind::Image) {
         w.source = Source::Image;
         w.path = info.imagePath;
@@ -91,6 +97,7 @@ std::wstring Describe(const Display &d) {
     case Source::None: wallpaper = L"no wallpaper (black)"; break;
     case Source::Video: wallpaper = L"video " + d.wallpaper.id; break;
     case Source::Image: wallpaper = L"image " + d.wallpaper.id; break;
+    case Source::Scene: wallpaper = L"scene " + d.wallpaper.id; break;
     case Source::Gradient: wallpaper = L"the built-in wallpaper"; break;
     }
     return animelogon::Format(L"display %s%s %ldx%ld: theme %s, %s, %s, %zu component(s)%s", d.monitorKey.c_str(),

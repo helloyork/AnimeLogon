@@ -183,6 +183,7 @@ bool IsSetKey(const std::wstring &key) {
 }
 
 bool IsPackageWallpaperRef(const std::wstring &ref) {
+    if (ref == L"wallpaper.alscene") return true;
     for (const wchar_t *name : kPackageWallpapers)
         if (ref == name) return true;
     return false;

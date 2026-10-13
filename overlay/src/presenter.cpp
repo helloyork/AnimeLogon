@@ -25,6 +25,9 @@ struct Params {
     float uvMax[2];
     float dim;
     float source;  // 0 black, 1 the video, 2 a picture: the still, an image wallpaper or the gradient
+    float mix;
+    float padding[3];
+    float liveScale[2], liveOffset[2];
 };
 static_assert(sizeof(Params) % 16 == 0, "constant buffer size");
 
@@ -264,6 +267,7 @@ const Presenter::Texture *Presenter::Gradient(int rows) {
 
 const Presenter::Texture *Presenter::WallpaperTexture(const Target &target, animelogon::Scaling *fit) {
     switch (target.wallpaper.source) {
+    case plan::Source::Scene:
     case plan::Source::Image: {
         const auto it = images_.find(target.wallpaper.id);
         if (it == images_.end() || !it->second.texture.view) return nullptr;
@@ -278,6 +282,37 @@ const Presenter::Texture *Presenter::WallpaperTexture(const Target &target, anim
     default:
         return nullptr;
     }
+}
+
+bool Presenter::LoadImageNow(const std::wstring &id, const std::wstring &path) {
+    if (ImageStatus(id) == ImageState::Ready) return true;
+    picture::Image pixels; std::wstring why;
+    if (!picture::ReadImage(path,&pixels,&why)) return false;
+    auto &e = images_[id]; e.job.reset();
+    if (FAILED(MakeView(device_.Get(),pixels.bgra.data(),pixels.width,pixels.height,&e.texture.view))) return false;
+    e.texture.width = pixels.width; e.texture.height = pixels.height; e.path = path; e.why.clear();
+    return true;
+}
+
+void Presenter::DrawVideo(const VideoPlayer::Frame &frame, int width, int height, animelogon::Scaling fit, ID3D11Texture2D *output) {
+    if (!device_ || !output) return;
+    D3D11_TEXTURE2D_DESC d{}; output->GetDesc(&d);
+    ComPtr<ID3D11RenderTargetView> rtv;
+    if (FAILED(device_->CreateRenderTargetView(output,nullptr,&rtv))) return;
+    const RECT canvas{0,0,(LONG)d.Width,(LONG)d.Height};
+    const auto m = layout::Map(width,height,canvas,canvas,fit);
+    Params p{}; p.source = 1; p.scale[0] = m.scaleX; p.scale[1] = m.scaleY;
+    p.offset[0] = m.offsetX; p.offset[1] = m.offsetY; p.uvMax[0] = frame.uMax; p.uvMax[1] = frame.vMax;
+    context_->UpdateSubresource(constants_.Get(),0,nullptr,&p,0,0);
+    D3D11_VIEWPORT vp{0,0,(float)d.Width,(float)d.Height,0,1}; context_->RSSetViewports(1,&vp);
+    ID3D11RenderTargetView *target = rtv.Get(); context_->OMSetRenderTargets(1,&target,nullptr);
+    context_->IASetInputLayout(nullptr); context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    context_->VSSetShader(vs_.Get(),nullptr,0); context_->PSSetShader(ps_.Get(),nullptr,0);
+    ID3D11Buffer *cb = constants_.Get(); context_->PSSetConstantBuffers(0,1,&cb);
+    ID3D11SamplerState *sampler = sampler_.Get(); context_->PSSetSamplers(0,1,&sampler);
+    ID3D11ShaderResourceView *views[]{frame.luma,frame.chroma}; context_->PSSetShaderResources(0,2,views);
+    context_->Draw(3,0);
+    ID3D11ShaderResourceView *none[2]{}; context_->PSSetShaderResources(0,2,none); context_->OMSetRenderTargets(0,nullptr,nullptr);
 }
 
 void Presenter::ReleaseDevice() {
@@ -463,7 +498,7 @@ bool Presenter::Render(const std::vector<Picture> &pictures, float dim, float op
         Params p{};
         p.dim = dim;
         // t0 and t1 the video's planes, t2 a picture.
-        ID3D11ShaderResourceView *views[3] = {};
+        ID3D11ShaderResourceView *views[4] = {};
         bool placed = false;
         layout::Mapping m;
         switch (pic.kind) {
@@ -478,12 +513,20 @@ bool Presenter::Render(const std::vector<Picture> &pictures, float dim, float op
                 placed = true;
             }
             break;
+        case Picture::Kind::Scene:
         case Picture::Kind::Wallpaper: {
             animelogon::Scaling fit = animelogon::Scaling::Fill;
             if (const Texture *texture = WallpaperTexture(t, &fit)) {
                 m = layout::Map(texture->width, texture->height, t.canvas, t.rect, fit);
                 p.source = 2.0f;
                 views[2] = texture->view.Get();
+                if (pic.kind == Picture::Kind::Scene && pic.scene && pic.sceneMix > 0) {
+                    views[3] = pic.scene;
+                    p.mix = pic.sceneMix;
+                    const auto live = layout::Map(pic.sceneW, pic.sceneH, t.canvas, t.rect, animelogon::Scaling::Stretch);
+                    p.liveScale[0] = live.scaleX; p.liveScale[1] = live.scaleY;
+                    p.liveOffset[0] = live.offsetX; p.liveOffset[1] = live.offsetY;
+                }
                 placed = true;
             }
             break;
@@ -519,10 +562,10 @@ bool Presenter::Render(const std::vector<Picture> &pictures, float dim, float op
         context_->PSSetConstantBuffers(0, 1, cb);
         ID3D11SamplerState *samplers[] = {sampler_.Get()};
         context_->PSSetSamplers(0, 1, samplers);
-        context_->PSSetShaderResources(0, 3, views);
+        context_->PSSetShaderResources(0, 4, views);
         context_->Draw(3, 0);
-        ID3D11ShaderResourceView *none[3] = {};
-        context_->PSSetShaderResources(0, 3, none);
+        ID3D11ShaderResourceView *none[4] = {};
+        context_->PSSetShaderResources(0, 4, none);
         context_->OMSetRenderTargets(0, nullptr, nullptr);
         if (components_ && t.showComponents && !componentsFailed_ && componentOpacity_ > 0.0f &&
             i < componentsPerTarget_.size() && !componentsPerTarget_[i].empty()) {

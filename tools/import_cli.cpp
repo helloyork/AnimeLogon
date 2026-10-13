@@ -37,6 +37,7 @@
 #include "../config/src/exporter.h"
 #include "../config/src/scratch.h"
 #include "../config/src/staging.h"
+#include "../config/src/sceneimport.h"
 #include "../config/src/store.h"
 
 using namespace animelogon;
@@ -71,6 +72,7 @@ int Stage(const std::wstring &what, const std::wstring &file, std::wstring dir) 
     staging::Result r;
     if (what == L"media") r = staging::Media(file, dir, cancel, progress);
     else if (what == L"package") r = staging::Package(file, dir, cancel, progress);
+    else if (what == L"scene") r = staging::Scene(file, dir, cancel, progress);
     else r = staging::Component(file, dir);
     if (!r.ok) {
         secure::RemoveTree(dir);
@@ -90,7 +92,7 @@ int wmain(int argc, wchar_t **argv) {
     // Media Foundation for videos, WIC for pictures; both want COM.
     CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     int code = 2;
-    if ((what == L"media" || what == L"package" || what == L"component") && argc <= 4) {
+    if ((what == L"media" || what == L"package" || what == L"component" || what == L"scene") && argc <= 4) {
         code = Stage(what, argv[2], argc == 4 ? argv[3] : L"");
     } else if (what == L"export" && argc == 4) {
         std::wstring error;

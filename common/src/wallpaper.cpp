@@ -8,6 +8,7 @@
 #include "animelogon/paths.h"
 #include "animelogon/secure.h"
 #include "animelogon/text.h"
+#include "animelogon/scene.h"
 
 namespace animelogon {
 namespace {
@@ -62,10 +63,24 @@ bool LoadStored(const std::wstring &id, WallpaperInfo *info, std::wstring *why) 
     WallpaperInfo w;
     if (!ParseWallpaperInfo(FromUtf8(bytes), &w, &reason)) return *why = L"wallpaper.ini " + reason, false;
     w.id = id;
+    if (w.kind == WallpaperKind::Scene) {
+        w.scenePath = WallpaperDir(id) + L"\\scene.xml";
+        w.imagePath = WallpaperDir(id) + L"\\still.bmp";
+        if (!TrustedPayload(w.scenePath, &w.bytes, why) || !TrustedPayload(w.imagePath, &w.bytes, why) ||
+            !secure::ReadFileBytes(w.scenePath, &raw, kMaxInfoBytes)) return false;
+        scene::Document d;
+        if (!scene::Parse(std::string_view((const char *)raw.data(), raw.size()), &d, why) ||
+            w.sceneVideo != (d.base.kind == scene::Kind::Video)) return *why = L"scene base and metadata disagree", false;
+        for (const auto &asset : scene::Assets(d, true)) {
+            std::wstring p = WallpaperDir(id) + L"\\" + asset;
+            std::replace(p.begin(), p.end(), L'/', L'\\');
+            if (!TrustedPayload(p, &w.bytes, why)) return false;
+        }
+    }
     if (w.kind == WallpaperKind::Image) {
         w.imagePath = WallpaperImagePath(id);
         if (!TrustedPayload(w.imagePath, &w.bytes, why)) return false;
-    } else {
+    } else if (w.kind == WallpaperKind::Video || w.sceneVideo) {
         w.videoPath = WallpaperVideoPath(id);
         if (!TrustedPayload(w.videoPath, &w.bytes, why)) return false;
         if (w.hasAudio) {
@@ -105,13 +120,14 @@ std::wstring WallpaperAudioPath(const std::wstring &id) { return WallpaperDir(id
 std::wstring WallpaperImagePath(const std::wstring &id) { return WallpaperDir(id) + L"\\image.bmp"; }
 
 std::wstring SerializeWallpaperInfo(const WallpaperInfo &w) {
-    const bool video = w.kind == WallpaperKind::Video;
+    const bool video = w.kind == WallpaperKind::Video || (w.kind == WallpaperKind::Scene && w.sceneVideo);
     std::wstring out = Format(L"type = %s\r\nname = %s\r\nsource = %s\r\nimported = %s\r\nwidth = %d\r\nheight = %d\r\n",
-                              video ? L"video" : L"image", OneLine(w.name).c_str(), OneLine(w.sourceName).c_str(),
+                              w.kind == WallpaperKind::Scene ? L"scene" : video ? L"video" : L"image", OneLine(w.name).c_str(), OneLine(w.sourceName).c_str(),
                               OneLine(w.importedAt).c_str(), w.width, w.height);
     if (video)
         out += Format(L"frame_rate = %u/%u\r\nduration_ms = %lld\r\naudio = %s\r\n", w.frameRateNum, w.frameRateDen,
                       w.durationMs, w.hasAudio ? L"true" : L"false");
+    if (w.kind == WallpaperKind::Scene) out += std::wstring(L"video = ") + (w.sceneVideo ? L"true\r\n" : L"false\r\n");
     if (!w.sha256.empty()) out += L"sha256 = " + w.sha256 + L"\r\n";
     return out;
 }
@@ -144,6 +160,7 @@ bool ParseWallpaperInfo(const std::wstring &text, WallpaperInfo *info, std::wstr
         else if (key == L"height" && ParseInt(value, &n) && n > 0 && n <= kMaxVideoSide) w.height = (int)n, haveHeight = true;
         else if (key == L"duration_ms" && ParseInt(value, &n) && n > 0) w.durationMs = n, haveDuration = true;
         else if (key == L"audio") w.hasAudio = value == L"true";
+        else if (key == L"video") w.sceneVideo = value == L"true";
         else if (key == L"sha256") {
             badHash = !IsLowerHex(value, 64);
             if (!badHash) w.sha256 = value;
@@ -159,21 +176,23 @@ bool ParseWallpaperInfo(const std::wstring &text, WallpaperInfo *info, std::wstr
         }
     }
     if (!haveType) return fail(L"has no type");
-    if (type == L"scene") return fail(L"is a scene wallpaper, which this version cannot show");
     if (type == L"image") w.kind = WallpaperKind::Image;
     else if (type == L"video") w.kind = WallpaperKind::Video;
+    else if (type == L"scene") w.kind = WallpaperKind::Scene;
     else return fail(L"has an unknown type");
     if (!haveWidth || !haveHeight) return fail(L"has no valid width and height");
     if (badHash) return fail(L"has a bad sha256");
-    if (w.kind == WallpaperKind::Image) {
+    if (w.kind == WallpaperKind::Image || (w.kind == WallpaperKind::Scene && !w.sceneVideo)) {
         if (w.width > kMaxImageSide || w.height > kMaxImageSide) return fail(L"describes an image that is too large");
         w.frameRateNum = 0;
         w.frameRateDen = 1;
         w.durationMs = 0;
         w.hasAudio = false;
+        w.sceneVideo = false;
     } else if (!haveRate || !haveDuration) {
         return fail(L"has no valid frame rate and duration");
     }
+    if (w.kind != WallpaperKind::Scene) w.sceneVideo = false;
     *info = std::move(w);
     return true;
 }

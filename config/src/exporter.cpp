@@ -1,4 +1,5 @@
 #include "exporter.h"
+#include <algorithm>
 
 #include <windows.h>
 
@@ -13,6 +14,7 @@
 #include "animelogon/text.h"
 #include "animelogon/theme.h"
 #include "animelogon/wallpaper.h"
+#include "animelogon/scene.h"
 
 #include "remux.h"
 
@@ -91,7 +93,20 @@ bool Build(const std::wstring &themeId, const Settings &settings, const ThemeSto
         WallpaperInfo w;
         if (!store.LoadWallpaper(t.wallpaper, &w, &why))
             return Fail(error, L"这个主题的壁纸已不存在或无法读取，无法导出。", L"wallpaper " + t.wallpaper + L": " + why);
-        if (w.kind == WallpaperKind::Video) {
+        if (w.kind == WallpaperKind::Scene) {
+            scene::Document d; std::vector<uint8_t> xml;
+            if (!secure::ReadFileBytes(w.scenePath,&xml,64*1024) || !scene::Parse(std::string_view((const char *)xml.data(),xml.size()),&d,&why))
+                return Fail(error,L"无法读取场景。",why);
+            std::vector<package::Item> sceneItems{{"scene.xml",L"",Bytes(scene::Normalize(d))}};
+            const std::wstring dir = w.scenePath.substr(0,w.scenePath.find_last_of(L'\\'));
+            for (const auto &name : scene::Assets(d,false)) {
+                std::wstring path = dir+L"\\"+name; std::replace(path.begin(),path.end(),L'/',L'\\');
+                if (d.base.kind == scene::Kind::Video && name == d.base.file && !VideoOf(w,workDir,&path,error)) return false;
+                sceneItems.push_back({ToUtf8(name),path,{}});
+            }
+            wallpaperFile = L"wallpaper.alscene";
+            if (!package::WriteToMemory(sceneItems,&wallpaper.bytes,&why)) return Fail(error,L"无法打包场景。",why);
+        } else if (w.kind == WallpaperKind::Video) {
             wallpaperFile = L"wallpaper.mp4";
             if (!VideoOf(w, workDir, &wallpaper.file, error)) return false;
         } else {

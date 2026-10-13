@@ -425,8 +425,8 @@ TEST(WallpaperInfoRoundTrip) {
     // Without a hash it still loads; unknown keys are ignored.
     CHECK(ParseWallpaperInfo(L"type = image\nwidth = 10\nheight = 10\nfuture = 1\n", &w) && w.sha256.empty());
 
-    CHECK(!ParseWallpaperInfo(L"type = scene\nwidth = 10\nheight = 10\n", &w, &why));
-    CHECK(why.find(L"scene") != std::wstring::npos);
+    CHECK(ParseWallpaperInfo(L"type = scene\nwidth = 10\nheight = 10\n", &w, &why));
+    CHECK(w.kind == WallpaperKind::Scene && !w.sceneVideo);
     CHECK(!ParseWallpaperInfo(L"width = 10\nheight = 10\n", &w));
     CHECK(!ParseWallpaperInfo(L"type = gif\nwidth = 10\nheight = 10\n", &w));
     CHECK(!ParseWallpaperInfo(L"type = image\nwidth = 10\n", &w));

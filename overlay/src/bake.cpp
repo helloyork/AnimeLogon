@@ -210,7 +210,8 @@ bool Refresh(const std::wstring &preview) {
     // With a theme whose wallpaper is "none" there is nothing to follow: the background stays
     // as it is.
     if (wallpaper.source == plan::Source::None) return false;
-    const bool video = wallpaper.source == plan::Source::Video, image = wallpaper.source == plan::Source::Image;
+    const bool video = wallpaper.source == plan::Source::Video;
+    const bool image = wallpaper.source == plan::Source::Image || wallpaper.source == plan::Source::Scene;
     // Where the wallpaper sits on the primary display, as it is drawn there.
     const std::wstring placed =
         animelogon::Format(L"%s|%ld,%ld,%ld,%ld|%dx%d", animelogon::ToString(wallpaper.fit),

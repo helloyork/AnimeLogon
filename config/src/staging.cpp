@@ -19,6 +19,7 @@
 #include "animelogon/wallpaper.h"
 
 #include "transcode.h"
+#include "sceneimport.h"
 
 using namespace animelogon;
 
@@ -272,7 +273,11 @@ Result Package(const std::wstring &source, const std::wstring &dir, const std::a
     if (namesWallpaper) {
         const std::wstring wallpaperDir = dir + L"\\wallpaper";
         Result r;
-        if (t.wallpaper == L"wallpaper.mp4") {
+        if (t.wallpaper == L"wallpaper.alscene") {
+            package::Reader sceneReader;
+            if (!reader.Read(*wallpaper,package::kMaxPictureBytes,&bytes,&why) || !sceneReader.OpenBytes(std::move(bytes),&why)) return Error(L"场景包有误："+why);
+            r = SceneWallpaper(sceneReader,wallpaperDir,t.name,cancel,progress);
+        } else if (t.wallpaper == L"wallpaper.mp4") {
             // Media Foundation reads from a file. It goes beside the staging, not into it, and
             // is gone once the video is transcoded.
             const std::wstring scratch = dir + L"-source";

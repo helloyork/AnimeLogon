@@ -20,13 +20,14 @@ animelogon_add_executable(app WIN32
         ${config_src}/commit.cpp
         ${config_src}/store.cpp
         ${config_src}/staging.cpp
+        ${config_src}/sceneimport.cpp
         ${config_src}/exporter.cpp
         ${config_src}/remux.cpp
         ${config_src}/transcode.cpp
         ${config_src}/devices.cpp
         ${config_src}/fonts.cpp
     DESCRIPTION "AnimeLogon 设置"
-    LIBS animelogon_render webview2::loader mfplat mfreadwrite mfuuid mmdevapi ole32 shell32 shlwapi comdlg32
+    LIBS animelogon_render animelogon_scene_host webview2::loader mfplat mfreadwrite mfuuid mmdevapi ole32 shell32 shlwapi comdlg32
          dwmapi delayimp windowsapp)
 target_include_directories(app PRIVATE src ${config_src})
 # The agent reads Windows' media controls through C++/WinRT, which needs C++20's <coroutine>:

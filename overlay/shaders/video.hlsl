@@ -8,11 +8,16 @@ cbuffer Params : register(b0) {
     float2 uvMax;     // the visible part of the video texture
     float dim;        // 0 shows the picture, 1 is black
     float source;     // 0 black, 1 the video, 2 a picture
+    float liveMix;
+    float3 reserved;
+    float2 liveScale;
+    float2 liveOffset;
 };
 
 Texture2D<float> luma : register(t0);
 Texture2D<float2> chroma : register(t1);
 Texture2D<float4> picture : register(t2);
+Texture2D<float4> scene : register(t3);
 SamplerState linearClamp : register(s0);
 
 float4 VS(uint id : SV_VertexID) : SV_Position {
@@ -22,9 +27,14 @@ float4 VS(uint id : SV_VertexID) : SV_Position {
 
 float4 PS(float4 pos : SV_Position) : SV_Target {
     float2 uv = pos.xy * scale + offset;
-    if (source < 0.5 || any(uv < 0) || any(uv > 1)) return float4(0, 0, 0, 1);
+    if (source < 0.5) return float4(0, 0, 0, 1);
     // Pictures are drawn opaque, whatever their fourth byte says.
-    if (source > 1.5) return float4(picture.Sample(linearClamp, uv).rgb * (1.0 - dim), 1.0);
+    if (source > 1.5) {
+        float3 rgb = any(uv < 0) || any(uv > 1) ? float3(0,0,0) : picture.Sample(linearClamp, uv).rgb;
+        if (liveMix > 0) rgb = lerp(rgb, scene.Sample(linearClamp, pos.xy * liveScale + liveOffset).rgb, liveMix);
+        return float4(rgb * (1.0 - dim), 1.0);
+    }
+    if (any(uv < 0) || any(uv > 1)) return float4(0,0,0,1);
     uv *= uvMax;
     float y = (luma.Sample(linearClamp, uv) - 16.0 / 255.0) * (255.0 / 219.0);
     float2 c = (chroma.Sample(linearClamp, uv) - 128.0 / 255.0) * (255.0 / 224.0);

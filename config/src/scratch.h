@@ -95,9 +95,13 @@ public:
         if (!ParseWallpaperInfo(FromUtf8(ReadText(store::In(t_, WallpaperInfoPath(id)), 64 * 1024)), info, why))
             return false;
         info->id = id;
-        if (info->kind == WallpaperKind::Image) info->imagePath = store::In(t_, WallpaperImagePath(id));
+        if (info->kind == WallpaperKind::Scene) {
+            info->scenePath = store::In(t_,WallpaperDir(id))+L"\\scene.xml";
+            info->imagePath = store::In(t_,WallpaperDir(id))+L"\\still.bmp";
+            if (info->sceneVideo) info->videoPath = store::In(t_,WallpaperVideoPath(id));
+        } else if (info->kind == WallpaperKind::Image) info->imagePath = store::In(t_, WallpaperImagePath(id));
         else info->videoPath = store::In(t_, WallpaperVideoPath(id));
-        if (info->kind == WallpaperKind::Video && info->hasAudio) info->audioPath = store::In(t_, WallpaperAudioPath(id));
+        if ((info->kind == WallpaperKind::Video || info->sceneVideo) && info->hasAudio) info->audioPath = store::In(t_, WallpaperAudioPath(id));
         return true;
     }
     bool LoadComponent(const std::wstring &id, animelogon::skin::Skin *out, std::wstring *why) const override {

@@ -242,7 +242,7 @@ TEST(PackageNames) {
     CHECK(!package::Classify("Theme.xml", nullptr));
     CHECK(!package::Classify("wallpaper.gif", nullptr));
     CHECK(!package::Classify("wallpaper.jpeg", nullptr));
-    CHECK(!package::Classify("preview.jpg", nullptr));
+    CHECK(package::Classify("preview.jpg", &k) && k == package::Kind::Asset);
     CHECK(!package::Classify("theme.xml/", nullptr));
     CHECK(!package::Classify("", nullptr));
 }

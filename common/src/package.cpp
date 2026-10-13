@@ -6,6 +6,7 @@
 #include "animelogon/image.h"
 #include "animelogon/text.h"
 #include "animelogon/theme.h"
+#include "animelogon/scene.h"
 
 namespace animelogon::package {
 
@@ -142,9 +143,11 @@ std::string_view ExtensionOf(std::string_view name) {
 uint64_t CapFor(Kind kind, std::string_view extension) {
     switch (kind) {
     case Kind::Theme:
+    case Kind::Scene:
     case Kind::Component: return kMaxXmlBytes;
     case Kind::Preview: return kMaxPreviewBytes;
     case Kind::Wallpaper: return extension == "mp4" ? kMaxArchiveBytes : kMaxPictureBytes;
+    case Kind::Asset: return extension == "hlsl" ? scene::kMaxShaderBytes : extension == "json" ? scene::kMaxLottieBytes : extension == "mp4" ? kMaxArchiveBytes : kMaxPictureBytes;
     }
     return 0;
 }
@@ -155,6 +158,8 @@ int Rank(Kind kind) {
     case Kind::Wallpaper: return 1;
     case Kind::Component: return 2;
     case Kind::Preview: return 3;
+    case Kind::Scene: return 0;
+    case Kind::Asset: return 1;
     }
     return 4;
 }
@@ -180,13 +185,18 @@ bool Admit(std::string_view name, const std::vector<std::string> &earlier, Kind 
 }
 
 bool CountsFit(const std::vector<Kind> &kinds, std::wstring *why) {
-    size_t themes = 0, wallpapers = 0, components = 0;
+    size_t themes = 0, wallpapers = 0, components = 0, scenes = 0, assets = 0;
     for (Kind k : kinds) {
         themes += k == Kind::Theme;
         wallpapers += k == Kind::Wallpaper;
         components += k == Kind::Component;
+        scenes += k == Kind::Scene;
+        assets += k == Kind::Asset;
     }
-    if (themes != 1) *why = L"has no theme.xml";
+    if (scenes == 1 && themes == 0 && components == 0) return true;
+    if (kinds.size() > kMaxEntries) { *why = Format(L"has %zu entries, more than %zu",kinds.size(),kMaxEntries); return false; }
+    if (scenes || assets) *why = L"scene assets require a standalone scene.xml archive";
+    else if (themes != 1) *why = L"has no theme.xml";
     else if (wallpapers > 1) *why = L"has more than one wallpaper";
     else if (components > kMaxComponents) *why = Format(L"has %zu components, more than %zu", components, kMaxComponents);
     else return true;
@@ -306,8 +316,8 @@ struct Planned {
 };
 
 bool Plan(const std::vector<Item> &items, std::vector<Planned> *plan, std::wstring *why) {
-    if (items.size() > kMaxEntries) {
-        *why = Format(L"has %zu entries, more than %zu", items.size(), kMaxEntries);
+    if (items.size() > kMaxSceneEntries) {
+        *why = Format(L"has %zu entries, more than %zu", items.size(), kMaxSceneEntries);
         return false;
     }
     std::vector<std::string> names;
@@ -442,9 +452,13 @@ bool Classify(std::string_view name, Kind *kind) {
     const std::wstring wide(name.begin(), name.end());
     Kind k = Kind::Theme;
     if (wide == L"theme.xml") k = Kind::Theme;
+    else if (wide == L"scene.xml") k = Kind::Scene;
     else if (theme::IsPackageWallpaperRef(wide)) k = Kind::Wallpaper;
     else if (wide == L"preview.png") k = Kind::Preview;
     else if (theme::IsPackageComponentRef(wide)) k = Kind::Component;
+    else if (scene::IsAssetName(wide) && (ExtensionOf(name) == "hlsl" || ExtensionOf(name) == "json" ||
+        ExtensionOf(name) == "bmp" || ExtensionOf(name) == "png" || ExtensionOf(name) == "jpg" ||
+        ExtensionOf(name) == "webp" || ExtensionOf(name) == "mp4")) k = Kind::Asset;
     else return false;
     if (kind) *kind = k;
     return true;
@@ -584,8 +598,8 @@ bool Reader::Check(std::wstring *why) {
         *why = L"has no entries";
         return false;
     }
-    if (total > kMaxEntries) {
-        *why = Format(L"has %u entries, more than %zu", (unsigned)total, kMaxEntries);
+    if (total > kMaxSceneEntries) {
+        *why = Format(L"has %u entries, more than %zu", (unsigned)total, kMaxSceneEntries);
         return false;
     }
     if ((uint64_t)directoryAt + directorySize != endAt) {

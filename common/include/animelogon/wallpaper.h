@@ -15,8 +15,7 @@
 
 namespace animelogon {
 
-// type=scene in wallpaper.ini is reserved for scene wallpapers and refused for now.
-enum class WallpaperKind { Image, Video };
+enum class WallpaperKind { Image, Video, Scene };
 
 struct WallpaperInfo {
     std::wstring id;
@@ -31,6 +30,7 @@ struct WallpaperInfo {
     unsigned frameRateDen = 1;
     long long durationMs = 0;
     bool hasAudio = false;
+    bool sceneVideo = false;
     // SHA-256 of the normalised payload as 64 lowercase hex digits: the bytes of image.bmp, or
     // of video.mp4 followed by those of audio.wav. The elevated helper fills it in and uses it to
     // find a wallpaper that is already installed. Empty when unknown.
@@ -38,6 +38,7 @@ struct WallpaperInfo {
 
     // Filled in by LoadWallpaper; never stored in wallpaper.ini.
     std::wstring videoPath, audioPath, imagePath;  // empty where the wallpaper has no such file
+    std::wstring scenePath;
     uint64_t bytes = 0;                            // the payload on disk
     bool builtIn = false;                          // "default": no files, drawn by AnimeLogon
 };

@@ -51,12 +51,13 @@ namespace animelogon::package {
 
 constexpr uint64_t kMaxArchiveBytes = 1ull << 30;  // 1 GiB, the whole file
 constexpr size_t kMaxEntries = 16;
+constexpr size_t kMaxSceneEntries = 40;
 constexpr size_t kMaxComponents = 8;
 constexpr uint32_t kMaxXmlBytes = 64 * 1024;
 constexpr uint32_t kMaxPreviewBytes = 16 * 1024 * 1024;
 constexpr uint32_t kMaxPictureBytes = 256 * 1024 * 1024;  // the same as image::kMaxSourceBytes
 
-enum class Kind { Theme, Wallpaper, Component, Preview };
+enum class Kind { Theme, Wallpaper, Component, Preview, Scene, Asset };
 
 // Is `name` one the format allows? `kind` (optional) receives what it is.
 bool Classify(std::string_view name, Kind *kind);

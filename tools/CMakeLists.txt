@@ -7,9 +7,10 @@ add_executable(import_cli import_cli.cpp
     ${PROJECT_SOURCE_DIR}/config/src/exporter.cpp
     ${PROJECT_SOURCE_DIR}/config/src/remux.cpp
     ${PROJECT_SOURCE_DIR}/config/src/staging.cpp
+    ${PROJECT_SOURCE_DIR}/config/src/sceneimport.cpp
     ${PROJECT_SOURCE_DIR}/config/src/store.cpp
     ${PROJECT_SOURCE_DIR}/config/src/transcode.cpp)
-target_link_libraries(import_cli PRIVATE animelogon_common mfplat mfreadwrite mfuuid ole32)
+target_link_libraries(import_cli PRIVATE animelogon_common animelogon_scene_host mfplat mfreadwrite mfuuid ole32)
 
 add_executable(skin_preview skin_preview.cpp)
 target_link_libraries(skin_preview PRIVATE animelogon_render ole32)

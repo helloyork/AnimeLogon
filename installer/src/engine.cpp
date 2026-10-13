@@ -6,6 +6,7 @@
 #include <shlobj.h>
 #include <shobjidl.h>
 #include <wrl/client.h>
+#include <aclapi.h>
 
 #include <iterator>
 #include <vector>
@@ -30,11 +31,26 @@ using namespace animelogon;
 namespace engine {
 
 // WebView2Loader.dll is the settings app's: it finds the Edge WebView2 runtime its page runs in.
-const wchar_t *const kComponents[] = {L"overlay.exe", L"launcher.exe", L"animelogon.exe", L"WebView2Loader.dll",
+const wchar_t *const kComponents[] = {L"overlay.exe", L"launcher.exe", L"animelogon.exe", L"scene.exe", L"WebView2Loader.dll",
                                       L"uninstall.exe"};
 const size_t kComponentCount = ARRAYSIZE(kComponents);
 
 namespace {
+
+DWORD SceneReadAccess(const std::wstring &path, bool directory) {
+    BYTE sid[SECURITY_MAX_SID_SIZE]; DWORD size = sizeof(sid);
+    if (!CreateWellKnownSid(WinBuiltinAnyPackageSid,nullptr,sid,&size)) return GetLastError();
+    PACL oldAcl = nullptr, newAcl = nullptr; PSECURITY_DESCRIPTOR sd = nullptr;
+    DWORD e = GetNamedSecurityInfoW(path.c_str(),SE_FILE_OBJECT,DACL_SECURITY_INFORMATION,nullptr,nullptr,&oldAcl,nullptr,&sd);
+    if (e != ERROR_SUCCESS) return e;
+    EXPLICIT_ACCESSW access{};
+    access.grfAccessPermissions = directory ? FILE_TRAVERSE | FILE_READ_ATTRIBUTES | READ_CONTROL : FILE_GENERIC_READ | FILE_GENERIC_EXECUTE;
+    access.grfAccessMode = GRANT_ACCESS; access.grfInheritance = NO_INHERITANCE;
+    access.Trustee.TrusteeForm = TRUSTEE_IS_SID; access.Trustee.ptstrName = reinterpret_cast<LPWSTR>(sid);
+    e = SetEntriesInAclW(1,&access,oldAcl,&newAcl);
+    if (e == ERROR_SUCCESS) e = SetNamedSecurityInfoW(const_cast<LPWSTR>(path.c_str()),SE_FILE_OBJECT,DACL_SECURITY_INFORMATION,nullptr,nullptr,newAcl,nullptr);
+    if (newAcl) LocalFree(newAcl); LocalFree(sd); return e;
+}
 
 // Installed by earlier versions and no longer: config.exe was the settings app before
 // animelogon.exe. Deleted by install and by uninstall.
@@ -272,6 +288,9 @@ Report Install(const std::wstring &targetDir) {
             return fail(WithError(std::wstring(L"无法复制 ") + component, GetLastError()));
     }
     for (const wchar_t *retired : kRetired) RemoveFileOrQueue(targetDir + L"\\" + retired);
+    e = SceneReadAccess(targetDir,true);
+    if (e == ERROR_SUCCESS) e = SceneReadAccess(targetDir+L"\\scene.exe",false);
+    if (e != ERROR_SUCCESS) return fail(WithError(L"无法为场景渲染器设置读取权限",e));
     step(L"复制程序文件");
 
     // The sign-in background. One already in place is kept -- the overlay may have baked it

@@ -29,6 +29,7 @@ enum class Source {
     None,      // nothing: the display is black
     Video,     // video.mp4, decoded as it plays
     Image,     // image.bmp, read once
+    Scene,     // still.bmp, then isolated scene frames
     Gradient,  // the built-in wallpaper, drawn by AnimeLogon itself
 };
 
@@ -37,6 +38,8 @@ struct Wallpaper {
     std::wstring id;         // the wallpaper's id; "default" for the gradient
     std::wstring path;       // video.mp4 or image.bmp, found administrators-only by LoadWallpaper
     std::wstring audioPath;  // a video's audio.wav, when it has sound
+    std::wstring sceneDir, videoPath;
+    animelogon::skin::Values values;
     animelogon::Scaling fit = animelogon::Scaling::Fill;
 };
 

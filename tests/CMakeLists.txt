@@ -1,6 +1,7 @@
 add_executable(animelogon_tests common_tests.cpp clock_tests.cpp skin_tests.cpp wake_tests.cpp data_tests.cpp
                                theme_tests.cpp resolve_tests.cpp)
 target_sources(animelogon_tests PRIVATE image_tests.cpp package_tests.cpp)
+target_sources(animelogon_tests PRIVATE scene_tests.cpp)
 # The overlay's plan and its reading of still wallpapers need nothing but animelogon_common.
 target_sources(animelogon_tests PRIVATE overlay_tests.cpp ${PROJECT_SOURCE_DIR}/overlay/src/plan.cpp
                                         ${PROJECT_SOURCE_DIR}/overlay/src/picture.cpp)
@@ -16,6 +17,7 @@ target_sources(animelogon_tests PRIVATE config_tests.cpp
     ${PROJECT_SOURCE_DIR}/config/src/commit.cpp
     ${PROJECT_SOURCE_DIR}/config/src/store.cpp
     ${PROJECT_SOURCE_DIR}/config/src/staging.cpp
+    ${PROJECT_SOURCE_DIR}/config/src/sceneimport.cpp
     ${PROJECT_SOURCE_DIR}/config/src/exporter.cpp
     ${PROJECT_SOURCE_DIR}/config/src/transcode.cpp)
 target_include_directories(animelogon_tests PRIVATE ${PROJECT_SOURCE_DIR}/config/src)
@@ -41,4 +43,4 @@ target_include_directories(animelogon_tests PRIVATE ${PROJECT_SOURCE_DIR}/app/sr
 # The settings app's pictures of themes: the wall of displays when spanning, and the components
 # alone as a layer, drawn by the logon screen's renderer.
 target_sources(animelogon_tests PRIVATE app_picture_tests.cpp ${PROJECT_SOURCE_DIR}/app/src/pictures.cpp)
-target_link_libraries(animelogon_tests PRIVATE animelogon_render)
+target_link_libraries(animelogon_tests PRIVATE animelogon_render animelogon_scene_host)

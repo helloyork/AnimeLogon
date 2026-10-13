@@ -206,7 +206,7 @@ const Picture *Pictures::Still(const std::wstring &id) {
     for (const WallpaperInfo &w : library_.wallpapers()) {
         if (w.id != id || w.builtIn) continue;
         Picture full;
-        if (w.kind == WallpaperKind::Image) {
+        if (w.kind == WallpaperKind::Image || w.kind == WallpaperKind::Scene) {
             LoadPicture(w.imagePath, kStillWidth, &still);
         } else if (FirstFrame(w.videoPath, &full)) {
             if (full.width > kStillWidth) {

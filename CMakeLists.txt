@@ -37,6 +37,7 @@ add_subdirectory(vendor/webview2)
 include(cmake/AnimeLogon.cmake)
 
 add_subdirectory(common)
+add_subdirectory(scene)
 add_subdirectory(render)
 add_subdirectory(overlay)
 add_subdirectory(app)

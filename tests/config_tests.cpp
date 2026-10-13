@@ -25,6 +25,7 @@
 #include "animelogon/text.h"
 #include "animelogon/theme.h"
 #include "animelogon/wallpaper.h"
+#include "animelogon/scene.h"
 
 #include "commit.h"
 #include "exporter.h"
@@ -845,4 +846,38 @@ TEST(SettingsAppWritesEveryGlobalKey) {
           o.instances.at(L"clock").values.at(L"p1.offset-x") == L"4.5");
     CHECK(back.clock.hours == ClockHours::H24 && back.audio.volume == 35);
     CHECK(SerializeSettings(back) == SerializeSettings(s));
+}
+
+TEST(CommitSceneRechecksEveryAssetAndWritesXmlAfresh) {
+    const auto root = ScratchDir(), dir = ImportDir(root);
+    const auto wallpaper = dir + L"\\wallpaper";
+    CHECK(paths::CreateDirectories(wallpaper+L"\\images"));
+    const std::string sceneXml = "<scene format=\"1\" name=\"still\"><image id=\"city\" src=\"images/city.bmp\"/><base image=\"city\"/></scene>";
+    CHECK(WriteAll(wallpaper+L"\\scene.xml",sceneXml));
+    const std::vector<uint8_t> pixels(2*2*4,255);
+    const auto bmp = bitmap::Build(2,2,pixels.data(),pixels.size());
+    CHECK(WriteAll(wallpaper+L"\\images\\city.bmp",bmp));
+    CHECK(WriteAll(wallpaper+L"\\still.bmp",bmp));
+    WallpaperInfo info; info.kind = WallpaperKind::Scene; info.name = L"scene"; info.width = info.height = 2;
+    CHECK(WriteAll(wallpaper+L"\\wallpaper.ini",ToUtf8(SerializeWallpaperInfo(info))));
+    theme::Theme t; t.name = L"scene"; t.wallpaper = L"wallpaper.alscene";
+    CHECK(WriteAll(dir+L"\\theme.xml",theme::Normalize(t)));
+    scratch::PlainTarget target(root+L"\\store"); store::PackageResult r;
+    CHECK(store::CommitPackage(target,dir,&r) == commit::kOk);
+    const auto installed = store::In(target,WallpaperDir(r.wallpaperId));
+    scene::Document d; std::wstring why;
+    CHECK(scene::Parse(Text(ReadAll(installed+L"\\scene.xml")),&d,&why));
+    CHECK(Text(ReadAll(installed+L"\\scene.xml")) == scene::Normalize(d));
+    CHECK(ReadAll(installed+L"\\still.bmp") == bmp);
+    store::PackageResult reused;
+    CHECK(store::CommitPackage(target,dir,&reused) == commit::kOk && reused.wallpaperReused && reused.wallpaperId == r.wallpaperId);
+    CHECK(WriteAll(wallpaper+L"\\images\\unexpected.bmp",bmp));
+    CHECK(store::CommitPackage(target,dir) == commit::kFailed);
+    DeleteFileW((wallpaper+L"\\images\\unexpected.bmp").c_str());
+    CHECK(WriteAll(wallpaper+L"\\scene.xml","<scene format=\"1\" name=\"bad\"><base shader=\"../evil.hlsl\"/></scene>"));
+    CHECK(store::CommitPackage(target,dir) == commit::kFailed);
+    CHECK(WriteAll(wallpaper+L"\\scene.xml",sceneXml));
+    CHECK(WriteAll(wallpaper+L"\\still.bmp",std::string("BMbad")));
+    CHECK(store::CommitPackage(target,dir) == commit::kFailed);
+    secure::RemoveTree(root);
 }

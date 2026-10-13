@@ -14,6 +14,8 @@
 #include "animelogon/text.h"
 #include "animelogon/theme.h"
 #include "animelogon/wallpaper.h"
+#include "animelogon/scene.h"
+#include "animelogon/package.h"
 
 #include "commit.h"
 
@@ -173,7 +175,65 @@ std::vector<std::wstring> Entries(const std::wstring &dir) {
 struct StagedWallpaper {
     WallpaperInfo info;  // as staged, with sha256 computed from the payload
     Handle video, audio, image;
+    std::string sceneXml;
+    std::vector<std::pair<std::wstring, Handle>> sceneFiles;
 };
+
+bool ReadStagedScene(const std::wstring &dir, const WallpaperInfo &info, StagedWallpaper *w, Sha256 *hash, std::wstring *why) {
+    Handle xml = OpenSource(dir + L"\\scene.xml", why);
+    std::vector<uint8_t> bytes;
+    scene::Document d;
+    if (!xml || !secure::ReadHandleBytes(xml.get(), &bytes, kMaxXmlBytes) ||
+        !scene::Parse(std::string_view((const char *)bytes.data(), bytes.size()), &d, why)) return Fail(why, L"invalid scene.xml");
+    if (info.sceneVideo != (d.base.kind == scene::Kind::Video) || (info.sceneVideo && d.base.file != L"video.mp4"))
+        return Fail(why, L"scene base and metadata disagree");
+    std::vector<std::wstring> files{L"wallpaper.ini", L"scene.xml", L"still.bmp"};
+    std::map<std::wstring, std::vector<std::wstring>> subdirs;
+    auto names = scene::Assets(d, true); names.push_back(L"still.bmp");
+    if (info.hasAudio) names.push_back(L"audio.wav");
+    uint64_t total = 0;
+    for (const auto &name : names) {
+        const size_t slash = name.find(L'/');
+        const auto ext = name.substr(name.find_last_of(L'.'));
+        if (slash != std::wstring::npos) {
+            const std::wstring sub = name.substr(0, slash);
+            if ((ext == L".bmp" && sub != L"images") || ((ext == L".hlsl" || ext == L".dxbc") && sub != L"shaders") ||
+                (ext == L".json" && sub != L"lottie")) return Fail(why, L"noncanonical scene asset path");
+            subdirs[sub].push_back(name.substr(slash+1));
+        } else if (name != L"still.bmp" && name != L"video.mp4" && name != L"audio.wav") return Fail(why, L"noncanonical scene asset path");
+        else if (name != L"still.bmp") files.push_back(name);
+        std::wstring path = dir + L"\\" + name; std::replace(path.begin(), path.end(), L'/', L'\\');
+        Handle h = OpenSource(path, why);
+        if (!h) return false;
+        const uint64_t size = SizeOf(h.get());
+        const uint64_t limit = ext == L".hlsl" ? scene::kMaxShaderBytes : ext == L".dxbc" ? 1024 * 1024 :
+            ext == L".json" ? scene::kMaxLottieBytes : ext == L".mp4" || ext == L".wav" ? package::kMaxArchiveBytes : scene::kMaxBundleBytes;
+        if (!size || size > limit) return Fail(why, name + L" is empty or too large");
+        if (ext != L".mp4" && ext != L".wav" && (total += size) > scene::kMaxBundleBytes) return Fail(why, L"scene assets are too large");
+        uint8_t head[bitmap::kHeaderBytes]{};
+        if (ext == L".bmp") {
+            int width = 0, height = 0;
+            if (!ReadHead(h.get(), head, sizeof(head)) || !bitmap::ReadSize(head, sizeof(head), size, &width, &height)) return Fail(why, name + L" is not a canonical bitmap");
+            if (name == L"still.bmp" && (width != info.width || height != info.height)) return Fail(why, L"scene still and metadata disagree");
+        } else if (ext == L".dxbc") {
+            if (!ReadHead(h.get(), head, 4) || memcmp(head, "DXBC", 4)) return Fail(why, L"invalid compiled shader envelope");
+        } else if (ext == L".mp4") {
+            if (!ReadHead(h.get(), head, 12) || !LooksLikeMp4(head, 12)) return Fail(why, L"invalid scene video");
+        } else if (ext == L".wav") {
+            if (!ReadHead(h.get(), head, kWavHeaderBytes) || !IsCanonicalWav(head, kWavHeaderBytes, size)) return Fail(why, L"invalid scene audio");
+        }
+        const std::string label = ToUtf8(name) + '\0';
+        hash->Update(label.data(), label.size());
+        hash->Update(&size, sizeof(size));
+        if (!hash->UpdateFromHandle(h.get()) || !Rewind(h.get())) return Fail(why, L"scene hashing failed");
+        w->sceneFiles.emplace_back(name, std::move(h));
+    }
+    std::vector<std::wstring> dirs;
+    for (const auto &[name, list] : subdirs) { dirs.push_back(name); if (!HoldsExactly(dir+L"\\"+name, list, {}, why)) return false; }
+    if (!HoldsExactly(dir, files, dirs, why)) return false;
+    w->sceneXml = scene::Normalize(d);
+    hash->Update(w->sceneXml.data(), w->sceneXml.size()); return true;
+}
 
 bool ReadStagedWallpaper(const std::wstring &dir, StagedWallpaper *w, std::wstring *why) {
     std::vector<uint8_t> bytes;
@@ -188,7 +248,9 @@ bool ReadStagedWallpaper(const std::wstring &dir, StagedWallpaper *w, std::wstri
     info.sha256.clear();  // never the staging's word for it
 
     Sha256 hash;
-    if (info.kind == WallpaperKind::Image) {
+    if (info.kind == WallpaperKind::Scene) {
+        if (!ReadStagedScene(dir, info, w, &hash, why)) return false;
+    } else if (info.kind == WallpaperKind::Image) {
         if (!HoldsExactly(dir, {kInfoName, kImageName}, {}, why)) return false;
         w->image = OpenSource(dir + L"\\" + kImageName, why);
         if (!w->image) return false;
@@ -272,9 +334,17 @@ bool InstalledWallpaper(const Target &t, const std::wstring &id, WallpaperInfo *
     std::wstring reason;
     if (!ParseWallpaperInfo(FromUtf8(WithoutBom(bytes)), &w, &reason)) return Fail(why, L"wallpaper.ini " + reason);
     std::vector<std::wstring> payload;
-    if (w.kind == WallpaperKind::Image) payload.push_back(WallpaperImagePath(id));
+    if (w.kind == WallpaperKind::Scene) {
+        const std::wstring xml = In(t, WallpaperDir(id)) + L"\\scene.xml";
+        scene::Document d;
+        if (!ReadInstalled(t, xml, kMaxXmlBytes, &bytes, why) || !scene::Parse(std::string_view((const char *)bytes.data(), bytes.size()), &d, why)) return false;
+        payload.push_back(WallpaperDir(id) + L"\\still.bmp");
+        for (const auto &asset : scene::Assets(d, true)) {
+            std::wstring path = WallpaperDir(id) + L"\\" + asset; std::replace(path.begin(), path.end(), L'/', L'\\'); payload.push_back(path);
+        }
+    } else if (w.kind == WallpaperKind::Image) payload.push_back(WallpaperImagePath(id));
     else payload.push_back(WallpaperVideoPath(id));
-    if (w.kind == WallpaperKind::Video && w.hasAudio) payload.push_back(WallpaperAudioPath(id));
+    if (w.hasAudio) payload.push_back(WallpaperAudioPath(id));
     for (const std::wstring &p : payload) {
         const std::wstring file = In(t, p);
         WIN32_FILE_ATTRIBUTE_DATA data{};
@@ -331,6 +401,17 @@ bool WriteWallpaper(const Target &t, const std::wstring &id, StagedWallpaper &w,
     w.info.id = id;
     const std::string ini = ToUtf8(SerializeWallpaperInfo(w.info));
     DWORD e = ERROR_SUCCESS;
+    if (w.info.kind == WallpaperKind::Scene) {
+        std::set<std::wstring> dirs;
+        for (const auto &[name, h] : w.sceneFiles) {
+            std::wstring path = dir + L"\\" + name; std::replace(path.begin(), path.end(), L'/', L'\\');
+            const size_t slash = name.find(L'/');
+            if (slash != std::wstring::npos && dirs.insert(name.substr(0, slash)).second) e = t.MakeDirectory(dir + L"\\" + name.substr(0, slash));
+            if (e == ERROR_SUCCESS) e = t.CopyInto(h.get(), path);
+            if (e != ERROR_SUCCESS) break;
+        }
+        if (e == ERROR_SUCCESS) e = t.WriteBytes(dir + L"\\scene.xml", w.sceneXml.data(), w.sceneXml.size());
+    }
     if (w.image) e = t.CopyInto(w.image.get(), In(t, WallpaperImagePath(id)));
     if (e == ERROR_SUCCESS && w.video) e = t.CopyInto(w.video.get(), In(t, WallpaperVideoPath(id)));
     if (e == ERROR_SUCCESS && w.audio) e = t.CopyInto(w.audio.get(), In(t, WallpaperAudioPath(id)));
@@ -487,7 +568,7 @@ int CommitPackage(const Target &t, const std::wstring &dir, PackageResult *resul
     if (hasWallpaper) {
         if (!ReadStagedWallpaper(dir + L"\\" + kWallpaperDirName, &w, &why)) return Refused(L"package: refused", why);
         const bool video = th.wallpaper == L"wallpaper.mp4";
-        if (video != (w.info.kind == WallpaperKind::Video))
+        if (video != (w.info.kind == WallpaperKind::Video) || (th.wallpaper == L"wallpaper.alscene") != (w.info.kind == WallpaperKind::Scene))
             return Refused(L"package: refused", L"theme.xml names " + th.wallpaper + L" but a different kind is staged");
     }
     std::map<std::wstring, std::string> staged;  // package file -> normalised component

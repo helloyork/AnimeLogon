@@ -81,6 +81,7 @@ public:
     // the file has not changed since; ImageStatus says when it is ready, and if it failed, why.
     enum class ImageState { Reading, Ready, Failed };
     void RequestImage(const std::wstring &id, const std::wstring &path);
+    bool LoadImageNow(const std::wstring &id, const std::wstring &path);
     ImageState ImageStatus(const std::wstring &id, std::wstring *why = nullptr);
     // Lets go of the images no target asked for this time.
     void KeepImages(const std::set<std::wstring> &ids);
@@ -91,13 +92,18 @@ public:
             Still,      // the baked sign-in background, while the wallpaper is not ready
             Video,      // `frame`
             Wallpaper,  // the target's image wallpaper or the built-in gradient
+            Scene,
         };
         Kind kind = Kind::Black;
         const VideoPlayer::Frame *frame = nullptr;
         int videoW = 0, videoH = 0;
+        ID3D11ShaderResourceView *scene = nullptr;
+        int sceneW = 0, sceneH = 0;
+        float sceneMix = 0;
     };
     // One picture per target. `dim` fades the picture to black; `opacity` fades the window.
     bool Render(const std::vector<Picture> &pictures, float dim, float opacity);
+    void DrawVideo(const VideoPlayer::Frame &frame, int width, int height, animelogon::Scaling fit, ID3D11Texture2D *output);
 
 private:
     struct Window {
