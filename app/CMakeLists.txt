@@ -29,6 +29,9 @@ animelogon_add_executable(app WIN32
     LIBS animelogon_render webview2::loader mfplat mfreadwrite mfuuid mmdevapi ole32 shell32 shlwapi comdlg32
          dwmapi delayimp windowsapp)
 target_include_directories(app PRIVATE src ${config_src})
+# The agent reads Windows' media controls through C++/WinRT, which needs C++20's <coroutine>:
+# under C++17 it falls back to <experimental/coroutine>, which newer MSVC refuses to compile.
+set_target_properties(app PROPERTIES CXX_STANDARD 20)
 # Windows N has no Media Foundation without the Media Feature Pack, and the elevated helper needs
 # no browser: both are loaded only when used, so the app can say what is missing.
 target_link_options(app PRIVATE /DELAYLOAD:mfplat.dll /DELAYLOAD:mfreadwrite.dll /DELAYLOAD:WebView2Loader.dll)
