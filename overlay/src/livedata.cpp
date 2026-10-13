@@ -18,6 +18,10 @@ constexpr DWORD kNoSession = 0xFFFFFFFF;
 constexpr ULONGLONG kTickMs = 1000;      // how often the console's user and the agent are looked at
 constexpr ULONGLONG kSettingsMs = 5000;  // how often settings.ini's `media` is read again
 constexpr ULONGLONG kWriteMs = 250;      // live.ini is written at most this often
+// How long after an agent ends before another is started. Signing out ends the agent while the
+// console session still has its user for a moment; by now the session is gone, so no agent is
+// started into it only to fail.
+constexpr ULONGLONG kRestartMs = 3000;
 // Interactive users may connect and write; nobody else, and nobody may make another instance.
 constexpr const wchar_t *kPipeSddl = L"D:P(A;;GA;;;SY)(A;;0x12019f;;;IU)";
 
@@ -114,7 +118,7 @@ void LiveData::Tick(DWORD consoleSession) {
         agentSession_ = kNoSession;
         // One that ends quickly and again and again is broken: back off.
         backoff_ = lived < 10000 ? (backoff_ ? (backoff_ * 2 > 300000 ? 300000 : backoff_ * 2) : 5000) : 0;
-        nextTry_ = now + backoff_;
+        nextTry_ = now + (backoff_ > kRestartMs ? backoff_ : kRestartMs);
         Forget(L"the agent ended");
     }
     bool sameUser = false;
