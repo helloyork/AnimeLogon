@@ -27,6 +27,7 @@ struct Preview::State {
     bool mf = false, hasVideo = false, videoReady = false;
     bool author = false;
     double videoTime = -1;
+    std::wstring videoPath;
     bool sent = false;
     float sentTime = -1;
     Inputs sentInputs;
@@ -80,6 +81,7 @@ bool Preview::Open(const WallpaperInfo &w, int width, int height, const skin::Va
     Inputs initial; initial.values=s->values;
     if (!s->host.Start(s->device.Get(),files,width,height,false,why,tier,initial)) return false;
     if (!w.videoPath.empty()) {
+        s->videoPath=w.videoPath;
         s->mf = SUCCEEDED(MFStartup(MF_VERSION)); UINT token=0;
         if (!s->mf || FAILED(MFCreateDXGIDeviceManager(&token,&s->manager)) || FAILED(s->manager->ResetDevice(s->device.Get(),token)) ||
             !s->player.Open(w.videoPath,s->device.Get(),s->manager.Get())) return false;
@@ -109,6 +111,10 @@ bool Preview::Frame(const Inputs &input, bool running, std::vector<uint8_t> *bit
     if (!s_ || Failed(why)) return false;
     if (!s_->still.empty()) { *bitmap=s_->still; return true; }
     auto &s=*s_; s.host.Poll();
+    if (s.hasVideo && input.time < s.sentTime) {
+        s.sent=false; s.videoReady=false; s.videoTime=-1;
+        if (!s.player.Open(s.videoPath,s.device.Get(),s.manager.Get())) { if (why) *why=L"video preview could not rewind"; return false; }
+    }
     const bool received=s.sent && s.host.Ready() && s.host.FrameSequence() >= s.requested;
     std::vector<uint8_t> completed;
     if (received) completed=s.host.Bitmap(why);

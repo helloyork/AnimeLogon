@@ -31,6 +31,7 @@ Inputs ReadInputs(const ipc::Command &c) {
         const LONG sequence = c.sequence; if (sequence & 1) continue;
         MemoryBarrier();
         in.time = c.time; in.day = c.day; in.battery = c.battery; in.progress = c.progress; in.playing = c.playing;
+        in.videoSequence=c.videoSequence;
         const std::string text(c.values, std::min<size_t>(c.valuesBytes, sizeof(c.values)));
         MemoryBarrier(); if (sequence != c.sequence) continue;
         size_t start = 0;
@@ -134,6 +135,7 @@ int wmain(int argc, wchar_t **argv) {
     clock.Active(false);
     samples.clear(); ULONGLONG next = GetTickCount64();
     ComPtr<ID3D11Texture2D> videoCopy;
+    LONG videoSequence=0;
     while (!command->stop) {
         clock.Active(command->running && fps > 0);
         if ((!command->running || fps == 0) && (!command->redraw || command->sequence == status->sequence)) { Sleep(10); next = GetTickCount64(); continue; }
@@ -141,13 +143,16 @@ int wmain(int argc, wchar_t **argv) {
         hr = mutex->AcquireSync(0, 20);
         if (hr == WAIT_TIMEOUT) continue;
         if (hr != S_OK) return fail(L"shared frame synchronization failed", hr);
-        if (videoMutex->AcquireSync(1, 0) == S_OK) {
+        const Inputs in = ReadInputs(*command);
+        if (in.videoSequence != videoSequence) {
+            if (videoMutex->AcquireSync(1,0) != S_OK) { mutex->ReleaseSync(0); Sleep(1); continue; }
             if (!videoCopy) { D3D11_TEXTURE2D_DESC d{}; video->GetDesc(&d); d.MiscFlags = 0; device->CreateTexture2D(&d, nullptr, &videoCopy); }
-            if (videoCopy) context->CopyResource(videoCopy.Get(), video.Get());
+            if (!videoCopy) { videoMutex->ReleaseSync(0); mutex->ReleaseSync(0); return fail(L"cannot allocate the video input copy"); }
+            context->CopyResource(videoCopy.Get(), video.Get());
+            videoSequence=command->videoSequence;
             context->Flush(); videoMutex->ReleaseSync(0);
         }
         const ULONGLONG frameStart = GetTickCount64();
-        const Inputs in = ReadInputs(*command);
         if (!renderer.Draw(in, videoCopy.Get(), output.Get(), scale, &cost, &why)) { mutex->ReleaseSync(1); return fail(why); }
         status->sequence = in.sequence;
         for (size_t i=0;i<renderer.Bounds().size();++i) std::copy(renderer.Bounds()[i].begin(),renderer.Bounds()[i].end(),status->bounds[i]);

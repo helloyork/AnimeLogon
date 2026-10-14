@@ -315,7 +315,9 @@ bool Host::Profile(Tier *tier) const {
 }
 bool Host::UpdateVideo(const std::function<void(ID3D11Texture2D *)> &draw) {
     if (!s_ || s_->videoMutex->AcquireSync(0, 0) != S_OK) return false;
-    draw(s_->video.Get()); s_->context->Flush(); s_->videoMutex->ReleaseSync(1); return true;
+    draw(s_->video.Get()); s_->context->Flush();
+    InterlockedIncrement(&s_->command->videoSequence);
+    return s_->videoMutex->ReleaseSync(1) == S_OK;
 }
 bool Device(ComPtr<ID3D11Device> *out, std::wstring *why) {
     D3D_FEATURE_LEVEL level;

@@ -8,6 +8,7 @@
 namespace animelogon::scene {
 struct Inputs {
     LONG sequence = 0;
+    LONG videoSequence = 0;
     float time = 0, day = 0, battery = -1, progress = 0, playing = 0;
     skin::Values values;
 };
