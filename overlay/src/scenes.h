@@ -16,6 +16,7 @@ public:
     void Unlocked();
     void Fail(const std::wstring &id, const std::wstring &why);
     void FailAll(const std::wstring &why);
+    bool Static(const std::wstring &id) const;
     Presenter::Picture Picture(const plan::Wallpaper &wallpaper) const;
     void Video(const std::wstring &id, Presenter &presenter, const VideoPlayer::Frame &frame, int width, int height);
 private:
@@ -25,6 +26,7 @@ private:
         ULONGLONG last = 0, fade = 0;
         bool failed = false, active = false, everReady = false;
         bool blocked = false;
+        bool staticOnly = false;
         animelogon::Scaling fit = animelogon::Scaling::Fill;
     };
     std::map<std::wstring, Entry> entries_;

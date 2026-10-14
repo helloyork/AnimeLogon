@@ -29,6 +29,7 @@ bool Literal(const std::wstring &s, Type type, double lo = -1e6, double hi = 1e6
     double n;
     if (Number(s, &n)) return n >= lo && n <= hi;
     if (type == Type::Float) return false;
+    if (s.find(L',') != std::wstring::npos) return !Components(s).empty();
     if (s == L"true" || s == L"false") return true;
     if ((s.size() == 7 || s.size() == 9) && s[0] == L'#') {
         for (size_t i = 1; i < s.size(); ++i) if (!iswxdigit(s[i])) return false;
@@ -222,21 +223,40 @@ const File *Find(const Files &files, const std::wstring &name) {
 bool Accepts(const Document &d, const std::wstring &id, const std::wstring &v) {
     const auto *s = d.controls.Find(id); return s && skin::IsValue(*s, v);
 }
-std::array<float, 4> Value(const Document &d, const skin::Values &values, const std::wstring &binding) {
+std::wstring BindingText(const Document &d, const skin::Values &values, const std::wstring &binding) {
     std::wstring s = binding;
     if (!s.empty() && s[0] == L'$') {
         const auto *control = d.controls.Find(s.substr(1));
         if (!control) return {};
         s = skin::ValueOf(*control, values);
     }
-    if (s == L"true") return {1, 0, 0, 0};
-    if (s == L"false") return {};
+    return s;
+}
+std::vector<float> Components(const std::wstring &s) {
+    if (s == L"true") return {1};
+    if (s == L"false") return {0};
     if (!s.empty() && s[0] == L'#') {
+        if (s.size() != 7 && s.size() != 9) return {};
+        for (size_t i = 1; i < s.size(); ++i) if (!iswxdigit(s[i])) return {};
         const uint32_t rgb = wcstoul(s.substr(1, 6).c_str(), nullptr, 16);
         const float a = s.size() == 9 ? wcstoul(s.substr(7, 2).c_str(), nullptr, 16) / 255.f : 1.f;
         return {(rgb >> 16) / 255.f, ((rgb >> 8) & 255) / 255.f, (rgb & 255) / 255.f, a};
     }
-    double n = 0; Number(s, &n); return {(float)n, 0, 0, 0};
+    std::vector<float> result; size_t start = 0;
+    while (start <= s.size()) {
+        const size_t end = s.find(L',',start);
+        double n = 0;
+        if (result.size() == 4 || !Number(s.substr(start,end == std::wstring::npos ? s.size()-start : end-start),&n)) return {};
+        result.push_back((float)n);
+        if (end == std::wstring::npos) break;
+        start = end+1;
+    }
+    return result;
+}
+std::array<float, 4> Value(const Document &d, const skin::Values &values, const std::wstring &binding) {
+    std::array<float,4> result{};
+    const auto parts = Components(BindingText(d,values,binding));
+    std::copy(parts.begin(),parts.end(),result.begin()); return result;
 }
 std::vector<uint8_t> Pack(const Files &files) {
     if (files.size() > 40) return {};

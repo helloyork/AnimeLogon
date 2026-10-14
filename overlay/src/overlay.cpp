@@ -377,6 +377,7 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
         for (const Presenter::Target &t : targets) {
             const plan::Wallpaper &w = t.wallpaper;
             if ((w.source != plan::Source::Video && (w.source != plan::Source::Scene || w.videoPath.empty())) || players.count(w.id) || unplayable.count(w.id)) continue;
+            if (w.source == plan::Source::Scene && scenes.Static(w.id)) continue;
             auto player = std::make_shared<VideoPlayer>();
             if (player->Open(w.source == plan::Source::Scene ? w.videoPath : w.path, presenter.device(), presenter.videoManager())) {
                 players[w.id] = player;
@@ -598,7 +599,7 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
     if (!opt.windowed && !done) {
         AudioSystem::RememberConsoleDefault();
         const plan::Wallpaper &first = targets.front().wallpaper;
-        if ((first.source == plan::Source::Video || first.source == plan::Source::Scene) && !first.audioPath.empty()) {
+        if ((first.source == plan::Source::Video || (first.source == plan::Source::Scene && !scenes.Static(first.id))) && !first.audioPath.empty()) {
             audio.PlayVideoTrack(first.audioPath, 0.0, kFadeSeconds);
             track = first.id;
         }
@@ -792,6 +793,7 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
             bool fresh = lit || componentsChanged || g_overlay.woke || componentsFading;
             animelogon::scene::Inputs sceneInputs; sceneInputs.time = (float)t;
             fresh = scenes.Tick(sceneInputs,draw,(float)(1/refresh)) || fresh;
+            if (!track.empty() && scenes.Static(track)) { audio.FadeOut(.2f); track.clear(); }
             if (componentsFading) {
                 const float k = std::min(1.0f, (float)(now - start) / 1000.0f / kClockFadeInSeconds);
                 componentsFading = k < 1.0f;

@@ -8,6 +8,8 @@
 #include <algorithm>
 #include <atomic>
 #include <cstring>
+#include <cmath>
+#include <mutex>
 #include "animelogon/bitmap.h"
 #include "animelogon/log.h"
 #include "animelogon/paths.h"
@@ -17,6 +19,7 @@ using Microsoft::WRL::ComPtr;
 namespace animelogon::scene {
 namespace {
 std::atomic<unsigned> serial{0};
+std::mutex stationMutex;
 std::wstring Access() {
     HANDLE token = nullptr; DWORD n = 0; std::wstring sid;
     if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) {
@@ -70,6 +73,7 @@ struct Host::State {
         if (!profile.empty()) DeleteAppContainerProfile(profile.c_str());
     }
     bool Spawn(const std::vector<HANDLE> &handles, std::wstring *why) {
+        std::lock_guard<std::mutex> stationLock(stationMutex);
         std::wstring failure;
         auto record = [&](bool ok, const wchar_t *stage) {
             if (!ok && failure.empty()) failure = Format(L"%s (%lu)", stage, GetLastError());
@@ -143,8 +147,21 @@ struct Host::State {
         std::wstring cmd = L"\"" + exe + L"\"";
         for (HANDLE h : handles) cmd += L" " + std::to_wstring(reinterpret_cast<uintptr_t>(h));
         PROCESS_INFORMATION pi{};
+        wchar_t system[MAX_PATH]{}; GetWindowsDirectoryW(system,MAX_PATH);
+        std::wstring environment;
+        // The LowBox launcher expands the standard profile directories. No application
+        // environment, credentials or custom PATH entries are inherited.
+        for (const wchar_t *name : {L"ALLUSERSPROFILE",L"APPDATA",L"LOCALAPPDATA",L"PATH",L"ProgramData",
+             L"PUBLIC",L"SystemDrive",L"SystemRoot",L"TEMP",L"TMP",L"USERDOMAIN",L"USERNAME",L"USERPROFILE",L"WINDIR"}) {
+            wchar_t value[32768]{};
+            if (!wcscmp(name,L"PATH")) wcscpy_s(value,(std::wstring(system)+L"\\System32").c_str());
+            else if (!GetEnvironmentVariableW(name,value,(DWORD)std::size(value))) continue;
+            environment += name; environment += L'='; environment += value; environment += L'\0';
+        }
+        environment += L'\0';
         if (ok) ok = CreateProcessAsUserW(token, exe.c_str(), cmd.data(), nullptr, nullptr, TRUE,
-            EXTENDED_STARTUPINFO_PRESENT | CREATE_NO_WINDOW | CREATE_SUSPENDED, nullptr, nullptr, &si.StartupInfo, &pi) != FALSE;
+            EXTENDED_STARTUPINFO_PRESENT | CREATE_NO_WINDOW | CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT,
+            environment.data(), system, &si.StartupInfo, &pi) != FALSE;
         const DWORD error = GetLastError();
         record(ok, L"starting scene.exe");
         if (ok) {
@@ -164,7 +181,7 @@ struct Host::State {
 Host::Host() = default;
 Host::~Host() = default;
 void Host::Stop() { s_.reset(); }
-bool Host::Start(ID3D11Device *device, const Files &files, int width, int height, bool importing, std::wstring *why) {
+bool Host::Start(ID3D11Device *device, const Files &files, int width, int height, bool importing, std::wstring *why, const Tier &tier) {
     Stop();
     if (!device || width <= 0 || height <= 0 || width > 16384 || height > 16384 || (uint64_t)width * height > 64 * 1024 * 1024) return Fail(why, L"invalid scene canvas");
     const auto input = Pack(files);
@@ -190,6 +207,9 @@ bool Host::Start(ID3D11Device *device, const Files &files, int width, int height
         s->command->adapter = ad.AdapterLuid; s->command->width = width; s->command->height = height;
         s->command->inputBytes = (uint32_t)input.size(); s->command->outputBytes = (uint32_t)s->capacity;
         s->command->importing = importing;
+        s->command->calibrated = tier.calibrated;
+        s->command->startFps = tier.fps == 0 || tier.fps == 30 ? tier.fps : 60;
+        s->command->startScale = std::isfinite(tier.scale) ? std::clamp(tier.scale,.5f,1.f) : 1.f;
     }
     auto texture = [&](ComPtr<ID3D11Texture2D> &t, ComPtr<IDXGIKeyedMutex> &mutex, HANDLE *h, DWORD access) {
         D3D11_TEXTURE2D_DESC d{}; d.Width = width; d.Height = height; d.MipLevels = d.ArraySize = 1;
@@ -269,6 +289,12 @@ std::vector<uint8_t> Host::Bitmap(std::wstring *why) const {
     return bitmap::Build(s_->width, s_->height, pixels.data(), pixels.size());
 }
 float Host::Milliseconds() const { return s_ ? s_->status->milliseconds : 0; }
+bool Host::Profile(Tier *tier) const {
+    if (!Ready()) return false;
+    const float fps = s_->status->fps, scale = s_->status->scale;
+    if ((fps != 0 && fps != 30 && fps != 60) || !std::isfinite(scale) || scale < .5f || scale > 1) return false;
+    *tier = {true,(int)fps,scale}; return true;
+}
 bool Host::UpdateVideo(const std::function<void(ID3D11Texture2D *)> &draw) {
     if (!s_ || s_->videoMutex->AcquireSync(0, 0) != S_OK) return false;
     draw(s_->video.Get()); s_->context->Flush(); s_->videoMutex->ReleaseSync(1); return true;

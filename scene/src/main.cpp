@@ -7,12 +7,24 @@
 #include <cmath>
 #include <cstring>
 #include <vector>
+#include <mmsystem.h>
 #include "animelogon/text.h"
 using Microsoft::WRL::ComPtr;
 using namespace animelogon;
 using namespace animelogon::scene;
 namespace {
-float P95(std::vector<float> samples) { std::sort(samples.begin(), samples.end()); return samples[(samples.size()-1)*95/100]; }
+class FrameClock {
+public:
+    void Active(bool active) {
+        if (active == active_) return;
+        if (active) active_ = timeBeginPeriod(1) == TIMERR_NOERROR;
+        else { timeEndPeriod(1); active_ = false; }
+    }
+    ~FrameClock() { Active(false); }
+private:
+    bool active_ = false;
+};
+float P95(std::vector<float> samples) { std::sort(samples.begin(), samples.end()); return samples[(size_t)std::ceil(samples.size()*.95)-1]; }
 Inputs ReadInputs(const ipc::Command &c) {
     Inputs in;
     for (int attempt = 0; attempt < 3; ++attempt) {
@@ -80,44 +92,48 @@ int wmain(int argc, wchar_t **argv) {
         memcpy(reinterpret_cast<uint8_t *>(status)+sizeof(ipc::Status), packed.data(), packed.size());
         status->normalizedBytes = (uint32_t)packed.size();
     }
-    float cost = 0, scale = 1, fps = 60;
+    float cost = 0, scale = command->calibrated ? std::clamp(command->startScale,.5f,1.f) : 1;
+    float fps = command->calibrated ? (float)command->startFps : 60;
+    FrameClock clock; clock.Active(true);
     hr = mutex->AcquireSync(0, 1500);
     if (hr != S_OK) return fail(L"cannot acquire the first scene frame", hr);
-    if (!renderer.Draw({}, nullptr, output.Get(), 1, &cost, &why)) { mutex->ReleaseSync(1); return fail(why); }
+    if (!renderer.Draw(ReadInputs(*command), nullptr, output.Get(), scale, &cost, &why)) { mutex->ReleaseSync(1); return fail(why); }
     context->Flush(); mutex->ReleaseSync(1); InterlockedIncrement(&status->frames);
     // Measure actual GPU completion and CPU work, independently of the parent and refresh timer.
     D3D11_TEXTURE2D_DESC td{}; output->GetDesc(&td); td.MiscFlags = 0;
     ComPtr<ID3D11Texture2D> trial;
     if (FAILED(device->CreateTexture2D(&td, nullptr, &trial))) return fail(L"cannot allocate trial frame");
     std::vector<float> samples;
-    for (int i = 0; i < 32 && !command->stop; ++i) {
-        Inputs in; in.time = i/60.f;
+    for (int i = 0; !command->calibrated && i < 32 && !command->stop; ++i) {
+        Inputs in; in.time = renderer.TrialSeconds()*i/32;
         if (!renderer.Draw(in, nullptr, trial.Get(), scale, &cost, &why)) return fail(why);
         samples.push_back(cost);
     }
-    if (samples.empty()) return 0;
-    status->milliseconds = P95(samples);
-    if (status->milliseconds > 8) fps = 30;
-    if (status->milliseconds > 16) scale = std::max(.5f, std::sqrt(16/status->milliseconds));
-    while (scale < 1) {
+    if (!command->calibrated && samples.empty()) return 0;
+    status->milliseconds = samples.empty() ? cost : P95(samples);
+    if (!command->calibrated && status->milliseconds > 8) fps = 30;
+    if (!command->calibrated && status->milliseconds > 16) scale = std::max(.5f, std::sqrt(16/status->milliseconds));
+    while (!command->calibrated && scale < 1) {
         samples.clear();
         for (int i = 0; i < 16 && !command->stop; ++i) {
-            Inputs in; in.time = i/30.f;
+            Inputs in; in.time = renderer.TrialSeconds()*i/16;
             if (!renderer.Draw(in, nullptr, trial.Get(), scale, &cost, &why)) return fail(why);
             samples.push_back(cost);
         }
         if (samples.empty()) return 0;
         status->milliseconds = P95(samples);
         if (status->milliseconds <= 16.f) break;
-        if (scale <= .5f) return fail(Format(L"scene cannot meet the frame budget (%.2f ms at %.2f scale)", status->milliseconds, scale));
+        if (scale <= .5f) { fps = 0; break; }
         scale = std::max(.5f, std::min(scale*.8f, scale*std::sqrt(16/status->milliseconds)));
     }
     status->scale = scale; status->fps = fps;
     InterlockedExchange(&status->state, 2);
+    clock.Active(false);
     samples.clear(); ULONGLONG next = GetTickCount64();
     ComPtr<ID3D11Texture2D> videoCopy;
     while (!command->stop) {
-        if (!command->running) { Sleep(10); next = GetTickCount64(); continue; }
+        clock.Active(command->running && fps > 0);
+        if (!command->running || fps == 0) { Sleep(10); next = GetTickCount64(); continue; }
         if (GetTickCount64() < next) { Sleep(1); continue; }
         hr = mutex->AcquireSync(0, 20);
         if (hr == WAIT_TIMEOUT) continue;

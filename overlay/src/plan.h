@@ -40,6 +40,7 @@ struct Wallpaper {
     std::wstring audioPath;  // a video's audio.wav, when it has sound
     std::wstring sceneDir, videoPath;
     animelogon::skin::Values values;
+    int sceneTrialWidth = 0, sceneTrialHeight = 0, sceneFps = 60, sceneScale = 100;
     animelogon::Scaling fit = animelogon::Scaling::Fill;
 };
 

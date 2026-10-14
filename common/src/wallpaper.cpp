@@ -128,6 +128,9 @@ std::wstring SerializeWallpaperInfo(const WallpaperInfo &w) {
         out += Format(L"frame_rate = %u/%u\r\nduration_ms = %lld\r\naudio = %s\r\n", w.frameRateNum, w.frameRateDen,
                       w.durationMs, w.hasAudio ? L"true" : L"false");
     if (w.kind == WallpaperKind::Scene) out += std::wstring(L"video = ") + (w.sceneVideo ? L"true\r\n" : L"false\r\n");
+    if (w.kind == WallpaperKind::Scene && w.sceneTrialWidth > 0)
+        out += Format(L"scene_trial_width = %d\r\nscene_trial_height = %d\r\nscene_fps = %d\r\nscene_scale = %d\r\nscene_p95_us = %d\r\n",
+            w.sceneTrialWidth,w.sceneTrialHeight,w.sceneFps,w.sceneScale,w.sceneP95Us);
     if (!w.sha256.empty()) out += L"sha256 = " + w.sha256 + L"\r\n";
     return out;
 }
@@ -140,6 +143,7 @@ bool ParseWallpaperInfo(const std::wstring &text, WallpaperInfo *info, std::wstr
     WallpaperInfo w;
     bool haveType = false, haveWidth = false, haveHeight = false, haveRate = false, haveDuration = false;
     bool badHash = false;
+    bool badTier = false;
     std::wstring type;
     size_t start = 0;
     while (start <= text.size()) {
@@ -161,6 +165,19 @@ bool ParseWallpaperInfo(const std::wstring &text, WallpaperInfo *info, std::wstr
         else if (key == L"duration_ms" && ParseInt(value, &n) && n > 0) w.durationMs = n, haveDuration = true;
         else if (key == L"audio") w.hasAudio = value == L"true";
         else if (key == L"video") w.sceneVideo = value == L"true";
+        else if (key == L"scene_trial_width" || key == L"scene_trial_height" || key == L"scene_fps" || key == L"scene_scale" || key == L"scene_p95_us") {
+            if (!ParseInt(value,&n)) badTier = true;
+            else if (key == L"scene_trial_width" || key == L"scene_trial_height") {
+                if (n <= 0 || n > 16384) badTier = true;
+                else (key == L"scene_trial_width" ? w.sceneTrialWidth : w.sceneTrialHeight) = (int)n;
+            } else if (key == L"scene_fps") {
+                if (n != 0 && n != 30 && n != 60) badTier = true; else w.sceneFps = (int)n;
+            } else if (key == L"scene_scale") {
+                if (n < 50 || n > 100) badTier = true; else w.sceneScale = (int)n;
+            } else {
+                if (n < 0 || n > 10000000) badTier = true; else w.sceneP95Us = (int)n;
+            }
+        }
         else if (key == L"sha256") {
             badHash = !IsLowerHex(value, 64);
             if (!badHash) w.sha256 = value;
@@ -182,6 +199,8 @@ bool ParseWallpaperInfo(const std::wstring &text, WallpaperInfo *info, std::wstr
     else return fail(L"has an unknown type");
     if (!haveWidth || !haveHeight) return fail(L"has no valid width and height");
     if (badHash) return fail(L"has a bad sha256");
+    if (w.kind == WallpaperKind::Scene && (badTier || (w.sceneTrialWidth == 0) != (w.sceneTrialHeight == 0) ||
+        (uint64_t)w.sceneTrialWidth*w.sceneTrialHeight > 64*1024*1024)) return fail(L"has an invalid scene trial profile");
     if (w.kind == WallpaperKind::Image || (w.kind == WallpaperKind::Scene && !w.sceneVideo)) {
         if (w.width > kMaxImageSide || w.height > kMaxImageSide) return fail(L"describes an image that is too large");
         w.frameRateNum = 0;

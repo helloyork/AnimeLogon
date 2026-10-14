@@ -44,6 +44,9 @@ std::vector<std::wstring> Assets(const Document &document, bool compiled);
 std::wstring BytecodeName(const std::wstring &source);
 const File *Find(const Files &files, const std::wstring &name);
 bool Accepts(const Document &document, const std::wstring &id, const std::wstring &value);
+std::wstring BindingText(const Document &document, const skin::Values &values, const std::wstring &binding);
+// Scalars, colors and two to four comma-separated finite coordinates.
+std::vector<float> Components(const std::wstring &literal);
 std::array<float, 4> Value(const Document &document, const skin::Values &values, const std::wstring &binding);
 // The binary envelope has bounded counts, names, and lengths; it contains no pointers.
 std::vector<uint8_t> Pack(const Files &files);

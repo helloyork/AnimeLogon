@@ -31,6 +31,8 @@ struct WallpaperInfo {
     long long durationMs = 0;
     bool hasAudio = false;
     bool sceneVideo = false;
+    int sceneTrialWidth = 0, sceneTrialHeight = 0;
+    int sceneFps = 60, sceneScale = 100, sceneP95Us = 0;
     // SHA-256 of the normalised payload as 64 lowercase hex digits: the bytes of image.bmp, or
     // of video.mp4 followed by those of audio.wav. The elevated helper fills it in and uses it to
     // find a wallpaper that is already installed. Empty when unknown.

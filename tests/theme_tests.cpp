@@ -388,6 +388,18 @@ TEST(ComponentAcceptsWhatItHas) {
     CHECK(!skin::Accepts(s, L"p1.l1.t1.value", L"{date}"));
 }
 
+TEST(SceneTrialProfileRejectsInvalidBudgetAndDimensions) {
+    WallpaperInfo w; w.kind = WallpaperKind::Scene; w.width = 1920; w.height = 1080;
+    w.sceneTrialWidth = 3840; w.sceneTrialHeight = 2160; w.sceneFps = 30; w.sceneScale = 50; w.sceneP95Us = 12345;
+    WallpaperInfo again; std::wstring why;
+    const auto text = SerializeWallpaperInfo(w);
+    CHECK(ParseWallpaperInfo(text,&again,&why));
+    CHECK(again.sceneTrialWidth == 3840 && again.sceneTrialHeight == 2160 && again.sceneFps == 30 && again.sceneScale == 50);
+    CHECK(!ParseWallpaperInfo(text+L"scene_fps=59\n",&again,&why));
+    CHECK(!ParseWallpaperInfo(text+L"scene_scale=49\n",&again,&why));
+    CHECK(!ParseWallpaperInfo(text+L"scene_p95_us=nan\n",&again,&why));
+    CHECK(!ParseWallpaperInfo(text+L"scene_trial_width=0\n",&again,&why));
+}
 TEST(WallpaperInfoRoundTrip) {
     WallpaperInfo v;
     v.kind = WallpaperKind::Video;

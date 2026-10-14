@@ -1,4 +1,5 @@
 #include "renderer.h"
+#include "lottie.h"
 #include <d3dcompiler.h>
 #include <d3d11shader.h>
 #include <wrl/client.h>
@@ -121,6 +122,7 @@ struct Renderer::State {
     std::array<Texture, 4> images;
     Texture canvas[2], video;
     std::map<const Layer *, Texture> effects;
+    std::map<const Layer *, std::unique_ptr<Lottie>> lotties;
     std::map<std::wstring, ComPtr<ID3D11PixelShader>> shaders;
     ComPtr<ID3D11Query> disjoint, begin, end;
     bool Make(Texture *t, int w, int h, const uint8_t *pixels = nullptr) {
@@ -162,11 +164,17 @@ struct Renderer::State {
             for (size_t i = 0; i < d.images.size(); ++i) if (d.images[i].id == l.image) { *out = &images[i]; return true; }
         }
         if (l.kind == Kind::Video) { *out = &video; return true; }
-        if (l.kind == Kind::Lottie) return Fail(why, L"this renderer does not yet support Lottie");
         const int h = std::max(1, (int)(height * scale * (l.full ? 1 : l.height / 100)));
-        const int w = std::max(1, (int)(h * (double)width / height));
+        const float aspect = l.kind == Kind::Lottie && !l.full ? lotties.at(&l)->Aspect() : (float)width/height;
+        const int w = std::max(1, (int)(h * aspect));
         auto &effect = effects[&l];
         if (!Make(&effect, w, h)) return Fail(why, L"cannot allocate the effect texture");
+        if (l.kind == Kind::Lottie) {
+            auto &animation = *lotties.at(&l);
+            if (!animation.Draw(d,l,in,w,h,why)) return false;
+            context->UpdateSubresource(effect.texture.Get(),0,nullptr,animation.Pixels(),w*4,0);
+            *out = &effect; return true;
+        }
         Constants c; c.time = in.time; c.resolution[0] = (float)w; c.resolution[1] = (float)h;
         c.day = in.day; c.battery = in.battery; c.playback = in.progress; c.playing = in.playing;
         for (const auto &p : l.params) {
@@ -182,6 +190,11 @@ struct Renderer::State {
 Renderer::Renderer() = default;
 Renderer::~Renderer() = default;
 const Files &Renderer::Normalized() const { return s_->normalized; }
+float Renderer::TrialSeconds() const {
+    float seconds = 4;
+    for (const auto &[layer,animation] : s_->lotties) seconds = std::max(seconds,animation->Duration());
+    return std::min(120.f,seconds);
+}
 bool Renderer::Open(ID3D11Device *device, Files files, bool importing, int width, int height, std::wstring *why) {
     auto s = std::make_unique<State>(); s->device = device; device->GetImmediateContext(&s->context);
     s->width = width; s->height = height;
@@ -247,6 +260,11 @@ bool Renderer::Open(ID3D11Device *device, Files files, bool importing, int width
     };
     if (!shader(d.base)) return false;
     for (const auto &l : d.layers) if (!shader(l)) return false;
+    for (const auto &l : d.layers) if (l.kind == Kind::Lottie) {
+        const auto *f = Find(files,l.file); auto animation = std::make_unique<Lottie>();
+        if (!f || !animation->Open(*f,d,l,why)) return false;
+        s->lotties[&l] = std::move(animation);
+    }
     if (d.base.kind == Kind::Video) {
         const auto *f = Find(files, L"images/video.bmp");
         if (!f || !s->Bitmap(&s->video, *f, why)) return false;
@@ -295,6 +313,7 @@ bool Renderer::Draw(const Inputs &in, ID3D11Texture2D *video, ID3D11Texture2D *o
         if (Value(s.d, in.values, l.when)[0] == 0) continue;
         if (!s.LayerFrame(l, in, &s.canvas[current], &layer, scale, why)) return false;
         b = Blit{}; b.opacity = std::clamp(Value(s.d, in.values, l.opacity)[0], 0.f, 1.f); b.blend = (float)l.blend;
+        b.premul = l.kind == Kind::Lottie ? 1.f : 0.f;
         if (!l.full) {
             b.rect[3] = l.height / 100; b.rect[2] = b.rect[3] * ((float)layer->width / layer->height) / ((float)s.width / s.height);
             b.rect[0] = (l.anchor % 3) * .5f * (1-b.rect[2]) + l.x / 100;

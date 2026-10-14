@@ -23,6 +23,8 @@ Wallpaper WallpaperOf(const ResolvedTheme &theme) {
         w.sceneDir = info.scenePath.substr(0, info.scenePath.find_last_of(L'\\'));
         w.videoPath = info.videoPath;
         w.audioPath = info.audioPath;
+        w.sceneTrialWidth = info.sceneTrialWidth; w.sceneTrialHeight = info.sceneTrialHeight;
+        w.sceneFps = info.sceneFps; w.sceneScale = info.sceneScale;
     } else if (info.kind == animelogon::WallpaperKind::Image) {
         w.source = Source::Image;
         w.path = info.imagePath;

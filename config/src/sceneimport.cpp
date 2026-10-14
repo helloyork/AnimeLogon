@@ -5,6 +5,7 @@
 #include <wrl/client.h>
 #include <algorithm>
 #include <cstring>
+#include <cmath>
 #include <set>
 #include "animelogon/bitmap.h"
 #include "animelogon/components.h"
@@ -38,6 +39,21 @@ bool MediaFoundation() {
         FreeLibrary(m); return SUCCEEDED(MFStartup(MF_VERSION, MFSTARTUP_LITE));
     }();
     return ready;
+}
+std::pair<int,int> TrialSize() {
+    RECT wall{}; std::pair<int,int> largest{1920,1080}; int64_t area = 0;
+    DISPLAY_DEVICEW display{}; display.cb = sizeof(display);
+    for (DWORD i = 0; EnumDisplayDevicesW(nullptr,i,&display,0); ++i) {
+        if (!(display.StateFlags & DISPLAY_DEVICE_ATTACHED_TO_DESKTOP)) continue;
+        DEVMODEW mode{}; mode.dmSize = sizeof(mode);
+        if (!EnumDisplaySettingsW(display.DeviceName,ENUM_CURRENT_SETTINGS,&mode)) continue;
+        const int w = mode.dmPelsWidth, h = mode.dmPelsHeight;
+        RECT rect{mode.dmPosition.x,mode.dmPosition.y,mode.dmPosition.x+w,mode.dmPosition.y+h};
+        UnionRect(&wall,&wall,&rect);
+        if ((int64_t)w*h > area) { largest = {w,h}; area = (int64_t)w*h; }
+    }
+    if (LoadSettings(false).monitorMode == MonitorMode::Span && area) largest = {wall.right-wall.left,wall.bottom-wall.top};
+    return largest;
 }
 using Picture = image::Picture;
 bool FirstFrame(const std::wstring &path, Picture *out) {
@@ -156,7 +172,11 @@ Result SceneWallpaper(package::Reader &reader, const std::wstring &dir, const st
     }
     if (cancel) return Error(L"已取消。");
     ComPtr<ID3D11Device> device; scene::Host renderer;
-    if (!scene::Device(&device, &why) || !renderer.Start(device.Get(), files, info.width, info.height, true, &why)) return Error(why);
+    const auto [trialWidth,trialHeight] = TrialSize();
+    const double posterScale = std::min({1.0,1920.0/trialWidth,1080.0/trialHeight});
+    info.width = std::max(1,(int)std::lround(trialWidth*posterScale));
+    info.height = std::max(1,(int)std::lround(trialHeight*posterScale));
+    if (!scene::Device(&device, &why) || !renderer.Start(device.Get(), files, trialWidth, trialHeight, true, &why)) return Error(why);
     const ULONGLONG deadline = GetTickCount64()+30000;
     while (!renderer.Ready() && GetTickCount64()<deadline && !cancel) {
         renderer.Poll(); if (renderer.Failed(&why)) return Error(why); Sleep(5);
@@ -165,7 +185,26 @@ Result SceneWallpaper(package::Reader &reader, const std::wstring &dir, const st
     if (!renderer.Ready()) return Error(L"场景试画超过 30 秒。");
     scene::Files normalized;
     if (!renderer.Normalized(&normalized,&why)) return Error(why);
-    const auto still = renderer.Bitmap(&why);
+    scene::Tier tier;
+    const float milliseconds = renderer.Milliseconds();
+    if (!renderer.Profile(&tier) || !std::isfinite(milliseconds) || milliseconds < 0 || milliseconds > 10000) return Error(L"试画返回了无效的性能档位。");
+    info.sceneTrialWidth = trialWidth; info.sceneTrialHeight = trialHeight;
+    info.sceneFps = tier.fps; info.sceneScale = (int)std::lround(tier.scale*100);
+    info.sceneP95Us = (int)std::lround(milliseconds*1000);
+    std::vector<uint8_t> still;
+    if (trialWidth == info.width && trialHeight == info.height) still = renderer.Bitmap(&why);
+    else {
+        renderer.Stop();
+        scene::Tier poster{true,0,1};
+        if (!renderer.Start(device.Get(),normalized,info.width,info.height,false,&why,poster)) return Error(why);
+        const ULONGLONG until = GetTickCount64()+30000;
+        while (!renderer.Ready() && GetTickCount64()<until && !cancel) {
+            renderer.Poll(); if (renderer.Failed(&why)) return Error(why); Sleep(5);
+        }
+        if (cancel) return Error(L"已取消。");
+        if (!renderer.Ready()) return Error(L"静止画面试画超过 30 秒。");
+        still = renderer.Bitmap(&why);
+    }
     if (still.empty()) return Error(L"无法生成静止画面。");
     // Copy and recheck the child's envelope before making paths from it.
     const auto *sceneXml = scene::Find(normalized,L"scene.xml"); scene::Document checked;
@@ -182,7 +221,7 @@ Result SceneWallpaper(package::Reader &reader, const std::wstring &dir, const st
         if (!paths::CreateDirectories(path.substr(0,path.find_last_of(L'\\'))) || !Write(path,f.bytes)) return Error(L"无法写入临时文件。");
     }
     if (!Write(dir+L"\\still.bmp",still) || !Text(dir+L"\\wallpaper.ini",ToUtf8(SerializeWallpaperInfo(info)))) return Error(L"无法保存静止画面。");
-    ALOG(L"import: scene trial p95 %.2f ms at 1920x1080", renderer.Milliseconds());
+    ALOG(L"import: scene trial p95 %.2f ms at %dx%d, %d fps, %.2f scale", milliseconds,trialWidth,trialHeight,tier.fps,tier.scale);
     Result r; r.ok = true; r.name = info.name; if (progress) progress(1); return r;
 }
 Result Scene(const std::wstring &source, const std::wstring &dir, const std::atomic<bool> &cancel, const Progress &progress) {

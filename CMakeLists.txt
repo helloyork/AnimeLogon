@@ -33,6 +33,7 @@ add_link_options(/MANIFESTUAC:NO "$<$<CONFIG:Release>:/DEBUG;/OPT:REF;/OPT:ICF>"
 configure_file(res/version.h.in ${PROJECT_BINARY_DIR}/include/animelogon/version.h @ONLY)
 
 add_subdirectory(vendor/webview2)
+add_subdirectory(vendor/thorvg)
 
 include(cmake/AnimeLogon.cmake)
 

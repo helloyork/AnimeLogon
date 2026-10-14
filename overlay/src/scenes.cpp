@@ -59,6 +59,11 @@ void Scenes::Prepare(Presenter &presenter, const plan::Plan &plan) {
         if (added) { e.failures = saved_[id]; e.blocked = savedBlocked_.count(id) != 0; }
         if (e.host && e.width == size.first && e.height == size.second) continue;
         e.host.reset(); e.width = size.first; e.height = size.second; e.fit = wallpapers[id]->fit;
+        e.staticOnly = wallpapers[id]->sceneFps == 0;
+        if (e.staticOnly) {
+            if (added) ALOG(L"scene: %s uses its static image because the import trial exceeded the frame budget at half resolution",id.c_str());
+            continue;
+        }
         if (e.failures >= 3) {
             if (added) ALOG(L"scene: %s disabled after three consecutive failed locks; waiting for a wallpaper change",id.c_str());
             continue;
@@ -66,8 +71,15 @@ void Scenes::Prepare(Presenter &presenter, const plan::Plan &plan) {
         if (e.blocked) continue;
         scene::Files files; scene::Document document; std::wstring why;
         auto host = std::make_unique<scene::Host>();
+        const auto &w = *wallpapers[id];
+        scene::Tier tier{w.sceneTrialWidth > 0,w.sceneFps,w.sceneScale/100.f};
+        if (tier.calibrated) {
+            const double ratio = std::sqrt((double)w.sceneTrialWidth*w.sceneTrialHeight/((double)e.width*e.height));
+            tier.scale = std::clamp((float)(tier.scale*ratio),.5f,1.f);
+        }
         if (scene::LoadFiles(wallpapers[id]->sceneDir,true,&files,&document,&why) &&
-            host->Start(presenter.device(),files,e.width,e.height,false,&why)) {
+            host->Start(presenter.device(),files,e.width,e.height,false,&why,tier)) {
+            e.fit = document.base.fit;
             e.host = std::move(host); e.last = GetTickCount64(); e.everReady = false;
             e.failed = false;
         } else {
@@ -80,7 +92,7 @@ void Scenes::Prepare(Presenter &presenter, const plan::Plan &plan) {
 void Scenes::Begin() {
     live_ = true;
     for (auto &[id,e] : entries_) {
-        e.active = e.failures < 3 && !e.blocked; e.fade = 0; e.last = GetTickCount64();
+        e.active = e.failures < 3 && !e.blocked && !e.staticOnly; e.fade = 0; e.last = GetTickCount64();
         if (e.active && e.failed) { e.failed = false; Fail(id,L"renderer could not be prepared"); }
     }
 }
@@ -93,6 +105,10 @@ void Scenes::Fail(const std::wstring &id, const std::wstring &why) {
     if (e.failures == 3) ALOG(L"scene: %s disabled after three consecutive failed locks; waiting for a wallpaper change",id.c_str());
 }
 void Scenes::FailAll(const std::wstring &why) { for (const auto &[id,e] : entries_) Fail(id,why); }
+bool Scenes::Static(const std::wstring &id) const {
+    const auto it = entries_.find(id);
+    return it != entries_.end() && (it->second.staticOnly || it->second.failed || it->second.blocked || it->second.failures >= 3);
+}
 bool Scenes::Tick(const scene::Inputs &inputs, bool draw, float refresh) {
     bool changed = false; const ULONGLONG now = GetTickCount64();
     for (auto &[id,e] : entries_) {

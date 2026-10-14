@@ -57,6 +57,16 @@ TEST(SceneEnvelopeRejectsOverflowDuplicatesAndTrailingData) {
     files.push_back(files[0]); CHECK(scene::Pack(files).empty());
     CHECK(scene::Pack({{L"../evil.hlsl",{1}}}).empty());
 }
+TEST(SceneCoordinateBindingsStayFiniteAndTyped) {
+    CHECK(scene::Components(L"10,-20,30") == std::vector<float>({10,-20,30}));
+    CHECK(scene::Components(L"1,2,3,4,5").empty());
+    CHECK(scene::Components(L"1,nan").empty());
+    CHECK(scene::Components(L"1,inf").empty());
+    CHECK(scene::Components(L"1,").empty());
+    CHECK(scene::Components(L"#zz0000").empty());
+    CHECK(Parses("<base shader=\"sky.hlsl\"/><layer lottie=\"bird.json\"><slot id=\"position\" value=\"20,40\"/></layer>"));
+    CHECK(!Parses("<base shader=\"sky.hlsl\"/><layer lottie=\"bird.json\"><slot id=\"position\" value=\"20,nan\"/></layer>"));
+}
 TEST(SceneArchiveCannotAddAssetsToAThemeArchive) {
     std::vector<uint8_t> zip; std::wstring why;
     CHECK(package::WriteToMemory({{"scene.xml",L"",{'x'}},{"sky.hlsl",L"",{'x'}}},&zip,&why));
