@@ -16,6 +16,21 @@ TEST(SceneAcknowledgesVideoOnItsFirstFrameAndWhilePaused) {
         std::printf("  skipped: no hardware adapter for sandbox scene textures\n");
         return;
     }
+    ComPtr<IDXGIDevice> dxgi;
+    ComPtr<IDXGIAdapter> adapter;
+    ComPtr<IDXGIAdapter1> adapter1;
+    DXGI_ADAPTER_DESC1 description{};
+    const bool identified = SUCCEEDED(device.As(&dxgi)) && SUCCEEDED(dxgi->GetAdapter(&adapter)) &&
+        SUCCEEDED(adapter.As(&adapter1)) && SUCCEEDED(adapter1->GetDesc1(&description));
+    CHECK(identified);
+    if (!identified) return;
+    // D3D_DRIVER_TYPE_HARDWARE can still select the Basic Render Driver on hosted runners.
+    // This test, like scene.exe, needs a real display adapter for AppContainer shared textures.
+    if ((description.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) ||
+        (description.VendorId == 0x1414 && description.DeviceId == 0x8c)) {
+        std::printf("  skipped: software adapter cannot run the hardware scene texture check\n");
+        return;
+    }
     ComPtr<ID3D11DeviceContext> context;
     device->GetImmediateContext(&context);
     const std::string xml = "<scene format=\"1\" name=\"Video input\"><base video=\"video.mp4\"/></scene>";
