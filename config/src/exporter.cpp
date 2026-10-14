@@ -97,6 +97,8 @@ bool Build(const std::wstring &themeId, const Settings &settings, const ThemeSto
             scene::Document d; std::vector<uint8_t> xml;
             if (!secure::ReadFileBytes(w.scenePath,&xml,64*1024) || !scene::Parse(std::string_view((const char *)xml.data(),xml.size()),&d,&why))
                 return Fail(error,L"无法读取场景。",why);
+            d = scene::Bake(d,settings.OverridesFor(themeId).wallpaperValues,&why);
+            if (!why.empty()) return Fail(error,L"场景的调整超出了文件格式上限，无法导出。",why);
             std::vector<package::Item> sceneItems{{"scene.xml",L"",Bytes(scene::Normalize(d))}};
             const std::wstring dir = w.scenePath.substr(0,w.scenePath.find_last_of(L'\\'));
             for (const auto &name : scene::Assets(d,false)) {

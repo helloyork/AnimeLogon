@@ -523,7 +523,7 @@ bool Presenter::Render(const std::vector<Picture> &pictures, float dim, float op
                 if (pic.kind == Picture::Kind::Scene && pic.scene && pic.sceneMix > 0) {
                     views[3] = pic.scene;
                     p.mix = pic.sceneMix;
-                    const auto live = layout::Map(pic.sceneW, pic.sceneH, t.canvas, t.rect, animelogon::Scaling::Stretch);
+                    const auto live = layout::Map(pic.sceneW, pic.sceneH, t.canvas, t.rect, fit);
                     p.liveScale[0] = live.scaleX; p.liveScale[1] = live.scaleY;
                     p.liveOffset[0] = live.offsetX; p.liveOffset[1] = live.offsetY;
                 }

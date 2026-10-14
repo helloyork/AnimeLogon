@@ -221,7 +221,88 @@ const File *Find(const Files &files, const std::wstring &name) {
     return nullptr;
 }
 bool Accepts(const Document &d, const std::wstring &id, const std::wstring &v) {
-    const auto *s = d.controls.Find(id); return s && skin::IsValue(*s, v);
+    if (const auto *s = d.controls.Find(id)) return skin::IsValue(*s, v);
+    for (const auto &p : Parts(d)) for (const auto &a : p.adjustments) if (a.key == id) {
+        if (a.control == skin::Control::Choice) {
+            for (const auto &o : a.options) if (o.value == v) return true;
+            return false;
+        }
+        double n = 0; return Number(v,&n) && n >= a.min && n <= a.max;
+    }
+    return false;
+}
+std::vector<skin::Part> Parts(const Document &d) {
+    std::vector<skin::Part> result;
+    const wchar_t *labels[] = {L"左上",L"上方",L"右上",L"左侧",L"居中",L"右侧",L"左下",L"下方",L"右下"};
+    for (size_t i = 0; i < d.layers.size(); ++i) {
+        skin::Part p; p.key = L"p"+std::to_wstring(i+1);
+        p.label = (d.layers[i].kind == Kind::Lottie ? L"动画层 " : L"效果层 ")+std::to_wstring(i+1);
+        auto add = [&](const wchar_t *key, const wchar_t *label, double lo, double hi, double step) {
+            skin::Adjustment a; a.key = p.key+L"."+key; a.label = label; a.min = lo; a.max = hi; a.step = step;
+            p.adjustments.push_back(std::move(a));
+        };
+        skin::Adjustment anchor; anchor.key = p.key+L".anchor"; anchor.label = L"位置"; anchor.control = skin::Control::Choice;
+        anchor.options.push_back({L"full",L"铺满画面"});
+        for (int j = 0; j < 9; ++j) anchor.options.push_back({anchors[j],labels[j]});
+        p.adjustments.push_back(std::move(anchor));
+        add(L"offset-x",L"水平偏移",-100,100,.1); add(L"offset-y",L"垂直偏移",-100,100,.1);
+        add(L"size",L"高度",.1,100,.1); add(L"opacity",L"透明度",0,1,.01);
+        skin::Adjustment visible; visible.key = p.key+L".visible"; visible.label = L"显示";
+        visible.control = skin::Control::Choice; visible.options = {{L"true",L"开"},{L"false",L"关"}};
+        p.adjustments.push_back(std::move(visible)); result.push_back(std::move(p));
+    }
+    return result;
+}
+std::wstring Effective(const Document &d, const skin::Values &values, const std::wstring &key) {
+    if (const auto *s = d.controls.Find(key)) return skin::ValueOf(*s,values);
+    if (const auto it = values.find(key); it != values.end() && Accepts(d,key,it->second)) return it->second;
+    for (size_t i = 0; i < d.layers.size(); ++i) {
+        const auto &l = d.layers[i]; const std::wstring prefix = L"p"+std::to_wstring(i+1)+L".";
+        if (key == prefix+L"anchor") return l.full ? L"full" : anchors[l.anchor];
+        if (key == prefix+L"offset-x") return Format(L"%.4g",l.x);
+        if (key == prefix+L"offset-y") return Format(L"%.4g",l.y);
+        if (key == prefix+L"size") return Format(L"%.4g",l.height);
+        if (key == prefix+L"opacity") return BindingText(d,values,l.opacity);
+        if (key == prefix+L"visible") return BindingText(d,values,l.when);
+    }
+    return {};
+}
+Layer Placed(const Document &d, const skin::Values &values, size_t index) {
+    Layer l = d.layers.at(index); const std::wstring p = L"p"+std::to_wstring(index+1)+L".";
+    const auto anchor = Effective(d,values,p+L"anchor"); l.full = anchor == L"full";
+    for (int j = 0; j < 9; ++j) if (anchor == anchors[j]) l.anchor = j;
+    l.x = (float)wcstod(Effective(d,values,p+L"offset-x").c_str(),nullptr);
+    l.y = (float)wcstod(Effective(d,values,p+L"offset-y").c_str(),nullptr);
+    l.height = (float)wcstod(Effective(d,values,p+L"size").c_str(),nullptr);
+    l.opacity = Effective(d,values,p+L"opacity"); l.when = Effective(d,values,p+L"visible"); return l;
+}
+Document Bake(const Document &d, const skin::Values &values, std::wstring *error) {
+    auto root = d.xml; size_t layer = 0;
+    auto set = [](xml::Element &e, const std::wstring &key, const std::wstring &value) {
+        for (auto &a : e.attributes) if (a.first == key) { a.second = value; return; }
+        e.attributes.emplace_back(key,value);
+    };
+    for (auto &e : root.children) {
+        if (e.name == L"setting") {
+            const auto *id = e.Find(L"id"); const auto it = id ? values.find(*id) : values.end();
+            if (it != values.end() && Accepts(d,it->first,it->second)) set(e,L"default",it->second);
+        } else if (e.name == L"layer") {
+            const std::wstring p = L"p"+std::to_wstring(++layer)+L".";
+            for (const auto *key : {L"anchor",L"offset-x",L"offset-y",L"size",L"opacity",L"visible"}) {
+                const auto it = values.find(p+key); if (it == values.end() || !Accepts(d,it->first,it->second)) continue;
+                if (std::wstring(key) == L"anchor" && it->second == L"full") {
+                    e.attributes.erase(std::remove_if(e.attributes.begin(),e.attributes.end(),[](const auto &a) {
+                        return a.first == L"anchor" || a.first == L"height" || a.first == L"offset-x" || a.first == L"offset-y";
+                    }),e.attributes.end());
+                } else if (Effective(d,values,p+L"anchor") != L"full" || std::wstring(key) == L"opacity" || std::wstring(key) == L"visible")
+                    set(e,std::wstring(key) == L"size" ? L"height" : std::wstring(key) == L"visible" ? L"when" : key,it->second);
+            }
+        }
+    }
+    Document result; std::wstring why;
+    if (Parse(xml::Write(root),&result,&why)) { if (error) error->clear(); return result; }
+    if (error) *error=why;
+    return d;
 }
 std::wstring BindingText(const Document &d, const skin::Values &values, const std::wstring &binding) {
     std::wstring s = binding;

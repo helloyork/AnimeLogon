@@ -7,6 +7,7 @@
 
 namespace animelogon::scene {
 struct Inputs {
+    LONG sequence = 0;
     float time = 0, day = 0, battery = -1, progress = 0, playing = 0;
     skin::Values values;
 };
@@ -21,9 +22,11 @@ public:
     ~Host();
     Host(const Host &) = delete;
     Host &operator=(const Host &) = delete;
-    bool Start(ID3D11Device *device, const Files &files, int width, int height, bool importing, std::wstring *why, const Tier &tier = {});
+    bool Start(ID3D11Device *device, const Files &files, int width, int height, bool importing, std::wstring *why, const Tier &tier = {}, const Inputs &initial = {});
     void Stop();
-    void SetRunning(bool running, const Inputs &inputs, float refresh = 60);
+    LONG SetRunning(bool running, const Inputs &inputs, float refresh = 60, bool redraw = false);
+    LONG FrameSequence() const;
+    std::vector<std::array<float,4>> Bounds() const;
     // Nonblocking. Copies completed frames to a texture that the child cannot access.
     bool Poll();
     bool Ready() const;

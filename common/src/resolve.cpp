@@ -1,6 +1,8 @@
 #include "animelogon/resolve.h"
 
 #include "animelogon/components.h"
+#include "animelogon/scene.h"
+#include "animelogon/secure.h"
 
 namespace animelogon {
 namespace {
@@ -57,6 +59,16 @@ ResolvedTheme Themed(const Settings &s, std::wstring id, const ThemeStore &store
             loaded = store.LoadWallpaper(kDefaultWallpaper, &wallpaper, &why);
         }
         if (loaded) r.wallpaper = std::move(wallpaper);
+    }
+    if (r.wallpaper && r.wallpaper->kind == WallpaperKind::Scene) {
+        std::vector<uint8_t> bytes; scene::Document doc;
+        if (secure::ReadFileBytes(r.wallpaper->scenePath,&bytes,64*1024) &&
+            scene::Parse(std::string_view((const char *)bytes.data(),bytes.size()),&doc,&why)) {
+            for (const auto &[key,value] : overrides.wallpaperValues) {
+                if (scene::Accepts(doc,key,value)) r.wallpaperValues[key] = value;
+                else Report(problems,L"theme."+id+L".wallpaper."+key+L": invalid scene value -- dropped");
+            }
+        }
     }
 
     if (!s.components) return r;

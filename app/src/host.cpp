@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cwchar>
 #include <set>
+#include <cmath>
 
 #include "animelogon/clock.h"
 #include "animelogon/components.h"
@@ -176,6 +177,7 @@ bool Host::Create(int show) {
     ShowWindow(hwnd_, show_);
     UpdateWindow(hwnd_);
     StartWebView();
+    SetTimer(hwnd_,1,500,nullptr);
     return true;
 }
 
@@ -201,7 +203,13 @@ LRESULT CALLBACK Host::Proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 LRESULT Host::Handle(UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
     case WM_SIZE:
+        if (wp == SIZE_MINIMIZED) scenePreviews_.clear();
         Fit();
+        return 0;
+    case WM_TIMER:
+        for (auto it=scenePreviews_.begin();it!=scenePreviews_.end();) {
+            if (GetTickCount64()-it->second.used > 1500) it=scenePreviews_.erase(it); else ++it;
+        }
         return 0;
     case WM_DPICHANGED: {
         const RECT *r = reinterpret_cast<const RECT *>(lp);
@@ -233,6 +241,7 @@ LRESULT Host::Handle(UINT msg, WPARAM wp, LPARAM lp) {
         DestroyWindow(hwnd_);
         return 0;
     case WM_DESTROY:
+        scenePreviews_.clear(); KillTimer(hwnd_,1);
         if (controller_) controller_->Close();
         PostQuitMessage(0);
         return 0;
@@ -475,7 +484,8 @@ void Host::RenderPreview() {
     if (library_.open().empty() || previewW_ < 16 || previewH_ < 16) return;
     const theme::Theme t = library_.Edited(library_.open());
     // A video wallpaper plays in the page itself, under the components drawn here.
-    previewLayer_ = previewMotion_ && IsVideo(library_, t.wallpaper);
+    scene::Document sceneDoc;
+    previewLayer_ = library_.LoadScene(library_.open(),&sceneDoc) || (previewMotion_ && IsVideo(library_, t.wallpaper));
     screens_ = Wall(previewW_, previewH_);
     Picture p;
     if (pictures_.Theme(t, previewW_, previewH_, previewLayer_ ? Draw::ComponentsOnly : Draw::Everything, &p, &bounds_,
@@ -510,6 +520,53 @@ void Host::Shape(const std::wstring &themeId, UINT width, UINT *height) const {
     *height = PictureHeight(library_.settings(), monitors_, shown, width);
 }
 
+bool Host::SceneFrame(const std::wstring &id, UINT width, UINT height, double time, bool motion,
+                     std::vector<uint8_t> *bytes, std::wstring *bounds) {
+    if (width < 16 || height < 16 || height > 2400) return false;
+    const auto key=id+L"/"+std::to_wstring(width)+L"x"+std::to_wstring(height);
+    const auto signature=library_.Edited(id).wallpaper;
+    if (!scenePreviews_.count(key) && scenePreviews_.size() >= 2) {
+        auto oldest=scenePreviews_.begin();
+        for (auto it=scenePreviews_.begin();it!=scenePreviews_.end();++it) if (it->second.used < oldest->second.used) oldest=it;
+        scenePreviews_.erase(oldest);
+    }
+    auto &entry=scenePreviews_[key]; entry.used=GetTickCount64();
+    std::wstring why;
+    if (entry.signature != signature) {
+        if (!library_.stores().Store().LoadWallpaper(signature,&entry.wallpaper,nullptr) || entry.wallpaper.kind != WallpaperKind::Scene) return false;
+        entry.preview=std::make_unique<scene::Preview>(); entry.signature=signature;
+        entry.failed=!entry.preview->Open(entry.wallpaper,width,height,library_.settings().OverridesFor(id).wallpaperValues,&why);
+        if (entry.failed) ALOG(L"preview: scene %s could not start (%s)",signature.c_str(),why.c_str());
+    }
+    const auto &wallpaper=entry.wallpaper;
+    if (entry.failed || wallpaper.sceneFps == 0) {
+        Picture still; if (pictures_.Wallpaper(wallpaper.id,library_.Edited(id).fit,width,height,&still)) *bytes=Bmp(still);
+        return !bytes->empty();
+    }
+    scene::Inputs input; input.time=(float)time;
+    entry.preview->SetValues(library_.settings().OverridesFor(id).wallpaperValues);
+    SYSTEMTIME local{}; GetLocalTime(&local);
+    input.day=(local.wHour*3600.f+local.wMinute*60.f+local.wSecond)/86400.f;
+    const auto battery=data::ReadBattery(); input.battery=battery.percent < 0 ? -1.f : battery.percent/100.f;
+    bool mediaReady=false; data::Snapshot snapshot; snapshot.media=previewMedia_.Get(library_.settings().media,&mediaReady);
+    if (!mediaReady) return false;
+    input.playing=(float)snapshot.media.state; data::Context context; context.snapshot=&snapshot;
+    FILETIME utc{}; GetSystemTimeAsFileTime(&utc); context.now=((uint64_t)utc.dwHighDateTime<<32)|utc.dwLowDateTime;
+    double progress=0; data::FractionOf(L"media.progress",context,&progress); input.progress=(float)progress;
+    if (!entry.preview->Frame(input,motion,bytes,&why)) {
+        if (entry.preview->Failed(&why)) { entry.failed=true; ALOG(L"preview: scene %s stopped (%s)",wallpaper.id.c_str(),why.c_str()); }
+        return false;
+    }
+    json::Writer w; w.BeginArray(); size_t n=0;
+    for (const auto &r : entry.preview->Bounds()) {
+        ++n; if (r[2] <= 0 || r[3] <= 0) continue;
+        w.BeginObject().Member(L"instance",L"wallpaper").Member(L"key",L"p"+std::to_wstring(n)).Member(L"screen",0);
+        w.Member(L"left",(double)r[0]*width).Member(L"top",(double)r[1]*height);
+        w.Member(L"right",(double)(r[0]+r[2])*width).Member(L"bottom",(double)(r[1]+r[3])*height).EndObject();
+    }
+    w.EndArray(); *bounds=w.text(); return true;
+}
+
 void Host::OnResource(ICoreWebView2WebResourceRequestedEventArgs *args) {
     ComPtr<ICoreWebView2WebResourceRequest> request;
     LPWSTR raw = nullptr;
@@ -526,9 +583,20 @@ void Host::OnResource(ICoreWebView2WebResourceRequestedEventArgs *args) {
 
     std::vector<uint8_t> body;
     std::wstring type;
+    std::wstring sceneBounds;
     Picture p;
     if (WebFile(path, &body, &type)) {
         // one of the page's own files
+    } else if (path.rfind(L"scene/",0) == 0 && EndsWith(path,L".bmp") && !IsIconic(hwnd_)) {
+        const auto id=path.substr(6,path.size()-10);
+        if (library_.Entry(id)) {
+            const UINT width=ParamSize(query,L"w",960,3840); UINT height=ParamSize(query,L"h",0,2400);
+            if (!height) Shape(id,width,&height);
+            const double time=wcstod(Param(query,L"t").c_str(),nullptr)/1000;
+            if (std::isfinite(time) && time >= 0 && time <= 86400)
+                SceneFrame(id,width,height,time,Param(query,L"motion") == L"1",&body,&sceneBounds);
+        }
+        type=L"image/bmp";
     } else if (path == L"preview") {
         body = previewBytes_;
         type = previewLayer_ ? L"image/png" : L"image/bmp";
@@ -583,7 +651,8 @@ void Host::OnResource(ICoreWebView2WebResourceRequestedEventArgs *args) {
 
     ComPtr<IStream> stream;
     ComPtr<ICoreWebView2WebResourceResponse> response;
-    const std::wstring headers = L"Content-Type: " + type + L"\r\nCache-Control: no-store";
+    const std::wstring headers = L"Content-Type: " + type + L"\r\nCache-Control: no-store"+
+        (sceneBounds.empty() ? L"" : L"\r\nX-Scene-Bounds: "+sceneBounds);
     if (!body.empty()) stream.Attach(SHCreateMemStream(body.data(), (UINT)body.size()));
     if (stream) env_->CreateWebResourceResponse(stream.Get(), 200, L"OK", headers.c_str(), &response);
     else env_->CreateWebResourceResponse(nullptr, 404, L"Not Found", L"", &response);
@@ -591,6 +660,15 @@ void Host::OnResource(ICoreWebView2WebResourceRequestedEventArgs *args) {
 }
 
 void Host::OnMessage(const json::Value &m) {
+    if (m[L"op"].Str() == L"sceneStop") {
+        const auto id=m[L"theme"].Str(); const UINT width=(UINT)m[L"width"].Num(); UINT height=(UINT)m[L"height"].Num();
+        if (!height && width && library_.Entry(id)) Shape(id,width,&height);
+        const auto key=id+L"/"+std::to_wstring(width)+L"x"+std::to_wstring(height);
+        for (auto it=scenePreviews_.begin();it!=scenePreviews_.end();) {
+            if (it->first == key) it=scenePreviews_.erase(it); else ++it;
+        }
+        return;
+    }
     const std::wstring op = m[L"op"].Str();
     const int seq = (int)m[L"seq"].Num();
     const int gesture = (int)m[L"gesture"].Num();

@@ -757,7 +757,7 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
         }
 
         audio.Tick();
-        if (withComponents && !emergency && feed.Poll(&snapshot)) layer.SetData(snapshot);
+        if (!emergency && feed.Poll(&snapshot) && withComponents) layer.SetData(snapshot);
         const bool componentsChanged = withComponents && !emergency && layer.Tick();
 
         double t = 0.0;
@@ -792,6 +792,15 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
             // the minutes, and a high refresh rate need not cost a full-screen draw per tick.
             bool fresh = lit || componentsChanged || g_overlay.woke || componentsFading;
             animelogon::scene::Inputs sceneInputs; sceneInputs.time = (float)t;
+            SYSTEMTIME local{}; GetLocalTime(&local);
+            sceneInputs.day = (local.wHour*3600.f+local.wMinute*60.f+local.wSecond)/86400.f;
+            sceneInputs.battery = snapshot.battery.percent < 0 ? -1.f : snapshot.battery.percent/100.f;
+            sceneInputs.playing = (float)snapshot.media.state;
+            animelogon::data::Context dataContext; dataContext.snapshot = &snapshot;
+            FILETIME utc{}; GetSystemTimeAsFileTime(&utc);
+            dataContext.now = ((uint64_t)utc.dwHighDateTime<<32)|utc.dwLowDateTime;
+            double progress = 0; animelogon::data::FractionOf(L"media.progress",dataContext,&progress);
+            sceneInputs.progress = (float)progress;
             fresh = scenes.Tick(sceneInputs,draw,(float)(1/refresh)) || fresh;
             if (!track.empty() && scenes.Static(track)) { audio.FadeOut(.2f); track.clear(); }
             if (componentsFading) {

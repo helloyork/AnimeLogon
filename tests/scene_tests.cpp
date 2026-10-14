@@ -74,3 +74,38 @@ TEST(SceneArchiveCannotAddAssetsToAThemeArchive) {
     CHECK(!package::WriteToMemory({{"theme.xml",L"",{'x'}},{"sky.hlsl",L"",{'x'}}},&zip,&why));
     CHECK(!package::WriteToMemory({{"theme.xml",L"",{'x'}},{"scene.xml",L"",{'x'}}},&zip,&why));
 }
+TEST(SceneLayerEditsAreTypedAndSurviveExport) {
+    scene::Document d; std::wstring why;
+    CHECK(scene::Parse(Scene("<setting id=\"tint\" kind=\"color\" label=\"Tint\" default=\"#ff0000\"/>"
+        "<setting id=\"show\" kind=\"bool\" label=\"Show\" default=\"true\"/>"
+        "<base shader=\"sky.hlsl\"/><layer lottie=\"bird.json\" when=\"$show\"/>"),&d,&why));
+    CHECK(!scene::Accepts(d,L"p2.size",L"20"));
+    CHECK(!scene::Accepts(d,L"p1.size",L"nan"));
+    CHECK(!scene::Accepts(d,L"p1.size",L"0"));
+    CHECK(!scene::Accepts(d,L"p1.visible",L"yes"));
+    skin::Values values{{L"tint",L"#00ff00"},{L"show",L"false"},{L"p1.anchor",L"bottom-right"},
+        {L"p1.offset-x",L"-4"},{L"p1.size",L"20"},{L"p1.opacity",L"0.3"}};
+    const auto placed=scene::Placed(d,values,0); CHECK(!placed.full && placed.anchor == 8 && placed.height == 20 && placed.x == -4);
+    CHECK(placed.when == L"false" && placed.opacity == L"0.3");
+    const auto baked=scene::Bake(d,values);
+    CHECK(scene::Value(baked,{},L"$tint")[1] == 1);
+    CHECK(scene::Placed(baked,{},0).height == 20 && !scene::Placed(baked,{},0).full);
+    CHECK(scene::Placed(baked,{},0).when == L"false");
+    values[L"p1.anchor"]=L"full";
+    CHECK(scene::Bake(d,values).layers[0].full);
+}
+TEST(SceneSettingsUseTheWallpaperNamespace) {
+    std::vector<std::wstring> problems;
+    const auto settings=ParseSettings(L"theme=aaaaaaaaaaaaaaaa\n"
+        L"theme.aaaaaaaaaaaaaaaa.wallpaper.tint=#00ff00\n"
+        L"theme.aaaaaaaaaaaaaaaa.wallpaper.p1.size=20\n"
+        L"theme.aaaaaaaaaaaaaaaa.wallpaper.p1.opacity=0.5\n"
+        L"theme.aaaaaaaaaaaaaaaa.wallpaper.p1.visible=false\n"
+        L"theme.aaaaaaaaaaaaaaaa.clock.p1.size=8\n",&problems);
+    CHECK(problems.empty());
+    const auto &o=settings.OverridesFor(L"aaaaaaaaaaaaaaaa");
+    CHECK(o.wallpaperValues.size() == 4 && !o.instances.count(L"wallpaper"));
+    CHECK(o.instances.at(L"clock").values.at(L"p1.size") == L"8");
+    const auto roundtrip=ParseSettings(SerializeSettings(settings),&problems);
+    CHECK(roundtrip.OverridesFor(L"aaaaaaaaaaaaaaaa").wallpaperValues == o.wallpaperValues);
+}

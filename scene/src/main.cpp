@@ -40,7 +40,7 @@ Inputs ReadInputs(const ipc::Command &c) {
             if (eq < end) in.values[FromUtf8(std::string_view(text).substr(start, eq-start))] = FromUtf8(std::string_view(text).substr(eq+1,end-eq-1));
             start = end+1;
         }
-        return in;
+        in.sequence = sequence; return in;
     }
     return {};
 }
@@ -97,7 +97,10 @@ int wmain(int argc, wchar_t **argv) {
     FrameClock clock; clock.Active(true);
     hr = mutex->AcquireSync(0, 1500);
     if (hr != S_OK) return fail(L"cannot acquire the first scene frame", hr);
-    if (!renderer.Draw(ReadInputs(*command), nullptr, output.Get(), scale, &cost, &why)) { mutex->ReleaseSync(1); return fail(why); }
+    Inputs first = ReadInputs(*command);
+    if (!renderer.Draw(first, nullptr, output.Get(), scale, &cost, &why)) { mutex->ReleaseSync(1); return fail(why); }
+    status->sequence = first.sequence;
+    for (size_t i=0;i<renderer.Bounds().size();++i) std::copy(renderer.Bounds()[i].begin(),renderer.Bounds()[i].end(),status->bounds[i]);
     context->Flush(); mutex->ReleaseSync(1); InterlockedIncrement(&status->frames);
     // Measure actual GPU completion and CPU work, independently of the parent and refresh timer.
     D3D11_TEXTURE2D_DESC td{}; output->GetDesc(&td); td.MiscFlags = 0;
@@ -133,7 +136,7 @@ int wmain(int argc, wchar_t **argv) {
     ComPtr<ID3D11Texture2D> videoCopy;
     while (!command->stop) {
         clock.Active(command->running && fps > 0);
-        if (!command->running || fps == 0) { Sleep(10); next = GetTickCount64(); continue; }
+        if ((!command->running || fps == 0) && (!command->redraw || command->sequence == status->sequence)) { Sleep(10); next = GetTickCount64(); continue; }
         if (GetTickCount64() < next) { Sleep(1); continue; }
         hr = mutex->AcquireSync(0, 20);
         if (hr == WAIT_TIMEOUT) continue;
@@ -146,10 +149,12 @@ int wmain(int argc, wchar_t **argv) {
         const ULONGLONG frameStart = GetTickCount64();
         const Inputs in = ReadInputs(*command);
         if (!renderer.Draw(in, videoCopy.Get(), output.Get(), scale, &cost, &why)) { mutex->ReleaseSync(1); return fail(why); }
+        status->sequence = in.sequence;
+        for (size_t i=0;i<renderer.Bounds().size();++i) std::copy(renderer.Bounds()[i].begin(),renderer.Bounds()[i].end(),status->bounds[i]);
         context->Flush(); mutex->ReleaseSync(1); InterlockedIncrement(&status->frames);
-        const float rate = std::clamp(command->refresh, 1.f, std::min(60.f, fps));
-        next = frameStart + (ULONGLONG)(1000/rate);
-        samples.push_back(cost);
+        const float rate = std::clamp(command->refresh, 1.f, fps == 0 ? 30.f : std::min(60.f, fps));
+        next = frameStart + (ULONGLONG)std::ceil(1000/rate);
+        if (command->running && fps > 0) samples.push_back(cost);
         if (samples.size() == 60) {
             const float p95 = P95(samples); samples.clear();
             if (p95 > 1000/rate) {

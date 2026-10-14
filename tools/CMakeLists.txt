@@ -16,4 +16,9 @@ add_executable(skin_preview skin_preview.cpp)
 target_link_libraries(skin_preview PRIVATE animelogon_render ole32)
 
 add_executable(theme_fixture theme_fixture.cpp)
+add_executable(scene_preview scene_preview.cpp
+    ${PROJECT_SOURCE_DIR}/config/src/staging.cpp
+    ${PROJECT_SOURCE_DIR}/config/src/sceneimport.cpp
+    ${PROJECT_SOURCE_DIR}/config/src/transcode.cpp)
+target_link_libraries(scene_preview PRIVATE animelogon_scene_preview mfplat mfreadwrite mfuuid ole32)
 target_link_libraries(theme_fixture PRIVATE animelogon_common bcrypt)

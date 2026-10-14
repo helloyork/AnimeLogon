@@ -66,7 +66,7 @@ function receive(m) {
     case 'state':
       L = m.library; T = m.open; UI.clock = m.clock;
       if (UI.view === 'theme' && !T) UI.view = 'library';
-      if (T && UI.sel.inst && !T.instances.some(i => i.id === UI.sel.inst)) UI.sel = { inst: null, part: null };
+      if (T && UI.sel.inst && !instOf(UI.sel.inst)) UI.sel = { inst: null, part: null };
       render();
       break;
     case 'preview': onPreview(m); break;
@@ -101,6 +101,38 @@ const videoUrl = ref => `${MEDIA}${ref}/video.mp4`;
 // Not when the person asked for less motion, nor once a video would not play here.
 const motion = () => !UI.noVideo && !matchMedia('(prefers-reduced-motion: reduce)').matches;
 const plays = t => !!t && t.wallpaperKind === 'video' && motion();
+const sceneViews = new Set();
+function sceneImage(t, width, height, cls, bounds) {
+  const img = h('img', { class: cls, alt: '', draggable: 'false', src: `${ORIGIN}lock/${t.id}/still.bmp?w=${width}${height ? '&h=' + height : ''}` });
+  let active = false, timer = 0, ticket = 0, started = 0, objectUrl = '', attempts = 0;
+  const moving = () => motion() && !t.sceneStatic && !(t.wallpaper?.scene?.static);
+  const stop = () => { active = false; ++ticket; clearTimeout(timer); send('sceneStop', { theme: t.id, width, height }); };
+  const next = async () => {
+    if (!active || !img.isConnected || document.hidden) { stop(); return; }
+    const serial = ticket, time = moving() ? performance.now() - started : 0;
+    try {
+      const response = await fetch(`${ORIGIN}scene/${t.id}.bmp?w=${width}${height ? '&h=' + height : ''}&t=${time.toFixed(1)}&motion=${moving() ? 1 : 0}&r=${PV.rev}`, { cache: 'no-store' });
+      if (!active || serial !== ticket) return;
+      if (response.ok) {
+        const blob = await response.blob(); if (!active || serial !== ticket) return;
+        const url = URL.createObjectURL(blob), old = objectUrl; objectUrl = url;
+        if (old) URL.revokeObjectURL(old);
+        img.onload = () => { if (img.sceneOnFrame) img.sceneOnFrame(); }; img.src = url;
+        const rectangles = response.headers.get('X-Scene-Bounds');
+        if (bounds && rectangles) bounds(JSON.parse(rectangles));
+        attempts = 0;
+        if (!moving()) { active = false; return; }
+      } else if (++attempts > 100) { stop(); return; }
+    } catch (_) { if (++attempts > 100) { stop(); return; } }
+    if (active && serial === ticket) timer = setTimeout(next, attempts ? 100 : 33);
+  };
+  const start = () => { if (active) return; active = true; started = performance.now(); attempts = 0; ++ticket; timer = setTimeout(next, 0); };
+  const view = { img, start, stop, dispose: () => { stop(); if (objectUrl) URL.revokeObjectURL(objectUrl); sceneViews.delete(view); } };
+  img.sceneRefresh = () => { if (active) { ++ticket; clearTimeout(timer); timer = setTimeout(next, 0); } else start(); };
+  img.sceneDispose = view.dispose; sceneViews.add(view); start(); return img;
+}
+new MutationObserver(() => { for (const v of sceneViews) if (!v.img.isConnected) v.dispose(); }).observe(document.getElementById('app'), { childList: true, subtree: true });
+document.addEventListener('visibilitychange', () => { for (const v of sceneViews) document.hidden ? v.stop() : v.start(); });
 const layerUrl = (t, w, hh) => `${ORIGIN}layer/${t.id}.png?w=${w}${hh ? '&h=' + hh : ''}&r=${t.revision}.${UI.tick}`;
 function videoEl(ref, fit, cls) {
   const v = h('video', { class: cls, muted: true, loop: true, playsinline: true, preload: 'auto', 'aria-hidden': 'true', src: videoUrl(ref) });
@@ -120,7 +152,7 @@ function usedOn(id) {
   const ms = ENV.monitors.filter(m => screenTheme(m) === id);
   return ms.length && ms.length === ENV.monitors.length ? ['所有屏幕'] : ms.map(m => m.name);
 }
-const kindName = k => ({ video: '视频', image: '图片', builtin: '内置背景', none: '无壁纸', missing: '壁纸缺失' })[k] || '';
+const kindName = k => ({ scene: '场景', video: '视频', image: '图片', builtin: '内置背景', none: '无壁纸', missing: '壁纸缺失' })[k] || '';
 function ratioLabel(w, hgt) {
   const known = [[16, 9], [16, 10], [21, 9], [32, 9], [4, 3], [3, 2]], r = w / hgt;
   const best = known.reduce((a, b) => Math.abs(b[0] / b[1] - r) < Math.abs(a[0] / a[1] - r) ? b : a);
@@ -212,6 +244,14 @@ function card(t) {
     });
     thumb.addEventListener('pointerleave', () => thumb.querySelectorAll('video.tv, img.tl').forEach(n => n.remove()));
   }
+  if (t.wallpaperKind === 'scene') {
+    thumb.addEventListener('pointerenter', () => {
+      if (!motion() || t.sceneStatic || thumb.querySelector('.scene-frame')) return;
+      const img = sceneImage(t, 480, 0, 'tv scene-frame'); thumb.querySelector('.shot').after(img);
+      if (L.settings.components) img.after(h('img', { class: 'tl', src: layerUrl(t, 480), alt: '', draggable: 'false' }));
+    });
+    thumb.addEventListener('pointerleave', () => thumb.querySelectorAll('.scene-frame, img.tl').forEach(n => { if (n.sceneDispose) n.sceneDispose(); n.remove(); }));
+  }
   const facts = [kindName(t.wallpaperKind), t.summary, t.modifications ? '已修改' : null, t.author && !t.builtIn ? t.author : null].filter(Boolean).join(' · ');
   return h('article', { class: 'card' }, thumb, h('div', { class: 'meta' }, h('div', null,
     h('h3', null, t.name), h('p', null, used.length ? h('span', { class: 'inuse' }, used.join('、') + ' · ') : null, facts))));
@@ -228,6 +268,10 @@ function currentView() {
   const t = theme(L.current);
   const wallpaper = ['image', 'video'].includes(t.wallpaperKind) ? `${t.wallpaper}（${kindName(t.wallpaperKind)}）` : t.wallpaper;
   const shown = h('div', { class: 'vbox' }, h('img', { class: 'shot', src: thumbUrl(t, 960), alt: '', vars: shapeVars(t.id) }));
+  if (t.wallpaperKind === 'scene' && motion() && !t.sceneStatic) {
+    shown.append(sceneImage(t, 960, 0, 'tv scene-frame'));
+    if (L.settings.components) shown.append(h('img', { class: 'tl', src: layerUrl(t, 960), alt: '', draggable: 'false' }));
+  }
   if (plays(t)) {
     const key = t.wallpaperRef + '/' + t.fit;
     if (live.key !== key) { live.key = key; live.video = videoEl(t.wallpaperRef, t.fit, 'tv'); }
@@ -404,6 +448,20 @@ function showPreview() {
 function stageVideo(layer) {
   const st = $('#stage'); if (!st || !T) return;
   let v = $('#pvv');
+  const oldScene = $('#pvscene');
+  if (T.wallpaper.kind === 'scene') {
+    if (v) v.remove();
+    const key = T.id + '/' + PV.width + 'x' + PV.height;
+    if (!oldScene || oldScene.dataset.key !== key) {
+      if (oldScene) { oldScene.sceneDispose(); oldScene.remove(); }
+      const img = sceneImage(T, PV.width, PV.height, 'pvv scene-frame', rectangles => {
+        PV.bounds = PV.bounds.filter(b => b.instance !== 'wallpaper').concat(rectangles); updateSel();
+      });
+      img.id = 'pvscene'; img.dataset.key = key; st.prepend(img);
+    } else oldScene.sceneRefresh();
+    return;
+  }
+  if (oldScene) { oldScene.sceneDispose(); oldScene.remove(); }
   if (!layer) { if (v) v.remove(); return; }
   if (!v || v.dataset.ref !== T.wallpaper.ref) {
     if (v) v.remove();
@@ -434,7 +492,7 @@ function setValues(inst, values) { send('setMany', { instance: inst, values, seq
 function clearValues(inst, keys) { send('clear', { instance: inst, keys, seq: ++PV.seq }); }
 
 /* --- the marks over the picture --- */
-const instOf = id => T && T.instances.find(i => i.id === id);
+const instOf = id => T && (id === 'wallpaper' ? T.wallpaper.scene : T.instances.find(i => i.id === id));
 const partOf = (inst, key) => inst && inst.parts && inst.parts.find(p => p.key === key);
 const panelKey = sel => sel.part ? sel.part.split('.')[0] : 'p1';
 // A component with several panels has no position of its own: each panel is placed by itself.
@@ -456,7 +514,7 @@ function rectOf(b) { const k = scale(); return { left: b.left * k, top: b.top * 
 function place(box, r, pad) { Object.assign(box.style, { left: (r.left - pad) + 'px', top: (r.top - pad) + 'px', width: (r.width + pad * 2) + 'px', height: (r.height + pad * 2) + 'px' }); box.hidden = false; }
 // The display a mark is placed on, in the stage's pixels: one of the wall's when spanning, else all of it.
 function frameOf(b) {
-  const st = $('#stage').getBoundingClientRect(), k = scale(), s = b && PV.screens[b.screen];
+  const st = $('#stage').getBoundingClientRect(), k = scale(), s = b && b.instance !== 'wallpaper' && PV.screens[b.screen];
   return s ? { left: s.left * k, top: s.top * k, width: (s.right - s.left) * k, height: (s.bottom - s.top) * k } : { left: 0, top: 0, width: st.width, height: st.height };
 }
 // The panel's anchor point and the point of the panel it holds, in the stage's pixels.
@@ -572,7 +630,7 @@ function onStageDown(e) {
   UI.screen = hit.screen;
   const pk = hit.key.split('.')[0], multi = multiPanel(hit.instance);
   const was = UI.sel.inst === hit.instance && (!multi || (!!UI.sel.part && panelKey(UI.sel) === pk));
-  if (!was) selectSel(hit.instance, multi ? pk : null, true);
+  if (!was) selectSel(hit.instance, multi || hit.instance === 'wallpaper' ? pk : null, true);
   startDrag(e, hit.instance, pk, was && hit.key.includes('.') ? hit.key : null);
 }
 const posText = (g, anchor, ox, oy) => `${ANCHOR_NAMES[Math.max(0, ANCHORS.indexOf(anchor))]} · 水平 ${signed(ox)}% · 垂直 ${signed(oy)}%`;
@@ -617,7 +675,9 @@ function startResize(e) {
   const move = ev => {
     const size = clamp(roundTo(s0 * Math.hypot(ev.clientX - cx, ev.clientY - cy) / d0, .5), a ? a.min : 1, a ? a.max : 50);
     showReadout(`大小 ${size.toFixed(1)}% 屏高`);
-    liveSet(inst.id, { [pk + '.size']: String(size) }, gesture);
+    const values = { [pk + '.size']: String(size) };
+    if (inst.id === 'wallpaper' && valueOf(inst, pk + '.anchor') === 'full') values[pk + '.anchor'] = 'center';
+    liveSet(inst.id, values, gesture);
   };
   const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); window.removeEventListener('pointercancel', up); $('#readout').hidden = true; endGesture(); };
   window.addEventListener('pointermove', move); window.addEventListener('pointerup', up); window.addEventListener('pointercancel', up);
@@ -647,6 +707,14 @@ function wallpaperSection() {
     labRow('wp-fit', '契合度', '画面比例与屏幕不同时怎样显示。', null, T.fitModified, () => send('fit', { value: T.ownFit, seq: ++PV.seq })),
     seg([['fill', '填充'], ['fit', '适应'], ['stretch', '拉伸']], T.fit, v => send('fit', { value: v, seq: ++PV.seq }), '契合度', 'wp-fit')));
   if (wp.audio) rows.push(h('p', { class: 'bnote' }, '视频的声音在「设置 > 声音」里开关。'));
+  if (wp.scene) {
+    const scene = wp.scene;
+    rows.push(...scene.settings.map(s => settingControl(scene, s)));
+    if (scene.static) rows.push(h('p', { class: 'bnote' }, '此场景在这台设备上使用静止画面。调整会保留在导出的主题中。'));
+    rows.push(h('div', { class: 'parts' }, scene.parts.map(pt => h('button', { class: 'btn sm', 'aria-pressed': String(UI.sel.inst === 'wallpaper' && UI.sel.part === pt.key), onclick: () => selectSel('wallpaper', pt.key) }, pt.label))));
+    const selected = scene.parts.find(pt => UI.sel.inst === 'wallpaper' && UI.sel.part === pt.key);
+    if (selected) { const details = h('div', { class: 'cbody' }); partEntry(details, scene, selected); rows.push(details); }
+  }
   return h('section', { class: 'tsec' }, h('h2', null, '壁纸'), h('div', { class: 'box' }, rows));
 }
 function componentSection() {
@@ -702,6 +770,7 @@ function partEntry(p, inst, pt) {
     p.append(det);
   } else if (/^p\d+$/.test(pt.key)) {
     p.append(positionGroup(inst, pt.key));
+    if (inst.id === 'wallpaper') p.append(group('外观', pt.adjustments.filter(a => ['opacity', 'visible'].includes(attr(a))).map(a => adjControl(inst, a))));
   } else {
     p.append(group('外观', pt.adjustments.map(a => adjControl(inst, a))));
   }
@@ -717,6 +786,7 @@ function positionGroup(inst, pk) {
   more.addEventListener('toggle', () => { UI.more = more.open; });
   const posModified = ['anchor', 'offset-x', 'offset-y'].some(k => { const a = adjustment(inst, pk + '.' + k); return a && a.modified; });
   return group('位置与大小', [
+    inst.id === 'wallpaper' ? h('button', { class: 'btn sm', 'aria-pressed': String(cur === 'full'), onclick: () => setValue(inst.id, pk + '.anchor', 'full') }, '铺满画面') : null,
     h('div', { class: 'row' }, labRow('pos-grid', '位置', '相对屏幕的哪个位置。', ANCHOR_NAMES[Math.max(0, ANCHORS.indexOf(cur))], posModified,
       () => clearValues(inst.id, [pk + '.anchor', pk + '.offset-x', pk + '.offset-y'])),
       h('div', { class: 'arow' }, grid, h('p', null, '也可以在预览里直接拖动。'))),
@@ -897,8 +967,9 @@ function lockPreview(id, ratio) {
   // As the logon screen goes: the still covers the screen at once, a video wallpaper starts over
   // it, and the components come in last. Over a video they are a layer of their own.
   const still = h('img', { src: `${ORIGIN}lock/${id}/still.bmp?${q}`, alt: '' });
-  const full = h('img', { class: 'full', src: vid ? layerUrl(t, w, ratio ? hh : 0) : `${ORIGIN}lock/${id}/full.bmp?${q}`, alt: '' });
-  let video = null, loaded = false, started = !vid, woke = false;
+  const scene = t.wallpaperKind === 'scene';
+  const full = h('img', { class: 'full', src: vid || scene ? layerUrl(t, w, ratio ? hh : 0) : `${ORIGIN}lock/${id}/full.bmp?${q}`, alt: '' });
+  let video = null, loaded = false, started = !(vid || scene), woke = false;
   const fadeIn = () => { if (loaded && started) setTimeout(() => { if (!woke) full.style.opacity = '1'; }, 300); };
   full.addEventListener('load', () => { loaded = true; fadeIn(); });
   if (vid) {
@@ -908,17 +979,21 @@ function lockPreview(id, ratio) {
     video.addEventListener('error', go, { once: true });
     video.play().catch(() => {});
   }
+  if (scene) {
+    video = sceneImage(t, w, ratio ? hh : 0, 'lv scene-frame');
+    video.sceneOnFrame = () => { if (started) return; started = true; video.classList.add('on'); fadeIn(); };
+  }
   frame.append(signin, still, ...(video ? [video] : []), full);
   const hint = h('div', { class: 'lhint' }, '按任意键或单击，模拟唤醒');
   const exit = h('button', { class: 'btn exit', onclick: e => { e.stopPropagation(); close(); } }, '退出预览 (Esc)');
   ov.append(frame, hint, exit);
   document.body.append(ov); ov.focus();
   // Everything over the sign-in screen fades out, the components with the rest.
-  const wake = () => { if (woke) return; woke = true; for (const n of [still, video, full]) if (n) { n.style.opacity = ''; n.classList.add('fading'); } hint.textContent = '之后是 Windows 的登录界面'; };
+  const wake = () => { if (woke) return; woke = true; if (video && video.sceneDispose) video.sceneDispose(); for (const n of [still, video, full]) if (n) { n.style.opacity = ''; n.classList.add('fading'); } hint.textContent = '之后是 Windows 的登录界面'; };
   ov.addEventListener('pointerdown', e => { if (e.target !== exit) wake(); });
   const key = e => { e.stopPropagation(); e.preventDefault(); if (e.key === 'Escape') close(); else wake(); };
   document.addEventListener('keydown', key, true);
-  function close() { document.removeEventListener('keydown', key, true); ov.remove(); }
+  function close() { if (video && video.sceneDispose) video.sceneDispose(); document.removeEventListener('keydown', key, true); ov.remove(); }
 }
 
 /* ================= keys on the theme page ================= */
@@ -937,6 +1012,7 @@ document.addEventListener('keydown', e => {
   const inst = instOf(UI.sel.inst); if (!inst) return;
   if (e.key === 'Delete' || e.key === 'Backspace') {
     e.preventDefault();
+    if (inst.id === 'wallpaper') { if (UI.sel.part) setValue(inst.id, UI.sel.part + '.visible', 'false'); return; }
     if (inst.base) send('visible', { instance: inst.id, on: false, seq: ++PV.seq });
     else { UI.sel = { inst: null, part: null }; send('removeInstance', { instance: inst.id, seq: ++PV.seq }); }
     return;
@@ -951,7 +1027,9 @@ document.addEventListener('keydown', e => {
   const ox = clamp(roundTo(+(pending[pk + '.offset-x'] ?? nudge.ox ?? valueOf(inst, pk + '.offset-x')) + d[0], .1), -50, 50);
   const oy = clamp(roundTo(+(pending[pk + '.offset-y'] ?? nudge.oy ?? valueOf(inst, pk + '.offset-y')) + d[1], .1), -50, 50);
   nudge.ox = ox; nudge.oy = oy;
-  liveSet(inst.id, { [pk + '.offset-x']: String(ox), [pk + '.offset-y']: String(oy) }, nudge.gesture);
+  const values = { [pk + '.offset-x']: String(ox), [pk + '.offset-y']: String(oy) };
+  if (inst.id === 'wallpaper' && valueOf(inst, pk + '.anchor') === 'full') values[pk + '.anchor'] = 'center';
+  liveSet(inst.id, values, nudge.gesture);
   showReadout(posText(null, valueOf(inst, pk + '.anchor'), ox, oy));
   clearTimeout(nudge.timer);
   nudge.timer = setTimeout(() => { $('#readout') && ($('#readout').hidden = true); nudge.ox = nudge.oy = undefined; endGesture(); }, 600);

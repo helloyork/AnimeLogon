@@ -41,6 +41,7 @@ struct ResolvedTheme {
     std::wstring themeId;  // the theme shown: the one named, or "default" in its place
     std::optional<WallpaperInfo> wallpaper;  // with its file paths; none: nothing behind the components
     Scaling fit = Scaling::Fill;
+    skin::Values wallpaperValues;
     std::vector<ResolvedComponent> components;  // the visible instances, in the theme's order
     // The displays the components are drawn on. Which display Auto means is the overlay's to find.
     ComponentDisplays componentDisplays = ComponentDisplays::Auto;

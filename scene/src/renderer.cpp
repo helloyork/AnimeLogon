@@ -113,6 +113,7 @@ bool ShaderContract(const void *bytes, size_t size, std::wstring *why) {
 }
 struct Renderer::State {
     Document d; Files normalized;
+    std::vector<std::array<float,4>> bounds;
     int width = 0, height = 0;
     ComPtr<ID3D11Device> device; ComPtr<ID3D11DeviceContext> context;
     ComPtr<ID3D11VertexShader> vs;
@@ -159,13 +160,14 @@ struct Renderer::State {
         context->UpdateSubresource(blitConstants.Get(), 0, nullptr, &b, 0, 0);
         DrawTo(dst, blit.Get(), blitConstants.Get(), {bottom ? bottom->view.Get() : nullptr, layer.view.Get()});
     }
-    bool LayerFrame(const Layer &l, const Inputs &in, const Texture *below, Texture **out, float scale, std::wstring *why) {
+    bool LayerFrame(const Layer &l, const Inputs &in, const Texture *below, Texture **out, float scale, std::wstring *why, const Layer *placed = nullptr) {
         if (l.kind == Kind::Image) {
             for (size_t i = 0; i < d.images.size(); ++i) if (d.images[i].id == l.image) { *out = &images[i]; return true; }
         }
         if (l.kind == Kind::Video) { *out = &video; return true; }
-        const int h = std::max(1, (int)(height * scale * (l.full ? 1 : l.height / 100)));
-        const float aspect = l.kind == Kind::Lottie && !l.full ? lotties.at(&l)->Aspect() : (float)width/height;
+        const Layer &layout = placed ? *placed : l;
+        const int h = std::max(1, (int)(height * scale * (layout.full ? 1 : layout.height / 100)));
+        const float aspect = l.kind == Kind::Lottie && !layout.full ? lotties.at(&l)->Aspect() : (float)width/height;
         const int w = std::max(1, (int)(h * aspect));
         auto &effect = effects[&l];
         if (!Make(&effect, w, h)) return Fail(why, L"cannot allocate the effect texture");
@@ -190,6 +192,7 @@ struct Renderer::State {
 Renderer::Renderer() = default;
 Renderer::~Renderer() = default;
 const Files &Renderer::Normalized() const { return s_->normalized; }
+const std::vector<std::array<float,4>> &Renderer::Bounds() const { return s_->bounds; }
 float Renderer::TrialSeconds() const {
     float seconds = 4;
     for (const auto &[layer,animation] : s_->lotties) seconds = std::max(seconds,animation->Duration());
@@ -309,16 +312,19 @@ bool Renderer::Draw(const Inputs &in, ID3D11Texture2D *video, ID3D11Texture2D *o
     }
     s.Composite(s.canvas[0], nullptr, *layer, b);
     int current = 0;
-    for (const auto &l : s.d.layers) {
-        if (Value(s.d, in.values, l.when)[0] == 0) continue;
-        if (!s.LayerFrame(l, in, &s.canvas[current], &layer, scale, why)) return false;
-        b = Blit{}; b.opacity = std::clamp(Value(s.d, in.values, l.opacity)[0], 0.f, 1.f); b.blend = (float)l.blend;
+    s.bounds.assign(s.d.layers.size(),{});
+    for (size_t i = 0; i < s.d.layers.size(); ++i) {
+        const auto &l = s.d.layers[i]; const auto layout = Placed(s.d,in.values,i);
+        if (Value(s.d, in.values, layout.when)[0] == 0) continue;
+        if (!s.LayerFrame(l, in, &s.canvas[current], &layer, scale, why,&layout)) return false;
+        b = Blit{}; b.opacity = std::clamp(Value(s.d, in.values, layout.opacity)[0], 0.f, 1.f); b.blend = (float)l.blend;
         b.premul = l.kind == Kind::Lottie ? 1.f : 0.f;
-        if (!l.full) {
-            b.rect[3] = l.height / 100; b.rect[2] = b.rect[3] * ((float)layer->width / layer->height) / ((float)s.width / s.height);
-            b.rect[0] = (l.anchor % 3) * .5f * (1-b.rect[2]) + l.x / 100;
-            b.rect[1] = (l.anchor / 3) * .5f * (1-b.rect[3]) + l.y / 100;
+        if (!layout.full) {
+            b.rect[3] = layout.height / 100; b.rect[2] = b.rect[3] * ((float)layer->width / layer->height) / ((float)s.width / s.height);
+            b.rect[0] = (layout.anchor % 3) * .5f * (1-b.rect[2]) + layout.x / 100;
+            b.rect[1] = (layout.anchor / 3) * .5f * (1-b.rect[3]) + layout.y / 100;
         }
+        std::copy(std::begin(b.rect),std::end(b.rect),s.bounds[i].begin());
         s.Composite(s.canvas[1-current], &s.canvas[current], *layer, b); current = 1-current;
     }
     s.context->CopyResource(output, s.canvas[current].texture.Get());

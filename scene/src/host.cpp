@@ -54,6 +54,7 @@ struct Host::State {
     int width = 0, height = 0;
     bool importing = false, received = false;
     LONG frame = 0;
+    std::vector<std::array<float,4>> bounds;
     ComPtr<ID3D11Device> device;
     ComPtr<ID3D11DeviceContext> context;
     ComPtr<ID3D11Texture2D> shared, copy, video;
@@ -181,7 +182,7 @@ struct Host::State {
 Host::Host() = default;
 Host::~Host() = default;
 void Host::Stop() { s_.reset(); }
-bool Host::Start(ID3D11Device *device, const Files &files, int width, int height, bool importing, std::wstring *why, const Tier &tier) {
+bool Host::Start(ID3D11Device *device, const Files &files, int width, int height, bool importing, std::wstring *why, const Tier &tier, const Inputs &initial) {
     Stop();
     if (!device || width <= 0 || height <= 0 || width > 16384 || height > 16384 || (uint64_t)width * height > 64 * 1024 * 1024) return Fail(why, L"invalid scene canvas");
     const auto input = Pack(files);
@@ -210,6 +211,12 @@ bool Host::Start(ID3D11Device *device, const Files &files, int width, int height
         s->command->calibrated = tier.calibrated;
         s->command->startFps = tier.fps == 0 || tier.fps == 30 ? tier.fps : 60;
         s->command->startScale = std::isfinite(tier.scale) ? std::clamp(tier.scale,.5f,1.f) : 1.f;
+        s->command->time=initial.time; s->command->day=initial.day; s->command->battery=initial.battery;
+        s->command->progress=initial.progress; s->command->playing=initial.playing;
+        std::string values;
+        for (const auto &[key,value] : initial.values) values+=ToUtf8(key)+"="+ToUtf8(value)+"\n";
+        s->command->valuesBytes=(uint32_t)std::min(values.size(),sizeof(s->command->values));
+        memcpy(s->command->values,values.data(),s->command->valuesBytes);
     }
     auto texture = [&](ComPtr<ID3D11Texture2D> &t, ComPtr<IDXGIKeyedMutex> &mutex, HANDLE *h, DWORD access) {
         D3D11_TEXTURE2D_DESC d{}; d.Width = width; d.Height = height; d.MipLevels = d.ArraySize = 1;
@@ -234,8 +241,8 @@ bool Host::Start(ID3D11Device *device, const Files &files, int width, int height
     if (!ok) return false;
     s_ = std::move(s); return true;
 }
-void Host::SetRunning(bool running, const Inputs &in, float refresh) {
-    if (!s_) return;
+LONG Host::SetRunning(bool running, const Inputs &in, float refresh, bool redraw) {
+    if (!s_) return 0;
     auto &c = *s_->command;
     InterlockedIncrement(&c.sequence);
     c.time = in.time; c.day = in.day; c.battery = in.battery; c.progress = in.progress; c.playing = in.playing;
@@ -245,11 +252,22 @@ void Host::SetRunning(bool running, const Inputs &in, float refresh) {
     c.valuesBytes = (uint32_t)std::min(text.size(), sizeof(c.values)); memcpy(c.values, text.data(), c.valuesBytes);
     InterlockedIncrement(&c.sequence);
     InterlockedExchange(&c.running, running ? 1 : 0);
+    InterlockedExchange(&c.redraw, redraw ? 1 : 0);
+    return c.sequence;
 }
+LONG Host::FrameSequence() const { return s_ ? s_->frame : 0; }
+std::vector<std::array<float,4>> Host::Bounds() const { return s_ ? s_->bounds : std::vector<std::array<float,4>>{}; }
 bool Host::Poll() {
     if (!s_ || s_->mutex->AcquireSync(1, 0) != S_OK) return false;
     s_->context->CopyResource(s_->copy.Get(), s_->shared.Get()); s_->context->Flush();
-    s_->mutex->ReleaseSync(0); s_->received = true; s_->frame = s_->status->frames; return true;
+    s_->frame = s_->status->sequence;
+    s_->bounds.clear();
+    for (const auto &raw : s_->status->bounds) {
+        std::array<float,4> rect{};
+        for (size_t i=0;i<4;++i) rect[i]=std::isfinite(raw[i]) ? std::clamp(raw[i],-2.f,3.f) : 0;
+        s_->bounds.push_back(rect);
+    }
+    s_->mutex->ReleaseSync(0); s_->received = true; return true;
 }
 bool Host::Ready() const { return s_ && s_->received && s_->status->state == 2; }
 bool Host::Failed(std::wstring *why) const {

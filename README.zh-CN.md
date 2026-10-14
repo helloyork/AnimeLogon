@@ -11,6 +11,7 @@ AnimeLogon 使用自己绘制的叠层替换了 Windows 10/11 的锁屏界面，
 
 - [x] 在锁屏和开机登录界面全屏播放视频
 - [x] 自定义时钟样式
+- [x] 分层场景壁纸（HLSL 和 Lottie），可直接调整参数和各层摆放
 - [ ] 小组件
 
 ## 系统要求
@@ -33,7 +34,9 @@ AnimeLogon 使用自己绘制的叠层替换了 Windows 10/11 的锁屏界面，
 
 锁定电脑（<kbd>Win</kbd>+<kbd>L</kbd>）或重新启动后，锁屏显示当前使用的主题。按任意键或点击鼠标，即显示 Windows 登录界面。
 
-如需更换，在设置的「主题库」中单击一个主题即可套用。视频、图片和主题包（.altheme）用「导入…」添加，导入的主题会直接设为当前主题。选择主题的「自定义」可以调整壁纸和组件。主题可以导出为 .altheme 文件分享给他人。
+如需更换，在设置的「主题库」中单击一个主题即可套用。视频、图片、场景（.alscene）和主题包（.altheme）用「导入…」添加，导入的主题会直接设为当前主题。选择主题的「自定义」可以调整壁纸和组件。主题可以导出为 .altheme 文件分享给他人。
+
+场景的可调项显示在主题页的「壁纸」栏，无需再次提权。卡片悬停时可以查看动画。制作场景与使用 `scene_preview` 输出图片、帧序列，见 [场景作者指南](tools/SCENES.md)。
 
 ## 对系统的更改
 
@@ -80,7 +83,6 @@ cmake --build --preset x64-release
 规划中：
 
 - 自定义锁屏元素（小组件），采用声明式格式定义
-- 动态场景渲染
 
 ## 参与贡献
 
@@ -93,3 +95,5 @@ cmake --build --preset x64-release
 MIT © 2026 Nomen (helloyork)。详见 [LICENSE](LICENSE)。
 
 `vendor/webview2` 中包含 Microsoft Edge WebView2 SDK 的头文件和加载器（BSD 3-Clause），加载器 `WebView2Loader.dll` 随 AnimeLogon 一起安装。
+
+`vendor/thorvg` 包含 ThorVG 1.1.2（MIT）和其内嵌 RapidJSON 的许可证，仅场景沙箱链接 ThorVG。来源与构建范围见 [SOURCE.md](vendor/thorvg/SOURCE.md)。

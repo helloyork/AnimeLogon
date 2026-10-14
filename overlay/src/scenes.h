@@ -21,6 +21,8 @@ public:
     void Video(const std::wstring &id, Presenter &presenter, const VideoPlayer::Frame &frame, int width, int height);
 private:
     struct Entry {
+        std::wstring id;
+        animelogon::skin::Values values;
         std::unique_ptr<animelogon::scene::Host> host;
         int width = 0, height = 0, failures = 0;
         ULONGLONG last = 0, fade = 0;

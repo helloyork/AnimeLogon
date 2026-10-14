@@ -19,6 +19,7 @@ Wallpaper WallpaperOf(const ResolvedTheme &theme) {
         w.source = Source::Gradient;
     } else if (info.kind == animelogon::WallpaperKind::Scene) {
         w.source = Source::Scene;
+        w.values = theme.wallpaperValues;
         w.path = info.imagePath;
         w.sceneDir = info.scenePath.substr(0, info.scenePath.find_last_of(L'\\'));
         w.videoPath = info.videoPath;

@@ -20,6 +20,8 @@
 #include "json.h"
 #include "library.h"
 #include "pictures.h"
+#include "agent.h"
+#include "animelogon/scenepreview.h"
 
 namespace app {
 
@@ -71,6 +73,8 @@ private:
     // display when spanning, otherwise the display (the theme's own in per-monitor mode, else
     // the main one).
     void Shape(const std::wstring &themeId, UINT width, UINT *height) const;
+    bool SceneFrame(const std::wstring &id, UINT width, UINT height, double time, bool motion,
+                    std::vector<uint8_t> *bytes, std::wstring *bounds);
     // Where the displays are in a picture `width` x `height` when spanning; empty otherwise.
     std::vector<Screen> Wall(UINT width, UINT height) const { return app::Wall(library_.settings(), monitors_, width, height); }
 
@@ -97,6 +101,15 @@ private:
     std::vector<Screen> screens_;
     unsigned previewRev_ = 0;
     bool saveFailed_ = false;
+    struct SceneEntry {
+        std::unique_ptr<animelogon::scene::Preview> preview;
+        std::wstring signature;
+        animelogon::WallpaperInfo wallpaper;
+        ULONGLONG used = 0;
+        bool failed = false;
+    };
+    std::map<std::wstring,SceneEntry> scenePreviews_;
+    PreviewMedia previewMedia_;
 
     // An import: staged on `worker_`, installed by the elevated helper afterwards.
     std::thread worker_;

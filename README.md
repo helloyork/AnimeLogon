@@ -12,6 +12,7 @@ can place videos, widgets and other content on it.
 
 - [x] Full-screen video on the lock screen and on the sign-in screen at startup
 - [x] Custom clock styles
+- [x] Layered HLSL and Lottie scene wallpapers, with editable parameters and layer placement
 - [ ] Widgets
 
 ## Requirements
@@ -37,9 +38,13 @@ Lock the computer (<kbd>Win</kbd>+<kbd>L</kbd>) or restart it. The lock screen s
 until you press a key or click, and the Windows sign-in screen appears.
 
 To change it, click a theme in the settings' theme library. Videos, pictures and theme packages
-(.altheme) are added with **Import…**, and an imported theme is put in use at once. Select
+(.altheme), along with scenes (.alscene), are added with **Import…**, and an imported theme is put in use at once. Select
 **Customize** on a theme to change its wallpaper and widgets. Themes can be exported as .altheme
 files to share.
+
+Scene controls appear under **Wallpaper** on the theme page and do not need elevation.
+Hover a scene card to play it. See the [scene author guide](tools/SCENES.md) for the format
+and the `scene_preview` image and frame-sequence tool.
 
 ## Changes to your system
 
@@ -90,7 +95,6 @@ Options:
 Planned:
 
 - Custom lock screen elements (widgets), defined in a declarative format
-- Rendered animated scenes
 
 ## Contributing
 
@@ -105,3 +109,6 @@ MIT © 2026 Nomen (helloyork). See [LICENSE](LICENSE).
 
 Includes the headers and loader of the Microsoft Edge WebView2 SDK (BSD 3-Clause) in
 `vendor/webview2`. The loader, `WebView2Loader.dll`, is installed with AnimeLogon.
+
+`vendor/thorvg` contains ThorVG 1.1.2 (MIT) and the licence for its embedded RapidJSON.
+Only the sandboxed scene renderer links ThorVG. See [SOURCE.md](vendor/thorvg/SOURCE.md).

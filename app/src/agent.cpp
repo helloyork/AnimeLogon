@@ -6,6 +6,9 @@
 
 #include <cmath>
 #include <string>
+#include <mutex>
+#include <thread>
+#include <atomic>
 
 #pragma warning(push)
 #pragma warning(disable : 4265 4946 5205)
@@ -42,14 +45,17 @@ uint64_t NowTicks() {
 // Whether any display's theme has a component that shows what is playing.
 bool ThemeShowsMedia() {
     const Settings settings = LoadSettings(false);
-    if (!settings.media || !settings.components) return false;
+    if (!settings.media) return false;
     std::vector<std::wstring> monitors{L""};
     if (settings.monitorMode == MonitorMode::PerMonitor)
         for (const auto &[monitor, theme] : settings.screens) monitors.push_back(monitor);
-    for (const std::wstring &monitor : monitors)
-        for (const ResolvedComponent &c : ResolveTheme(settings, monitor).components)
+    for (const std::wstring &monitor : monitors) {
+        const auto resolved = ResolveTheme(settings,monitor);
+        if (resolved.wallpaper && resolved.wallpaper->kind == WallpaperKind::Scene) return true;
+        for (const ResolvedComponent &c : resolved.components)
             for (data::Source s : skin::SourcesOf(c.skin))
                 if (s == data::Source::Media) return true;
+    }
     return false;
 }
 
@@ -81,7 +87,7 @@ uint64_t FileTimeOf(const winrt::Windows::Foundation::DateTime &t) {
 }
 
 // What is playing now, as the media controls report it.
-data::Media Read(const GlobalSystemMediaTransportControlsSessionManager &manager) {
+data::Media Read(const GlobalSystemMediaTransportControlsSessionManager &manager, bool metadata = true) {
     data::Media m;
     const GlobalSystemMediaTransportControlsSession session = manager.GetCurrentSession();
     if (!session) return m;
@@ -91,14 +97,16 @@ data::Media Read(const GlobalSystemMediaTransportControlsSessionManager &manager
     case GlobalSystemMediaTransportControlsSessionPlaybackStatus::Paused: m.state = data::MediaState::Paused; break;
     default: return m;  // stopped, closed, changing: nothing to show
     }
-    const auto properties = session.TryGetMediaPropertiesAsync().get();
-    if (properties) {
-        m.title = data::CleanText(std::wstring(properties.Title()));
-        m.artist = data::CleanText(std::wstring(properties.Artist()));
-        m.album = data::CleanText(std::wstring(properties.AlbumTitle()));
+    if (metadata) {
+        const auto properties = session.TryGetMediaPropertiesAsync().get();
+        if (properties) {
+            m.title = data::CleanText(std::wstring(properties.Title()));
+            m.artist = data::CleanText(std::wstring(properties.Artist()));
+            m.album = data::CleanText(std::wstring(properties.AlbumTitle()));
+        }
+        if (m.title.empty()) return data::Media{};
+        m.app = data::CleanText(AppName(std::wstring(session.SourceAppUserModelId())));
     }
-    if (m.title.empty()) return data::Media{};  // nothing worth showing
-    m.app = data::CleanText(AppName(std::wstring(session.SourceAppUserModelId())));
     if (const auto rate = playback.PlaybackRate()) m.rate = std::max(0.0, rate.Value());
     const auto timeline = session.GetTimelineProperties();
     const double start = std::chrono::duration<double>(timeline.StartTime()).count();
@@ -150,6 +158,44 @@ private:
 };
 
 }  // namespace
+
+struct PreviewMedia::State {
+    std::mutex mutex;
+    std::atomic<ULONGLONG> wanted{0};
+    std::atomic<bool> ready{false};
+    data::Media media;
+    HANDLE stop = CreateEventW(nullptr,TRUE,FALSE,nullptr);
+    std::thread worker;
+    State() {
+        worker=std::thread([this] {
+            const HRESULT com=CoInitializeEx(nullptr,COINIT_MULTITHREADED);
+            GlobalSystemMediaTransportControlsSessionManager manager{nullptr};
+            while (WaitForSingleObject(stop,500) == WAIT_TIMEOUT) {
+                data::Media next;
+                const bool active=wanted.load() > GetTickCount64();
+                try {
+                    if (active) {
+                        if (!manager) manager=GlobalSystemMediaTransportControlsSessionManager::RequestAsync().get();
+                        next=Read(manager,false);
+                    } else manager=nullptr;
+                } catch (...) { manager=nullptr; }
+                std::lock_guard<std::mutex> lock(mutex); media=std::move(next); ready=active;
+            }
+            manager=nullptr; if (SUCCEEDED(com)) CoUninitialize();
+        });
+    }
+    ~State() { SetEvent(stop); worker.join(); CloseHandle(stop); }
+};
+PreviewMedia::PreviewMedia() = default;
+PreviewMedia::~PreviewMedia() = default;
+data::Media PreviewMedia::Get(bool enabled, bool *ready) {
+    if (!enabled) { if (s_) s_->wanted=0; if (ready) *ready=true; return {}; }
+    if (!s_) s_=std::make_unique<State>();
+    const auto now=GetTickCount64();
+    if (s_->wanted.exchange(now+1500) <= now) s_->ready=false;
+    if (ready) *ready=s_->ready.load();
+    std::lock_guard<std::mutex> lock(s_->mutex); return s_->media;
+}
 
 int RunAgent() {
     instance::Guard only;

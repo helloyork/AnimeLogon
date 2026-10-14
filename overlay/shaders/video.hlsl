@@ -31,7 +31,11 @@ float4 PS(float4 pos : SV_Position) : SV_Target {
     // Pictures are drawn opaque, whatever their fourth byte says.
     if (source > 1.5) {
         float3 rgb = any(uv < 0) || any(uv > 1) ? float3(0,0,0) : picture.Sample(linearClamp, uv).rgb;
-        if (liveMix > 0) rgb = lerp(rgb, scene.Sample(linearClamp, pos.xy * liveScale + liveOffset).rgb, liveMix);
+        if (liveMix > 0) {
+            float2 liveUV = pos.xy * liveScale + liveOffset;
+            float3 liveRGB = any(liveUV < 0) || any(liveUV > 1) ? float3(0,0,0) : scene.Sample(linearClamp, liveUV).rgb;
+            rgb = lerp(rgb, liveRGB, liveMix);
+        }
         return float4(rgb * (1.0 - dim), 1.0);
     }
     if (any(uv < 0) || any(uv > 1)) return float4(0,0,0,1);

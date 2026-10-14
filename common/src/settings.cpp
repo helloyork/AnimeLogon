@@ -60,6 +60,17 @@ bool ParseThemeOverride(std::wstring_view rest, std::wstring_view value, Setting
     if (inner == std::wstring_view::npos) return false;
     const std::wstring instance(what.substr(0, inner));
     const std::wstring name(what.substr(inner + 1));
+    if (instance == L"wallpaper") {
+        bool key = skin::IsSettingId(name) && name != L"ref" && name != L"visible";
+        if (name.size() > 3 && name[0] == L'p' && name[1] >= L'1' && name[1] <= L'8' && name[2] == L'.') {
+            const auto attribute=name.substr(3);
+            key=attribute == L"anchor" || attribute == L"offset-x" || attribute == L"offset-y" ||
+                attribute == L"size" || attribute == L"opacity" || attribute == L"visible";
+        }
+        if (!key || !IsTypedValueText(value)) return false;
+        s->themeOverrides[themeId].wallpaperValues[name] = value;
+        return true;
+    }
     if (!theme::IsInstanceId(instance)) return false;
     if (name == L"ref") {
         if (!IsComponentId(std::wstring(value))) return false;
@@ -208,6 +219,8 @@ void AppendOverrides(const Settings &s, std::wstring *out) {
         const std::wstring prefix = kThemePrefix + themeId + L".";
         if (o.wallpaper) *out += prefix + L"wallpaper = " + *o.wallpaper + L"\r\n";
         if (o.fit) *out += prefix + L"fit = " + ToString(*o.fit) + L"\r\n";
+        for (const auto &[key, value] : o.wallpaperValues)
+            *out += prefix + L"wallpaper." + key + L" = " + value + L"\r\n";
         for (const auto &[instance, io] : o.instances) {
             if (io.ref) *out += prefix + instance + L".ref = " + *io.ref + L"\r\n";
             if (io.visible) *out += prefix + instance + L".visible = " + (*io.visible ? L"true" : L"false") + L"\r\n";

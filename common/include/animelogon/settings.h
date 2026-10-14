@@ -58,6 +58,7 @@ struct InstanceOverrides {
 struct ThemeOverrides {
     std::optional<std::wstring> wallpaper;  // a wallpaper id, "default" or "none"
     std::optional<Scaling> fit;
+    skin::Values wallpaperValues;  // scene settings and pN layer adjustments
     std::map<std::wstring, InstanceOverrides> instances;  // by instance id
 };
 

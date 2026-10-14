@@ -355,5 +355,6 @@ bool VideoPlayer::FrameAt(double t, Frame *frame, bool *changed) {
     frame->chroma = s.chromaView.Get();
     frame->uMax = (float)displayW_ / (float)allocW_;
     frame->vMax = (float)displayH_ / (float)allocH_;
+    frame->time = s.pts;
     return true;
 }

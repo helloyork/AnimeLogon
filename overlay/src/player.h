@@ -33,6 +33,7 @@ public:
         ID3D11ShaderResourceView *chroma = nullptr;
         // The visible part of the texture, as a fraction of its size.
         float uMax = 1.0f, vMax = 1.0f;
+        double time = 0;  // decoded presentation time, including loops
     };
 
     // The newest decoded frame due at `t` (seconds since playback began, never wrapping).

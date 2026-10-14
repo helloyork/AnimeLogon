@@ -44,6 +44,10 @@ std::vector<std::wstring> Assets(const Document &document, bool compiled);
 std::wstring BytecodeName(const std::wstring &source);
 const File *Find(const Files &files, const std::wstring &name);
 bool Accepts(const Document &document, const std::wstring &id, const std::wstring &value);
+std::vector<skin::Part> Parts(const Document &document);
+std::wstring Effective(const Document &document, const skin::Values &values, const std::wstring &key);
+Layer Placed(const Document &document, const skin::Values &values, size_t index);
+Document Bake(const Document &document, const skin::Values &values, std::wstring *why = nullptr);
 std::wstring BindingText(const Document &document, const skin::Values &values, const std::wstring &binding);
 // Scalars, colors and two to four comma-separated finite coordinates.
 std::vector<float> Components(const std::wstring &literal);
