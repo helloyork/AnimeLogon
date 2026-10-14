@@ -15,6 +15,7 @@ private:
         int width = 0, height = 0;
         std::vector<uint8_t> pixels;
         WNDPROC inputHandler = nullptr;
+        ~Window() { if (hwnd) DestroyWindow(hwnd); }
     };
     static LRESULT CALLBACK Proc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp);
     std::vector<std::unique_ptr<Window>> windows_;

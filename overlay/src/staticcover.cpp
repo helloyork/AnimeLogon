@@ -4,7 +4,7 @@
 namespace {
 constexpr wchar_t kClass[] = L"AnimeLogonStaticCover";
 }
-StaticCover::~StaticCover() { for (auto &w : windows_) if (w->hwnd) DestroyWindow(w->hwnd); }
+StaticCover::~StaticCover() = default;
 HWND StaticCover::primary() const { return windows_.empty() ? nullptr : windows_.front()->hwnd; }
 LRESULT CALLBACK StaticCover::Proc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp) {
     if (message == WM_NCCREATE) SetWindowLongPtrW(hwnd,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(reinterpret_cast<CREATESTRUCTW *>(lp)->lpCreateParams));
@@ -23,6 +23,7 @@ LRESULT CALLBACK StaticCover::Proc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp
 bool StaticCover::Show(const std::vector<Presenter::Target> &targets, WNDPROC handler) {
     WNDCLASSW wc{}; wc.lpfnWndProc = Proc; wc.hInstance = GetModuleHandleW(nullptr); wc.lpszClassName = kClass;
     RegisterClassW(&wc);
+    std::vector<std::unique_ptr<Window>> fresh;
     for (const auto &t : targets) {
         auto w = std::make_unique<Window>(); w->inputHandler = handler;
         w->width = t.rect.right-t.rect.left; w->height = t.rect.bottom-t.rect.top;
@@ -43,8 +44,10 @@ bool StaticCover::Show(const std::vector<Presenter::Target> &targets, WNDPROC ha
         if (!w->hwnd) return false;
         SetLayeredWindowAttributes(w->hwnd,0,255,LWA_ALPHA);
         ShowWindow(w->hwnd,SW_SHOWNOACTIVATE); UpdateWindow(w->hwnd);
-        windows_.push_back(std::move(w));
+        fresh.push_back(std::move(w));
     }
+    if (fresh.empty()) return false;
+    windows_ = std::move(fresh);
     return !windows_.empty();
 }
 void StaticCover::Opacity(float opacity) {

@@ -633,7 +633,16 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
         for (const auto &target : targets) scene = scene || target.wallpaper.source == plan::Source::Scene;
         if (!scene) return false;
         scenes.FailAll(L"graphics device was reset");
-        if (!staticCover.Show(targets,WndProc)) return false;
+        std::vector<Presenter::Target> cpuTargets;
+        const auto monitors = animelogon::EnumerateMonitors();
+        const RECT wall = animelogon::VirtualBounds(monitors);
+        for (size_t i = 0; i < monitors.size(); ++i) {
+            auto target = targets[std::min(i,targets.size()-1)];
+            target.rect = monitors[i].rect;
+            target.canvas = settings.monitorMode == animelogon::MonitorMode::Span ? wall : target.rect;
+            cpuTargets.push_back(std::move(target));
+        }
+        if (!staticCover.Show(cpuTargets.empty() ? targets : cpuTargets,WndProc)) return false;
         presenter.Hide();
         UnregisterHotKey(g_overlay.inputWindow,kRescueHotkeyId);
         if (power) UnregisterPowerSettingNotification(power);
@@ -643,6 +652,7 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
         keyhook::State().notify.store(g_overlay.inputWindow);
         power = RegisterPowerSettingNotification(g_overlay.inputWindow,&kConsoleDisplayState,DEVICE_NOTIFY_WINDOW_HANDLE);
         audio.FadeOut(.2f); emergency = true;
+        g_overlay.displaysChanged = false;
         ALOG(L"scene: graphics reset -- CPU static cover is up; input and fade remain active");
         return true;
     };
@@ -703,7 +713,7 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
         // Wake just after the compositor's next frame, so the picture drawn then is ready for
         // the one after; a fixed period drifts against the display and drops frames.
         double wait = period;
-        if (presenter.SecondsToNextComposition(&wait)) wait += kAfterComposeSeconds;
+        if (!emergency && presenter.SecondsToNextComposition(&wait)) wait += kAfterComposeSeconds;
         LARGE_INTEGER due;
         due.QuadPart = -(LONGLONG)(wait * 1e7);
         SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE);
@@ -711,6 +721,11 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
 
         Beat();
         if (!PumpMessages()) {  // WM_QUIT: rescue hotkey or shutdown
+            end = LiveEnd::Leave;
+            break;
+        }
+        // A mode change may remove the device before the next Present or decoder error.
+        if (!emergency && presenter.DeviceLost() && !staticAfterReset()) {
             end = LiveEnd::Leave;
             break;
         }
@@ -832,6 +847,10 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
 
         // The windows were laid out for displays that are no longer there.
         if (g_overlay.displaysChanged && !g_overlay.woke && !opt.windowed) {
+            if (emergency) {
+                if (!staticAfterReset()) { end = LiveEnd::Leave; break; }
+                continue;
+            }
             ALOG(L"overlay: the displays changed -- laying the screen out again");
             end = LiveEnd::Rebuild;
             break;
