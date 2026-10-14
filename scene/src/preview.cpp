@@ -29,6 +29,7 @@ struct Preview::State {
     double videoTime = -1;
     std::wstring videoPath;
     bool sent = false;
+    bool sentRunning = false;
     float sentTime = -1;
     Inputs sentInputs;
     std::vector<uint8_t> still;
@@ -118,19 +119,19 @@ bool Preview::Frame(const Inputs &input, bool running, std::vector<uint8_t> *bit
     const bool received=s.sent && s.host.Ready() && s.host.FrameSequence() >= s.requested;
     std::vector<uint8_t> completed;
     if (received) completed=s.host.Bitmap(why);
-    bool videoChanged=false;
+    bool videoChanged=false, videoUpdated=false;
     if (s.hasVideo) {
         VideoPlayer::Frame frame;
         if (s.player.FrameAt(input.time,&frame,&videoChanged) && (videoChanged || !s.videoReady)) {
-            s.videoReady=s.host.UpdateVideo([&](ID3D11Texture2D *t) { s.Video(t,frame); });
-            s.videoTime=frame.time;
+            videoUpdated=s.videoReady=s.host.UpdateVideo([&](ID3D11Texture2D *t) { s.Video(t,frame); });
+            if (videoUpdated) s.videoTime=frame.time;
         }
     }
-    const bool request = !s.sent || input.time != s.sentTime || videoChanged || input.day != s.sentInputs.day ||
+    const bool request = !s.sent || input.time != s.sentTime || videoUpdated || running != s.sentRunning || input.day != s.sentInputs.day ||
         input.battery != s.sentInputs.battery || input.progress != s.sentInputs.progress || input.playing != s.sentInputs.playing;
     if (request) {
         Inputs in=input; in.values=s.values; s.requested=s.host.SetRunning(running,in,60,true);
-        s.sent=true; s.sentTime=input.time; s.sentInputs=input;
+        s.sent=true; s.sentRunning=running; s.sentTime=input.time; s.sentInputs=input;
     }
     if ((s.hasVideo && !s.videoReady) || (!running && s.host.FrameSequence() < s.requested)) return false;
     if (s.author && s.hasVideo && input.time-s.videoTime > s.player.frameSeconds()*1.25) return false;

@@ -87,6 +87,22 @@ int wmain(int argc, wchar_t **argv) {
         return fail(L"cannot open scene shared textures");
     Renderer renderer;
     if (!renderer.Open(device.Get(), std::move(files), command->importing != 0, command->width, command->height, &why)) return fail(why);
+    ComPtr<ID3D11Texture2D> videoCopy;
+    LONG videoSequence = 0;
+    auto readVideo = [&](const Inputs &in, DWORD timeout) -> HRESULT {
+        if (in.videoSequence == videoSequence) return S_OK;
+        const HRESULT acquired = videoMutex->AcquireSync(1, timeout);
+        if (acquired != S_OK) return acquired;
+        if (!videoCopy) {
+            D3D11_TEXTURE2D_DESC d{}; video->GetDesc(&d); d.MiscFlags = 0;
+            const HRESULT allocated = device->CreateTexture2D(&d, nullptr, &videoCopy);
+            if (FAILED(allocated)) { videoMutex->ReleaseSync(0); return allocated; }
+        }
+        context->CopyResource(videoCopy.Get(), video.Get());
+        videoSequence = command->videoSequence;
+        context->Flush();
+        return videoMutex->ReleaseSync(0);
+    };
     if (command->importing) {
         const auto packed = Pack(renderer.Normalized());
         if (packed.empty() || packed.size() > command->outputBytes-sizeof(ipc::Status)) return fail(L"normalized scene is too large");
@@ -99,7 +115,11 @@ int wmain(int argc, wchar_t **argv) {
     hr = mutex->AcquireSync(0, 1500);
     if (hr != S_OK) return fail(L"cannot acquire the first scene frame", hr);
     Inputs first = ReadInputs(*command);
-    if (!renderer.Draw(first, nullptr, output.Get(), scale, &cost, &why)) { mutex->ReleaseSync(1); return fail(why); }
+    // The parent can publish a video frame during startup. Acknowledge its inputs only after
+    // consuming that frame, just as in the main loop, rather than returning the imported poster.
+    hr = readVideo(first, 1500);
+    if (hr != S_OK) { mutex->ReleaseSync(0); return fail(L"cannot read the first video input", hr); }
+    if (!renderer.Draw(first, videoCopy.Get(), output.Get(), scale, &cost, &why)) { mutex->ReleaseSync(1); return fail(why); }
     status->sequence = first.sequence;
     for (size_t i=0;i<renderer.Bounds().size();++i) std::copy(renderer.Bounds()[i].begin(),renderer.Bounds()[i].end(),status->bounds[i]);
     context->Flush(); mutex->ReleaseSync(1); InterlockedIncrement(&status->frames);
@@ -134,8 +154,6 @@ int wmain(int argc, wchar_t **argv) {
     InterlockedExchange(&status->state, 2);
     clock.Active(false);
     samples.clear(); ULONGLONG next = GetTickCount64();
-    ComPtr<ID3D11Texture2D> videoCopy;
-    LONG videoSequence=0;
     while (!command->stop) {
         clock.Active(command->running && fps > 0);
         if ((!command->running || fps == 0) && (!command->redraw || command->sequence == status->sequence)) { Sleep(10); next = GetTickCount64(); continue; }
@@ -144,14 +162,9 @@ int wmain(int argc, wchar_t **argv) {
         if (hr == WAIT_TIMEOUT) continue;
         if (hr != S_OK) return fail(L"shared frame synchronization failed", hr);
         const Inputs in = ReadInputs(*command);
-        if (in.videoSequence != videoSequence) {
-            if (videoMutex->AcquireSync(1,0) != S_OK) { mutex->ReleaseSync(0); Sleep(1); continue; }
-            if (!videoCopy) { D3D11_TEXTURE2D_DESC d{}; video->GetDesc(&d); d.MiscFlags = 0; device->CreateTexture2D(&d, nullptr, &videoCopy); }
-            if (!videoCopy) { videoMutex->ReleaseSync(0); mutex->ReleaseSync(0); return fail(L"cannot allocate the video input copy"); }
-            context->CopyResource(videoCopy.Get(), video.Get());
-            videoSequence=command->videoSequence;
-            context->Flush(); videoMutex->ReleaseSync(0);
-        }
+        hr = readVideo(in, 0);
+        if (hr == WAIT_TIMEOUT) { mutex->ReleaseSync(0); Sleep(1); continue; }
+        if (hr != S_OK) { mutex->ReleaseSync(0); return fail(L"cannot read the video input", hr); }
         const ULONGLONG frameStart = GetTickCount64();
         if (!renderer.Draw(in, videoCopy.Get(), output.Get(), scale, &cost, &why)) { mutex->ReleaseSync(1); return fail(why); }
         status->sequence = in.sequence;
