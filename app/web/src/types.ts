@@ -168,6 +168,10 @@ export interface Bound {
   top: number;
   right: number;
   bottom: number;
+  // A panel's points held at a left, centre and right anchor, then at a top, middle and bottom
+  // one: where the logon screen puts the anchor's point, which hanging texts and the last
+  // line's baseline keep from being the box's edge or middle.
+  hold?: number[];
 }
 
 export interface ScreenRect {

@@ -431,7 +431,14 @@ void Host::SendPreview(int seq) {
     for (const Bound &b : bounds_) {
         w.BeginObject().Member(L"instance", b.instance).Member(L"key", b.key).Member(L"screen", (int)b.screen);
         w.Member(L"left", (double)b.rect.left).Member(L"top", (double)b.rect.top);
-        w.Member(L"right", (double)b.rect.right).Member(L"bottom", (double)b.rect.bottom).EndObject();
+        w.Member(L"right", (double)b.rect.right).Member(L"bottom", (double)b.rect.bottom);
+        if (b.holds) {
+            w.Key(L"hold").BeginArray();
+            for (float x : b.holdX) w.Number(x);
+            for (float y : b.holdY) w.Number(y);
+            w.EndArray();
+        }
+        w.EndObject();
     }
     w.EndArray();
     // Several only when spanning: the displays, in the picture's pixels.

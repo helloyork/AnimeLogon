@@ -10,15 +10,20 @@
 #include <objbase.h>
 #include <wrl/client.h>
 
+#include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <map>
 #include <string>
 #include <vector>
 
+#include "animelogon/clock.h"
 #include "animelogon/components.h"
 #include "animelogon/monitors.h"
 #include "animelogon/settings.h"
+#include "animelogon/skin.h"
+#include "animelogon/skinpreview.h"
 #include "animelogon/theme.h"
 #include "animelogon/wallpaper.h"
 
@@ -244,5 +249,50 @@ TEST(AppPicturesLayerIsTheComponentsAlone) {
     CHECK(premultiplied);
     const std::vector<uint8_t> png = app::Png(layer);
     CHECK(png.size() > 8 && png[0] == 0x89 && png[1] == 'P' && png[2] == 'N' && png[3] == 'G');
+    if (SUCCEEDED(co)) CoUninitialize();
+}
+
+// A panel says which of its points is held at its anchor. A centred 12-hour clock is held by the
+// middle of its figures, with the AM/PM marker hanging to their right, and by the baseline of
+// its last line at the bottom; the settings app snaps a dragged panel by these points.
+TEST(SkinPanelsSayThePointTheyAreHeldBy) {
+    const HRESULT co = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    SkinPreview preview;
+    Picture background;
+    background.width = 640;
+    background.height = 360;
+    background.bgra.assign((size_t)640 * 360 * 4, 0);
+    const RegionalFormat us{L"en-US", L"h:mm tt", L"dddd, MMMM d, yyyy"};
+    SYSTEMTIME now{};
+    now.wYear = 2026;
+    now.wMonth = 10;
+    now.wDay = 16;
+    now.wDayOfWeek = 5;
+    now.wHour = 15;
+    now.wMinute = 4;
+    const float margin = 0.07f * 360;
+    auto about = [](float a, float b) { return std::fabs(a - b) <= 1.5f; };
+    for (const wchar_t *anchor : {L"top", L"bottom-right", L"left"}) {
+        Picture out;
+        std::vector<SkinView::Bound> bounds;
+        CHECK(preview.Render(background, skin::Resolve(skin::Default(), {{L"p1.anchor", anchor}}), ClockStyle{}, us, now,
+                             &out, &bounds));
+        const auto p1 = std::find_if(bounds.begin(), bounds.end(), [](const SkinView::Bound &b) { return b.key == L"p1"; });
+        CHECK(p1 != bounds.end());
+        if (p1 == bounds.end()) continue;
+        const SkinView::Bound &b = *p1;
+        CHECK(b.holds);
+        if (std::wstring(anchor) == L"top") {
+            CHECK(about(b.holdX[1], 320.0f) && about(b.holdY[0], margin));
+            CHECK((b.rect.left + b.rect.right) / 2 > b.holdX[1] + 2);  // the marker hangs to the right
+        } else if (std::wstring(anchor) == L"bottom-right") {
+            CHECK(about(b.holdX[2], 640 - margin) && about(b.holdY[2], 360 - margin));
+            CHECK(b.rect.right > b.holdX[2] + 2 && b.rect.bottom > b.holdY[2]);
+        } else {
+            CHECK(about(b.holdX[0], margin) && about(b.holdY[1], 180.0f) && b.holdX[0] == b.rect.left);
+        }
+        // The texts are not placed by an anchor.
+        for (const SkinView::Bound &t : bounds) CHECK(t.key == L"p1" || !t.holds);
+    }
     if (SUCCEEDED(co)) CoUninitialize();
 }

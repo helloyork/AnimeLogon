@@ -44,6 +44,13 @@ public:
     struct Bound {
         std::wstring key;
         D2D1_RECT_F rect{};
+        // A panel's point that is held at its anchor: at a left, centre or right anchor (x) and at
+        // a top, middle or bottom one (y). Texts that hang and the last line's baseline mean this
+        // is not the rectangle's edge or middle. Another column can line the lines up differently,
+        // so only the panel's own column is exact; the other two keep that edge, or the middle, of
+        // the ink where it is. Texts have none.
+        bool holds = false;
+        float holdX[3]{}, holdY[3]{};
     };
     std::vector<Bound> Bounds(size_t slot) const;
 

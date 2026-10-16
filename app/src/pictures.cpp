@@ -274,7 +274,12 @@ bool Pictures::Theme(const theme::Theme &theme, UINT width, UINT height, Draw dr
                     for (const SkinView::Bound &b : placed) {
                         const D2D1_RECT_F at = D2D1::RectF(b.rect.left + r.left, b.rect.top + r.top, b.rect.right + r.left,
                                                            b.rect.bottom + r.top);
-                        bounds->push_back({i.id, b.key, at, s});
+                        Bound placedAt{i.id, b.key, at, s, b.holds};
+                        for (int k = 0; k < 3; ++k) {
+                            placedAt.holdX[k] = b.holdX[k] + r.left;
+                            placedAt.holdY[k] = b.holdY[k] + r.top;
+                        }
+                        bounds->push_back(placedAt);
                     }
             }
             if (whole) drawn = std::move(part);

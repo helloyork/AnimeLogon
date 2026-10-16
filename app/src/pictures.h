@@ -25,6 +25,10 @@ struct Bound {
     std::wstring instance, key;  // key as adjustments name it: p1, p1.l1.t1
     D2D1_RECT_F rect{};
     size_t screen = 0;  // which of the picture's screens it is on
+    // A panel's points held at a left, centre or right anchor and at a top, middle or bottom
+    // one (SkinView::Bound).
+    bool holds = false;
+    float holdX[3]{}, holdY[3]{};
 };
 
 // What a picture of a theme shows.

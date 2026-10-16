@@ -136,6 +136,8 @@ interface Drag {
   row?: number;
   bx?: number;
   by?: number;
+  rx?: number;      // the point it is held by
+  ry?: number;
   snapX?: boolean;
   snapY?: boolean;
   // A resize: how much larger the panel is drawn than it was.
@@ -281,7 +283,7 @@ export function Canvas() {
       last = { [pk + '.anchor']: place.anchor, [pk + '.offset-x']: String(place.ox), [pk + '.offset-y']: String(place.oy) };
       if (lift) hold(lift);
       setDrag({ inst, pk, g, lift, left: place.left, top: place.top, anchor: place.anchor, col: place.col, row: place.row, bx: place.bx, by: place.by,
-        snapX: place.snapX, snapY: place.snapY, readout: posText(place.anchor, place.ox, place.oy) });
+        rx: place.rx, ry: place.ry, snapX: place.snapX, snapY: place.snapY, readout: posText(place.anchor, place.ox, place.oy) });
       if (!lift) liveSet(inst, last, gesture);
     }, moved => {
       if (!moved) {
@@ -427,7 +429,7 @@ export function Canvas() {
               {drag && drag.scale == null && <Anchors g={drag.g} />}
               {drag && drag.scale == null && drag.snapX && <Guide x1={drag.bx!} y1={drag.g.f.top} x2={drag.bx!} y2={drag.g.f.top + drag.g.f.height} />}
               {drag && drag.scale == null && drag.snapY && <Guide x1={drag.g.f.left} y1={drag.by!} x2={drag.g.f.left + drag.g.f.width} y2={drag.by!} />}
-              {g && !whole && <Tether g={g} drag={drag} selRect={selRect} />}
+              {g && !whole && <Tether g={g} drag={drag} />}
             </svg>
 
             {hoverRects.map((r, i) => <div key={i} className={mergeClasses(styles.box, styles.hover)} style={pad(r, 4)} />)}
@@ -505,13 +507,13 @@ function Guide(p: { x1: number; y1: number; x2: number; y2: number }) {
 }
 
 // The anchor the selected panel is placed by, and a dashed line to the point of it held there.
-function Tether({ g, drag, selRect }: { g: Geometry; drag: Drag | null; selRect: Rect | null }) {
+function Tether({ g, drag }: { g: Geometry; drag: Drag | null }) {
   let bx = g.bx, by = g.by, rx = g.rx, ry = g.ry;
-  if (drag && drag.scale == null && selRect && drag.col != null && drag.row != null) {
+  if (drag && drag.scale == null && drag.rx != null && drag.ry != null) {
     bx = drag.bx!;
     by = drag.by!;
-    rx = [selRect.left, selRect.left + selRect.width / 2, selRect.left + selRect.width][drag.col];
-    ry = [selRect.top, selRect.top + selRect.height / 2, selRect.top + selRect.height][drag.row];
+    rx = drag.rx;
+    ry = drag.ry;
   }
   return (
     <>

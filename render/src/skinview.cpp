@@ -402,8 +402,29 @@ bool SkinView::Build(Built &built, size_t index, UINT width, UINT height) {
     built.px = px;
 
     const std::wstring pk = L"p" + std::to_wstring(index + 1);
-    built.bounds.push_back({pk, D2D1::RectF(built.at.x + refX - before, built.at.y + originY + top,
-                                            built.at.x + refX + after, built.at.y + originY + bottom)});
+    Bound whole{pk, D2D1::RectF(built.at.x + refX - before, built.at.y + originY + top, built.at.x + refX + after,
+                                built.at.y + originY + bottom)};
+    whole.holds = true;
+    for (int c = 0; c < 3; ++c) {
+        if (panel.align != skin::Align::Auto) {
+            whole.holdX[c] = built.at.x + refX;  // the lines keep their alignment at every anchor
+            continue;
+        }
+        // How far the ink reaches either side of the point the lines would be aligned by.
+        float left = 0.0f, right = 0.0f;
+        for (const Line &l : lines) {
+            if (!l.layout) continue;
+            const float r = c == 0 ? l.coreLeft : c == 1 ? (l.coreLeft + l.coreRight) / 2.0f : l.coreRight;
+            left = std::max(left, r - l.inkLeft);
+            right = std::max(right, l.inkRight - r);
+        }
+        const D2D1_RECT_F &b = whole.rect;
+        whole.holdX[c] = c == 0 ? b.left + left : c == 2 ? b.right - right : (b.left + b.right) / 2.0f + (left - right) / 2.0f;
+    }
+    whole.holdY[0] = built.at.y + originY + top;
+    whole.holdY[1] = built.at.y + originY + (top + lastBaseline) / 2.0f;
+    whole.holdY[2] = built.at.y + originY + lastBaseline;
+    built.bounds.push_back(whole);
     for (size_t i = 0; i < lines.size(); ++i) {
         const Line &l = lines[i];
         if (!l.layout) continue;
