@@ -1,5 +1,8 @@
 // install.exe: installs AnimeLogon. Requires administrator rights (res/admin.manifest).
-// With --quiet it prints to the parent console; otherwise it shows a message box.
+// Before changing anything it asks whether to go on, since installing turns the Windows lock
+// screen off; a "No" exits with ERROR_CANCELLED and the machine untouched. With --quiet it asks
+// nothing and prints to the parent console instead of showing message boxes: scripted installs
+// tell the person themselves.
 
 #include <windows.h>
 #include <objbase.h>
@@ -8,10 +11,24 @@
 #include <vector>
 
 #include "animelogon/log.h"
+#include "animelogon/machine.h"
 
 #include "engine.h"
 
 namespace {
+
+// What installing takes away from Windows, as the README's "Changes to your system" puts it.
+// Not asked when the Windows lock screen is off already (an update, or a machine where it was
+// turned off before AnimeLogon): then nothing goes that was there.
+bool Agreed(bool quiet) {
+    if (quiet || animelogon::machine::WindowsLockScreenApplied()) return true;
+    const wchar_t *text =
+        L"AnimeLogon 会关闭 Windows 锁屏，换成自己绘制的锁屏。\n\n"
+        L"在此期间，Windows 聚焦和锁屏小组件不可用，也无法在 Windows 设置中更改锁屏图片。\n\n"
+        L"在「AnimeLogon 设置 > 设置」中关闭「启用 AnimeLogon」，或卸载 AnimeLogon，即可恢复。\n\n"
+        L"是否继续安装？";
+    return MessageBoxW(nullptr, text, L"安装 AnimeLogon", MB_YESNO | MB_ICONINFORMATION | MB_DEFBUTTON1) == IDYES;
+}
 
 bool HasArg(int argc, wchar_t **argv, const wchar_t *name) {
     for (int i = 1; i < argc; ++i)
@@ -44,6 +61,7 @@ std::wstring FullPath(const wchar_t *path) {
 
 int wmain(int argc, wchar_t **argv) {
     const bool quiet = HasArg(argc, argv, L"--quiet");
+    if (!Agreed(quiet)) return ERROR_CANCELLED;
     // The Start-menu shortcut is made through COM.
     const HRESULT co = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
 

@@ -55,7 +55,8 @@ and the `scene_preview` image and frame-sequence tool.
   longer be changed in Windows Settings.
 - **Imported videos, pictures and themes are stored on drive C:.** The location cannot be changed.
 
-Uninstalling AnimeLogon restores these settings.
+The installer describes the first two changes and asks before it makes them. Turning off
+**Enable AnimeLogon** in the settings, or uninstalling AnimeLogon, restores these settings.
 
 ## Uninstallation
 
