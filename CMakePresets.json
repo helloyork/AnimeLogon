@@ -26,5 +26,13 @@
     { "name": "x64-release", "configurePreset": "x64", "configuration": "Release" },
     { "name": "arm64-debug", "configurePreset": "arm64", "configuration": "Debug" },
     { "name": "arm64-release", "configurePreset": "arm64", "configuration": "Release" }
+  ],
+  "testPresets": [
+    {
+      "name": "x64-release",
+      "configurePreset": "x64",
+      "configuration": "Release",
+      "output": { "outputOnFailure": true }
+    }
   ]
 }

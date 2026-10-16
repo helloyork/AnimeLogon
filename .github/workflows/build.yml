@@ -16,6 +16,8 @@ jobs:
   build:
     name: ${{ matrix.arch }}
     runs-on: windows-latest
+    # A build and test take a few minutes; anything stuck is ended well before GitHub's six hours.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -28,3 +30,10 @@ jobs:
 
       - name: Build
         run: cmake --build --preset ${{ matrix.arch }}-release
+
+      # ARM64 is cross-built on an x64 runner, so only x64 runs the tests. --verbose prints the
+      # test program's whole output, so the log shows which Media Foundation tests ran and which
+      # said they were skipped.
+      - name: Test
+        if: matrix.arch == 'x64'
+        run: ctest --preset x64-release --verbose

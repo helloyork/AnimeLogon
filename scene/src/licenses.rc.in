@@ -1,0 +1,3 @@
+// Redistributed notices travel inside the renderer binary too.
+901 RCDATA "@PROJECT_SOURCE_DIR@/vendor/thorvg/LICENSE"
+902 RCDATA "@PROJECT_SOURCE_DIR@/vendor/thorvg/src/loaders/lottie/rapidjson/LICENSE"
