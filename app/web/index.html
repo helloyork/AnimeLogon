@@ -3,13 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: blob:; media-src https://wallpapers.animelogon.invalid; style-src 'self'; script-src 'self'">
+<!-- Fluent UI writes its styles into the page at run time, so styles may be inline; scripts still come only from the program itself. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: blob:; media-src https://wallpapers.animelogon.invalid; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'">
 <title>AnimeLogon</title>
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
 <div id="app"></div>
-<div id="toast" role="status" aria-live="polite"></div>
 <script src="app.js"></script>
 </body>
 </html>

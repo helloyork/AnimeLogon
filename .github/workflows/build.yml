@@ -25,6 +25,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # The settings app's page is bundled with esbuild (app/web).
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: app/web/package-lock.json
+
       - name: Configure
         run: cmake --preset ${{ matrix.arch }} -DANIMELOGON_BUILD=${{ github.run_number }}
 
@@ -37,3 +44,8 @@ jobs:
       - name: Test
         if: matrix.arch == 'x64'
         run: ctest --preset x64-release --verbose
+
+      # The build installed the page's packages; the bundler does not check types, so this does.
+      - name: Check the page's types
+        if: matrix.arch == 'x64'
+        run: npm run check --prefix app/web

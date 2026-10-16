@@ -56,6 +56,7 @@ AnimeLogon 使用自己绘制的叠层替换了 Windows 10/11 的锁屏界面，
 
 - Visual Studio 2022 或更高版本，安装「使用 C++ 的桌面开发」工作负载（构建 ARM64 还需安装「MSVC ARM64 生成工具」）
 - CMake 3.25 或更高版本
+- Node.js 20 或更高版本（含 npm），用于打包设置程序的界面
 
 ```powershell
 git clone https://github.com/helloyork/AnimeLogon.git

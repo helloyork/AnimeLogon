@@ -600,6 +600,26 @@ void Host::OnResource(ICoreWebView2WebResourceRequestedEventArgs *args) {
     } else if (path == L"preview") {
         body = previewBytes_;
         type = previewLayer_ ? L"image/png" : L"image/bmp";
+    } else if (path.rfind(L"lift/without/", 0) == 0 || path.rfind(L"lift/only/", 0) == 0) {
+        // A component lifted out of the open theme's picture, so that a drag on the page can move
+        // its pixels at once (app/web/src/preview.ts): the picture as the stage shows it but
+        // without that component, or the component alone over nothing. The page lays them over
+        // each other until the drag ends and the picture is drawn again.
+        const bool alone = path.rfind(L"lift/only/", 0) == 0;
+        const std::wstring id = path.substr(alone ? 10 : 13);
+        const bool layer = alone || previewLayer_;
+        if (!library_.open().empty() && previewW_ >= 16 && previewH_ >= 16) {
+            theme::Theme t = library_.Edited(library_.open());
+            bool found = false;
+            for (theme::Instance &i : t.components) {
+                if (i.id == id) found = i.visible;
+                if (alone ? i.id != id : i.id == id) i.visible = false;
+            }
+            const std::vector<Screen> wall = Wall(previewW_, previewH_);
+            if (found && pictures_.Theme(t, previewW_, previewH_, layer ? Draw::ComponentsOnly : Draw::Everything, &p, nullptr, &wall))
+                body = layer ? Png(p) : Bmp(p);
+        }
+        type = layer ? L"image/png" : L"image/bmp";
     } else if (path.rfind(L"thumb/", 0) == 0 && EndsWith(path, L".bmp")) {
         const std::wstring id = path.substr(6, path.size() - 10);
         if (library_.Entry(id)) {

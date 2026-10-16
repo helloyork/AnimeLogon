@@ -69,6 +69,7 @@ Prerequisites:
 - Visual Studio 2022 or later with the **Desktop development with C++** workload
   (add **MSVC ARM64 build tools** for ARM64)
 - CMake 3.25 or later
+- Node.js 20 or later, with npm, to bundle the settings app's page
 
 ```powershell
 git clone https://github.com/helloyork/AnimeLogon.git
