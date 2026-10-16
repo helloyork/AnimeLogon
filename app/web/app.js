@@ -41,6 +41,70 @@ const ICON = {
 };
 const shield = () => h('span', { class: 'uac', title: '需要管理员确认', html: ICON.shield });
 
+/* ================= motion =================
+   Windows' own timings (WinUI's ControlFaster/Fast/NormalAnimationDuration) and its curve for
+   things that arrive; things leave quicker and speeding up. The page is rebuilt on every change,
+   so a control that changes state is a new element that never transitions by itself: what moves
+   is played on the new element, from where the old one was. None of it when the person asked for
+   less motion -- Windows' "Animation effects" off reaches the page as prefers-reduced-motion. */
+const MOTION = { faster: 83, fast: 167, normal: 250, slow: 333, arrive: 'cubic-bezier(0, 0, 0, 1)', leave: 'cubic-bezier(0.7, 0, 1, 0.5)', shift: 'cubic-bezier(0.33, 0, 0.67, 1)' };
+const calm = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+function anim(el, frames, o) {
+  if (!el || !el.animate || calm()) return null;
+  return el.animate(frames, Object.assign({ duration: MOTION.normal, easing: MOTION.arrive }, o));
+}
+// Fades a node out and then removes it; at once when nothing moves.
+function retire(node, duration = MOTION.fast) {
+  node.style.pointerEvents = 'none';
+  const a = anim(node, [{ opacity: getComputedStyle(node).opacity }, { opacity: 0 }], { duration, easing: 'linear', fill: 'forwards' });
+  if (a) a.finished.then(() => node.remove(), () => node.remove()); else node.remove();
+}
+const tok = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+// How a page comes in: across the tabs it rises a little; into a theme it grows from slightly
+// smaller, and back out of one it settles from slightly larger (Windows' drill-in and back).
+function arrive(nodes, how, step = 30) {
+  const from = { rise: 'translateY(24px)', in: 'scale(.97)', out: 'scale(1.02)' }[how];
+  nodes.forEach((n, i) => {
+    anim(n, [{ transform: from }, { transform: 'none' }], { duration: MOTION.slow, delay: i * step, fill: 'backwards' });
+    anim(n, [{ opacity: 0 }, { opacity: 1 }], { duration: MOTION.fast, delay: i * step, easing: 'linear', fill: 'backwards' });
+  });
+}
+// Switches and pickers (segmented buttons, the anchor grid) between two renders: what each showed,
+// and which the person just pressed, since pressing one changes it before the page is rebuilt.
+const pressed = new Map();  // key -> { at, from }
+const pickIndex = g => [...g.querySelectorAll('button')].findIndex(b => b.getAttribute('aria-pressed') === 'true');
+function controlsOf(root) {
+  const m = new Map();
+  if (!root) return m;
+  for (const t of root.querySelectorAll('.tg[id]')) m.set(t.id, t.getAttribute('aria-checked') === 'true');
+  for (const g of root.querySelectorAll('[data-pick]')) m.set(g.dataset.pick, pickIndex(g));
+  return m;
+}
+function settleControls(root, before) {
+  const now = performance.now(), was = key => {
+    const p = pressed.get(key);
+    if (p) pressed.delete(key);
+    return p && now - p.at < 300 ? p.from : before.get(key);
+  };
+  for (const t of root.querySelectorAll('.tg[id]')) {
+    const on = t.getAttribute('aria-checked') === 'true', old = was(t.id);
+    if (old == null || old === on) continue;
+    anim(t, [{ backgroundColor: old ? tok('--accent') : 'transparent', borderColor: old ? tok('--accent') : tok('--muted') }], { duration: MOTION.fast, easing: 'linear' });
+    anim(t, [{ transform: `translateX(${old ? 20 : 0}px)`, backgroundColor: old ? tok('--on-accent') : tok('--muted') }, { transform: `translateX(${on ? 20 : 0}px)` }], { duration: MOTION.fast, pseudoElement: '::after' });
+  }
+  for (const g of root.querySelectorAll('[data-pick]')) {
+    const buttons = [...g.querySelectorAll('button')], cur = pickIndex(g), old = was(g.dataset.pick);
+    if (old == null || old === cur || old < 0 || cur < 0 || !buttons[old]) continue;
+    if (g.classList.contains('seg')) {
+      anim(buttons[old], [{ backgroundColor: tok('--accent'), color: tok('--on-accent') }], { duration: MOTION.fast, easing: 'linear' });
+      anim(buttons[cur], [{ backgroundColor: 'transparent', color: tok('--text') }], { duration: MOTION.fast, easing: 'linear' });
+    } else {
+      anim(buttons[old], [{ width: '10px', height: '10px', backgroundColor: tok('--accent') }], { duration: MOTION.fast, pseudoElement: '::after' });
+      anim(buttons[cur], [{ width: '6px', height: '6px', backgroundColor: tok('--faint') }], { duration: MOTION.fast, pseudoElement: '::after' });
+    }
+  }
+}
+
 const ANCHORS = ['top-left', 'top', 'top-right', 'left', 'center', 'right', 'bottom-left', 'bottom', 'bottom-right'];
 const ANCHOR_NAMES = ['左上', '上方居中', '右上', '左侧居中', '居中', '右侧居中', '左下', '下方居中', '右下'];
 const WEIGHT_NAMES = { 100: '极细', 200: '特细', 300: '细', 400: '常规', 500: '中等', 600: '半粗', 700: '粗', 800: '特粗', 900: '黑' };
@@ -54,7 +118,7 @@ let ENV = { monitors: [], fonts: [], devices: [], on: false, installed: false };
 const UI = { view: 'library', tab: 'mine', sel: { inst: null, part: null }, screen: 0, hover: null, noVideo: false, more: false, busy: null, tick: 0 };
 // The open theme's picture and the edits on their way to it. Edits made while a picture is being
 // drawn wait, and only the newest of them is sent.
-const PV = { rev: 0, shown: 0, seq: 0, width: 0, height: 0, bounds: [], screens: [], layer: false, asked: '', waiting: false, pending: null, commit: false };
+const PV = { rev: 0, shown: 0, seq: 0, width: 0, height: 0, bounds: [], screens: [], layer: false, asked: '', waiting: false, pending: null, commit: false, wallpaper: '' };
 let gestures = 0;
 
 function send(op, args) { if (native) native.postMessage(Object.assign({ op }, args || {})); }
@@ -72,7 +136,12 @@ function receive(m) {
     case 'preview': onPreview(m); break;
     case 'toast': toast(m.text); break;
     case 'problem': problem(m.text); break;
-    case 'busy': UI.busy = m.label ? { label: m.label, percent: m.percent } : null; renderBusy(); break;
+    case 'busy': {
+      const was = !!UI.busy;
+      UI.busy = m.label ? { label: m.label, percent: m.percent } : null; renderBusy();
+      if (!was && UI.busy) anim($('#busy'), [{ opacity: 0, transform: 'translateY(-4px)' }], { duration: MOTION.fast });
+      break;
+    }
     case 'added': UI.sel = { inst: m.instance, part: null }; break;
     case 'navigate': UI.view = 'theme'; UI.sel = { inst: null, part: null }; break;
   }
@@ -138,6 +207,8 @@ function videoEl(ref, fit, cls) {
   const v = h('video', { class: cls, muted: true, loop: true, playsinline: true, preload: 'auto', 'aria-hidden': 'true', src: videoUrl(ref) });
   v.muted = true;
   v.style.objectFit = OBJECT_FIT[fit] || 'cover';
+  // Over its still the first frame comes in softly; the lock screen preview starts it as the logon screen does.
+  if (cls !== 'lv') v.addEventListener('playing', () => anim(v, [{ opacity: 0 }, { opacity: 1 }], { duration: MOTION.fast, easing: 'linear' }), { once: true });
   v.addEventListener('error', () => {
     v.remove();
     if (UI.noVideo) return;
@@ -161,23 +232,57 @@ function ratioLabel(w, hgt) {
 const thumbUrl = (t, w) => `${ORIGIN}thumb/${t.id}.bmp?w=${w}&r=${t.revision}.${UI.tick}`;
 
 /* ================= the page ================= */
+let shownPage = '', shownCurrent = '';
 function render() {
   if (!L) return;
   closeMenu();
   const app = $('#app');
   const focused = document.activeElement && document.activeElement.id;
+  const page = UI.view === 'theme' && T ? 'theme:' + T.id : 'library:' + UI.tab, tabWas = tabMark();
   if (UI.view === 'theme' && T) {
     if (app.dataset.theme !== T.id || !$('#stage')) { app.dataset.theme = T.id; app.replaceChildren(themePage()); }
     renderHead(); renderSide(); renderPreviewParts(); fitPreview(); updateSel();
   } else {
     UI.view = 'library';
     const old = $('.scroll'), top = old && app.dataset.tab === UI.tab ? old.scrollTop : 0;
+    const controls = controlsOf(app), cards = cardsOf(app);
     app.dataset.theme = ''; app.dataset.tab = UI.tab;
     app.replaceChildren(libraryPage());
     const scroller = $('.scroll'); if (scroller) scroller.scrollTop = top;
+    settleControls(app, controls);
+    if (page === shownPage) settleCards(app, cards);
   }
   renderBusy();
   if (focused) { const f = document.getElementById(focused); if (f) f.focus(); }
+  if (page !== shownPage) enterPage(page, shownPage);
+  slideTab(tabWas);
+  shownPage = page; shownCurrent = L.current;
+}
+// A page that was not showing comes in; the bar above it stays where it is.
+function enterPage(page, was) {
+  const how = !was || was.startsWith('theme:') === page.startsWith('theme:') ? 'rise' : page.startsWith('theme:') ? 'in' : 'out';
+  if (page.startsWith('theme:')) { arrive([$('#phd'), $('.scroll')], how, 0); return; }
+  const scroll = $('.scroll'); if (!scroll) return;
+  arrive([...scroll.children], how);
+  // The themes come in one after another, as a Windows gallery fills.
+  [...scroll.querySelectorAll('.grid > .card')].slice(0, 12).forEach((c, i) =>
+    anim(c, [{ opacity: 0, transform: 'translateY(12px)' }, { opacity: 1, transform: 'none' }], { duration: MOTION.slow, delay: 60 + i * 20, fill: 'backwards' }));
+}
+// The mark under the current tab slides over from the tab that was current.
+const tabMark = () => { const b = $('.tabs [aria-current="page"]'); return b ? b.getBoundingClientRect() : null; };
+function slideTab(was) {
+  const b = $('.tabs [aria-current="page"]'); if (!b || !was) return;
+  const r = b.getBoundingClientRect(), dx = was.left + was.width / 2 - (r.left + r.width / 2);
+  if (Math.abs(dx) > 1) anim(b, [{ transform: `translateX(${dx}px)` }, { transform: 'none' }], { duration: MOTION.normal, pseudoElement: '::after' });
+}
+// A theme just put in use: its card's outline comes out to where it sits, the current theme's picture fades in.
+const cardsOf = root => new Map([...root.querySelectorAll('.card[data-theme]')].map(c => [c.dataset.theme, !!c.querySelector('.thumb.on')]));
+function settleCards(root, before) {
+  for (const c of root.querySelectorAll('.card[data-theme]')) {
+    const thumb = c.querySelector('.thumb.on');
+    if (thumb && before.get(c.dataset.theme) === false) anim(thumb, [{ outlineOffset: '-2px', outlineColor: 'transparent' }], { duration: MOTION.normal });
+  }
+  if (shownCurrent && L.current !== shownCurrent) anim(root.querySelector('.box.current .vbox'), [{ opacity: 0 }], { duration: MOTION.normal, easing: 'linear' });
 }
 
 function appTop() {
@@ -253,7 +358,7 @@ function card(t) {
     thumb.addEventListener('pointerleave', () => thumb.querySelectorAll('.scene-frame, img.tl').forEach(n => { if (n.sceneDispose) n.sceneDispose(); n.remove(); }));
   }
   const facts = [kindName(t.wallpaperKind), t.summary, t.modifications ? '已修改' : null, t.author && !t.builtIn ? t.author : null].filter(Boolean).join(' · ');
-  return h('article', { class: 'card' }, thumb, h('div', { class: 'meta' }, h('div', null,
+  return h('article', { class: 'card', 'data-theme': t.id }, thumb, h('div', { class: 'meta' }, h('div', null,
     h('h3', null, t.name), h('p', null, used.length ? h('span', { class: 'inuse' }, used.join('、') + ' · ') : null, facts))));
 }
 function currentView() {
@@ -442,7 +547,23 @@ function showPreview() {
   const img = $('#pv'); if (!img || !PV.width) return;
   const rev = PV.rev, layer = PV.layer, url = `${ORIGIN}preview?r=${rev}`, next = new Image();
   next.src = url;
-  next.decode().then(() => { if (rev >= PV.shown && $('#pv') === img) { img.src = url; PV.shown = rev; stageVideo(layer); } }, () => {});
+  next.decode().then(() => {
+    if (rev < PV.shown || $('#pv') !== img) return;
+    // A new wallpaper or fit: the picture that was there fades out over the new one. The first
+    // picture of a page fades in.
+    const wallpaper = T ? T.wallpaper.ref + '/' + T.fit : '', had = img.getAttribute('src');
+    if (had && wallpaper !== PV.wallpaper && !calm()) { const ghost = img.cloneNode(); ghost.removeAttribute('id'); img.after(ghost); retire(ghost, MOTION.normal); }
+    img.src = url; PV.shown = rev; PV.wallpaper = wallpaper; stageVideo(layer);
+    if (!had) anim(img, [{ opacity: 0 }], { duration: MOTION.fast, easing: 'linear' });
+  }, () => {});
+}
+// What the stage played goes over the picture now shown and fades out with the old picture.
+function stageAway(n) {
+  if (!n) return;
+  n.removeAttribute('id');
+  if (n.sceneDispose) n.sceneDispose();
+  $('#pv').after(n);
+  retire(n, MOTION.normal);
 }
 // With a layer, the picture is the components alone: the theme's video plays under it.
 function stageVideo(layer) {
@@ -450,10 +571,10 @@ function stageVideo(layer) {
   let v = $('#pvv');
   const oldScene = $('#pvscene');
   if (T.wallpaper.kind === 'scene') {
-    if (v) v.remove();
+    if (v) stageAway(v);
     const key = T.id + '/' + PV.width + 'x' + PV.height;
     if (!oldScene || oldScene.dataset.key !== key) {
-      if (oldScene) { oldScene.sceneDispose(); oldScene.remove(); }
+      if (oldScene) stageAway(oldScene);
       const img = sceneImage(T, PV.width, PV.height, 'pvv scene-frame', rectangles => {
         PV.bounds = PV.bounds.filter(b => b.instance !== 'wallpaper').concat(rectangles); updateSel();
       });
@@ -461,10 +582,10 @@ function stageVideo(layer) {
     } else oldScene.sceneRefresh();
     return;
   }
-  if (oldScene) { oldScene.sceneDispose(); oldScene.remove(); }
-  if (!layer) { if (v) v.remove(); return; }
+  if (oldScene) stageAway(oldScene);
+  if (!layer) { if (v) stageAway(v); return; }
   if (!v || v.dataset.ref !== T.wallpaper.ref) {
-    if (v) v.remove();
+    if (v) stageAway(v);
     v = videoEl(T.wallpaper.ref, T.fit, 'pvv');
     v.id = 'pvv'; v.dataset.ref = T.wallpaper.ref;
     st.prepend(v);
@@ -543,10 +664,19 @@ function unionOf(bs) {
   return bs.reduce((u, b) => ({ left: Math.min(u.left, b.left), top: Math.min(u.top, b.top), right: Math.max(u.right, b.right), bottom: Math.max(u.bottom, b.bottom) }),
     { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity });
 }
+// What the selection box was last drawn around: selecting something else, it moves over to it.
+let shownSel = '';
+function glide(sel, was, key) {
+  if (key === shownSel || dragShift) { shownSel = key; return; }
+  shownSel = key;
+  if (was) anim(sel, [was], { duration: MOTION.fast, easing: MOTION.shift });
+  else anim(sel, [{ opacity: 0, transform: 'scale(1.03)' }], { duration: MOTION.fast });
+}
 function updateSel() {
   const sel = $('#selbox'), part = $('#partbox'), svg = $('#anchors');
   if (!sel) return;
   const NS = 'http://www.w3.org/2000/svg', el = (tag, a) => { const e = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(a)) e.setAttribute(k, v); return e; };
+  const was = sel.hidden ? null : { left: sel.style.left, top: sel.style.top, width: sel.style.width, height: sel.style.height };
   svg.replaceChildren();
   drawScreens(svg, el);
   updateHover();
@@ -557,14 +687,15 @@ function updateSel() {
   if (whole) {
     const all = panelBounds(UI.sel.inst);
     part.hidden = true;
-    if (all.length) place(sel, rectOf(unionOf(all)), 6); else sel.hidden = true;
+    if (all.length) { place(sel, rectOf(unionOf(all)), 6); glide(sel, was, UI.sel.inst + '/*'); } else { sel.hidden = true; shownSel = ''; }
     return;
   }
   const pk = panelKey(UI.sel), b = UI.sel.inst && boundOf(UI.sel.inst, pk);
-  if (!b) { sel.hidden = true; part.hidden = true; return; }
+  if (!b) { sel.hidden = true; part.hidden = true; shownSel = ''; return; }
   const r = rectOf(b);
   if (dragShift) { r.left = dragShift.left; r.top = dragShift.top; }
   place(sel, r, 6);
+  glide(sel, was, UI.sel.inst + '/' + pk + '/' + UI.screen);
   const pb = UI.sel.part && UI.sel.part.includes('.') && boundOf(UI.sel.inst, UI.sel.part);
   if (pb && !dragShift) place(part, rectOf(pb), 2); else part.hidden = true;
   const g = geometry(UI.sel.inst, pk); if (!g) return;
@@ -688,13 +819,57 @@ function selectSel(inst, part, reveal) {
   UI.sel = { inst: inst || null, part: part || null };
   renderSide(); updateSel();
   if (reveal && inst && matchMedia('(min-width: 961px)').matches) {
-    const c = document.querySelector(`[data-card="${inst}"]`);
-    if (c) c.scrollIntoView({ block: 'nearest', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+    const card = () => document.querySelector(`[data-card="${CSS.escape(inst)}"]`), c = card();
+    if (c) c.scrollIntoView({ block: 'nearest', behavior: calm() ? 'auto' : 'smooth' });
+    // Again once the entry has unfolded, so as much of it shows as fits.
+    if (c && !calm()) setTimeout(() => { const n = card(); if (n && UI.sel.inst === inst) n.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }, MOTION.normal);
   }
 }
+// The list is rebuilt on every change. Between two of them: the entry newly selected unfolds and
+// the one that was folds away; inside one entry, a part opens from the right and back from the left.
+let shownSide = { theme: '', inst: null, part: null };
 function renderSide() {
   const side = $('#side'); if (!side || !T) return;
+  const controls = controlsOf(side), was = shownSide;
+  const oldBody = was.inst && side.querySelector(`.ccard[data-card="${CSS.escape(was.inst)}"] > .cbody`), oldHeight = oldBody ? oldBody.offsetHeight : 0;
   side.replaceChildren(wallpaperSection(), componentSection());
+  settleControls(side, controls);
+  shownSide = { theme: T.id, inst: UI.sel.inst, part: UI.sel.part };
+  if (was.theme !== T.id) return;  // a theme just opened comes in as a page
+  if (was.inst === UI.sel.inst) { if (was.part !== UI.sel.part) drillCard(side, !!UI.sel.part); return; }
+  if (oldBody) foldCard(side, was.inst, oldBody, oldHeight);
+  unfoldCard(side, UI.sel.inst);
+}
+const cardIn = (side, inst) => inst ? side.querySelector(`.ccard[data-card="${CSS.escape(inst)}"]`) : null;
+function turnChevron(card, open) {
+  anim(card.querySelector('.chev svg'), [{ transform: `rotate(${open ? 0 : 180}deg)` }, { transform: `rotate(${open ? 180 : 0}deg)` }], { duration: MOTION.fast });
+}
+function unfoldCard(side, inst) {
+  const card = cardIn(side, inst); if (!card) return;
+  turnChevron(card, true);
+  const body = card.querySelector(':scope > .cbody'); if (!body) return;
+  const height = body.offsetHeight;
+  body.style.overflow = 'hidden';
+  const a = anim(body, [{ height: '0px' }, { height: height + 'px' }], { duration: MOTION.normal });
+  anim(body, [{ opacity: 0 }, { opacity: 1 }], { duration: MOTION.fast, delay: MOTION.faster, easing: 'linear', fill: 'backwards' });
+  const done = () => { body.style.overflow = ''; };
+  if (a) a.finished.then(done, done); else done();
+}
+// The entry that was open is closed in the new list: its old contents are put back in it, inert,
+// and fold away.
+function foldCard(side, inst, body, height) {
+  const card = cardIn(side, inst); if (!card || calm()) return;
+  turnChevron(card, false);
+  for (const n of body.querySelectorAll('[id]')) n.removeAttribute('id');
+  body.inert = true;
+  Object.assign(body.style, { overflow: 'hidden', pointerEvents: 'none' });
+  card.append(body);
+  const a = anim(body, [{ height: height + 'px', opacity: 1 }, { height: '0px', opacity: 0 }], { duration: MOTION.fast, fill: 'forwards' });
+  if (a) a.finished.then(() => body.remove(), () => body.remove()); else body.remove();
+}
+function drillCard(side, deeper) {
+  const card = cardIn(side, UI.sel.inst);
+  anim(card && card.querySelector(':scope > .cbody'), [{ opacity: 0, transform: `translateX(${deeper ? 16 : -16}px)` }, { opacity: 1, transform: 'none' }], { duration: MOTION.normal });
 }
 function wallpaperSection() {
   const wp = T.wallpaper, rows = [h('div', { class: 'wprow' },
@@ -734,7 +909,7 @@ function compEntry(inst) {
       h('button', { class: 'cname', 'aria-expanded': String(open), onclick: toggleOpen }, h('span', null, inst.label), h('small', null, sub)),
       toggle(inst.visible, v => send('visible', { instance: inst.id, on: v, seq: ++PV.seq }), `在锁屏上显示「${inst.label}」`, `vis-${inst.id}`),
       h('button', { class: 'chev', 'aria-expanded': String(open), 'aria-label': (open ? '收起' : '展开') + inst.label, html: ICON.down, onclick: toggleOpen })));
-  if (open && !inst.missing) { const body = h('div'); fillEntry(body, inst); entry.append(body); }
+  if (open && !inst.missing) { const body = h('div', { class: 'cbody' }); fillEntry(body, inst); entry.append(body); }
   entry.addEventListener('pointerenter', () => setHover({ inst: inst.id }));
   entry.addEventListener('pointerleave', () => setHover(null));
   return entry;
@@ -765,9 +940,7 @@ function partEntry(p, inst, pt) {
   if (/^p\d+\.l\d+\.t\d+$/.test(pt.key)) {
     if (/^(时间|上午\/下午|日期)$/.test(pt.label)) p.append(h('p', { class: 'note' }, '时间制式、日期和语言在', h('button', { class: 'link', onclick: () => { leaveTheme(); UI.tab = 'settings'; render(); } }, '设置 > 时钟'), '里改，对所有主题生效。'));
     p.append(group('常用', pt.adjustments.filter(a => COMMON_TEXT.includes(attr(a)) && a.key.startsWith(pt.key + '.')).map(a => adjControl(inst, a))));
-    const det = h('details', { class: 'more', open: UI.more }, h('summary', null, '更多'), pt.adjustments.filter(a => !(COMMON_TEXT.includes(attr(a)) && a.key.startsWith(pt.key + '.'))).map(a => adjControl(inst, a)));
-    det.addEventListener('toggle', () => { UI.more = det.open; });
-    p.append(det);
+    p.append(moreRows(pt.adjustments.filter(a => !(COMMON_TEXT.includes(attr(a)) && a.key.startsWith(pt.key + '.'))).map(a => adjControl(inst, a))));
   } else if (/^p\d+$/.test(pt.key)) {
     p.append(positionGroup(inst, pt.key));
     if (inst.id === 'wallpaper') p.append(group('外观', pt.adjustments.filter(a => ['opacity', 'visible'].includes(attr(a))).map(a => adjControl(inst, a))));
@@ -777,13 +950,23 @@ function partEntry(p, inst, pt) {
   const keys = pt.adjustments.map(a => a.key);
   p.append(h('div', { class: 'cfoot' }, h('button', { class: 'btn', disabled: !pt.modified, onclick: () => clearValues(inst.id, keys) }, `恢复「${pt.label}」`)));
 }
+// Rows folded under 更多. Whether it is open is kept across renders; opened by hand, its rows come down into place.
+function moreRows(rows) {
+  const det = h('details', { class: 'more', open: UI.more }, h('summary', null, '更多'), rows);
+  let byHand = false;
+  det.firstChild.addEventListener('click', () => { byHand = true; });
+  det.addEventListener('toggle', () => {
+    UI.more = det.open;
+    if (det.open && byHand) for (const n of [...det.children].slice(1)) anim(n, [{ opacity: 0, transform: 'translateY(-6px)' }, { opacity: 1, transform: 'none' }], { duration: MOTION.normal });
+    byHand = false;
+  });
+  return det;
+}
 function positionGroup(inst, pk) {
   const anchor = adjustment(inst, pk + '.anchor'), cur = anchor ? anchor.value : 'top';
-  const grid = h('div', { class: 'agrid', role: 'group', 'aria-label': '位置' }, ANCHORS.map((val, i) => h('button', { type: 'button', title: ANCHOR_NAMES[i], 'aria-label': ANCHOR_NAMES[i], 'aria-pressed': String(val === cur),
+  const grid = h('div', { class: 'agrid', role: 'group', 'aria-label': '位置', 'data-pick': `agrid-${inst.id}-${pk}` }, ANCHORS.map((val, i) => h('button', { type: 'button', title: ANCHOR_NAMES[i], 'aria-label': ANCHOR_NAMES[i], 'aria-pressed': String(val === cur),
     onclick: () => setValues(inst.id, { [pk + '.anchor']: val, [pk + '.offset-x']: '0', [pk + '.offset-y']: '0' }) })));
-  const more = h('details', { class: 'more', open: UI.more }, h('summary', null, '更多'),
-    [pk + '.margin', pk + '.align'].map(k => adjustment(inst, k)).filter(Boolean).map(a => adjControl(inst, a)));
-  more.addEventListener('toggle', () => { UI.more = more.open; });
+  const more = moreRows([pk + '.margin', pk + '.align'].map(k => adjustment(inst, k)).filter(Boolean).map(a => adjControl(inst, a)));
   const posModified = ['anchor', 'offset-x', 'offset-y'].some(k => { const a = adjustment(inst, pk + '.' + k); return a && a.modified; });
   return group('位置与大小', [
     inst.id === 'wallpaper' ? h('button', { class: 'btn sm', 'aria-pressed': String(cur === 'full'), onclick: () => setValue(inst.id, pk + '.anchor', 'full') }, '铺满画面') : null,
@@ -894,17 +1077,24 @@ function addMenu() {
 
 /* ================= shared controls ================= */
 function seg(options, value, onChange, label, id) {
-  const g = h('div', { class: 'seg', role: 'group', 'aria-label': label || null, id });
+  const g = h('div', { class: 'seg', role: 'group', 'aria-label': label || null, id, 'data-pick': id });
   for (const [v, l] of options) {
     const b = h('button', { type: 'button', 'aria-pressed': String(v === value) }, l);
-    b.addEventListener('click', () => { g.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x === b))); onChange(v); });
+    b.addEventListener('click', () => {
+      if (id) pressed.set(id, { at: performance.now(), from: pickIndex(g) });
+      g.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x === b))); onChange(v);
+    });
     g.append(b);
   }
   return g;
 }
 function toggle(on, onChange, label, id) {
   const b = h('button', { type: 'button', class: 'tg', role: 'switch', 'aria-checked': String(on), 'aria-label': label, id });
-  b.addEventListener('click', () => { const v = b.getAttribute('aria-checked') !== 'true'; b.setAttribute('aria-checked', String(v)); onChange(v); });
+  b.addEventListener('click', () => {
+    const v = b.getAttribute('aria-checked') !== 'true';
+    if (id) pressed.set(id, { at: performance.now(), from: !v });
+    b.setAttribute('aria-checked', String(v)); onChange(v);
+  });
   return b;
 }
 function select(options, value, onChange, label, id) {
@@ -916,14 +1106,25 @@ function select(options, value, onChange, label, id) {
 function modal(title, body, foot, o = {}) {
   closeMenu();
   const bg = h('div', { class: 'modal-bg' });
-  const close = () => { document.removeEventListener('keydown', key, true); bg.remove(); };
+  // As a Windows dialog: it comes in from slightly larger, and leaves the same way, quicker.
+  let closed = false;
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    document.removeEventListener('keydown', key, true);
+    anim(box, [{ transform: 'none' }, { transform: 'scale(1.05)' }], { duration: MOTION.fast, easing: MOTION.leave, fill: 'forwards' });
+    retire(bg);
+  };
   const key = e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } };
   bg.addEventListener('pointerdown', e => { if (e.target === bg) close(); });
-  bg.append(h('div', { class: 'modal' + (o.narrow ? ' narrow' : ''), role: 'dialog', 'aria-modal': 'true', 'aria-label': title },
+  const box = h('div', { class: 'modal' + (o.narrow ? ' narrow' : ''), role: 'dialog', 'aria-modal': 'true', 'aria-label': title },
     h('div', { class: 'mhead' }, h('h2', null, title), h('button', { class: 'icon-btn', 'aria-label': '关闭', html: ICON.close, onclick: close })),
-    h('div', { class: 'mbody' }, body), foot ? h('div', { class: 'mfoot' }, foot) : null));
+    h('div', { class: 'mbody' }, body), foot ? h('div', { class: 'mfoot' }, foot) : null);
+  bg.append(box);
   document.addEventListener('keydown', key, true);
   document.body.append(bg);
+  anim(bg, [{ opacity: 0 }, { opacity: 1 }], { duration: MOTION.fast, easing: 'linear' });
+  anim(box, [{ opacity: 0, transform: 'scale(1.05)' }, { opacity: 1, transform: 'none' }], { duration: MOTION.normal });
   (bg.querySelector('[autofocus]') || bg.querySelector('.mfoot .accent') || bg.querySelector('button')).focus();
   return close;
 }
@@ -943,13 +1144,16 @@ function menu(anchor, items) {
   }
   document.body.append(m);
   const r = anchor.getBoundingClientRect(), mr = m.getBoundingClientRect();
+  const below = r.bottom + 6 + mr.height <= innerHeight - 8;
   m.style.left = clamp(r.right - mr.width, 8, innerWidth - mr.width - 8) + 'px';
-  m.style.top = (r.bottom + 6 + mr.height > innerHeight - 8 ? r.top - mr.height - 6 : r.bottom + 6) + 'px';
+  m.style.top = (below ? r.bottom + 6 : r.top - mr.height - 6) + 'px';
+  // It slides out of the button it opened from, and fades when it goes.
+  anim(m, [{ opacity: 0, transform: `translateY(${below ? -8 : 8}px)` }, { opacity: 1, transform: 'none' }], { duration: MOTION.normal });
   const away = e => { if (!m.contains(e.target)) closeMenu(); };
   const key = e => { if (e.key === 'Escape') { e.stopPropagation(); closeMenu(); } };
   setTimeout(() => document.addEventListener('pointerdown', away, true));
   document.addEventListener('keydown', key, true);
-  menuClose = () => { document.removeEventListener('pointerdown', away, true); document.removeEventListener('keydown', key, true); m.remove(); menuClose = null; };
+  menuClose = () => { document.removeEventListener('pointerdown', away, true); document.removeEventListener('keydown', key, true); menuClose = null; m.removeAttribute('role'); retire(m, MOTION.faster); };
   m.querySelector('button').focus();
 }
 
@@ -988,12 +1192,13 @@ function lockPreview(id, ratio) {
   const exit = h('button', { class: 'btn exit', onclick: e => { e.stopPropagation(); close(); } }, '退出预览 (Esc)');
   ov.append(frame, hint, exit);
   document.body.append(ov); ov.focus();
+  anim(ov, [{ opacity: 0 }, { opacity: 1 }], { duration: MOTION.fast, easing: 'linear' });
   // Everything over the sign-in screen fades out, the components with the rest.
   const wake = () => { if (woke) return; woke = true; if (video && video.sceneDispose) video.sceneDispose(); for (const n of [still, video, full]) if (n) { n.style.opacity = ''; n.classList.add('fading'); } hint.textContent = '之后是 Windows 的登录界面'; };
   ov.addEventListener('pointerdown', e => { if (e.target !== exit) wake(); });
   const key = e => { e.stopPropagation(); e.preventDefault(); if (e.key === 'Escape') close(); else wake(); };
   document.addEventListener('keydown', key, true);
-  function close() { if (video && video.sceneDispose) video.sceneDispose(); document.removeEventListener('keydown', key, true); ov.remove(); }
+  function close() { if (video && video.sceneDispose) video.sceneDispose(); document.removeEventListener('keydown', key, true); retire(ov); }
 }
 
 /* ================= keys on the theme page ================= */
