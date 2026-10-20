@@ -16,6 +16,8 @@ jobs:
   build:
     name: ${{ matrix.arch }}
     runs-on: windows-latest
+    # A build and test take a few minutes; anything stuck is ended well before GitHub's six hours.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -23,8 +25,27 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # The settings app's page is bundled with esbuild (app/web).
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: app/web/package-lock.json
+
       - name: Configure
         run: cmake --preset ${{ matrix.arch }} -DANIMELOGON_BUILD=${{ github.run_number }}
 
       - name: Build
         run: cmake --build --preset ${{ matrix.arch }}-release
+
+      # ARM64 is cross-built on an x64 runner, so only x64 runs the tests. --verbose prints the
+      # test program's whole output, so the log shows which Media Foundation tests ran and which
+      # said they were skipped.
+      - name: Test
+        if: matrix.arch == 'x64'
+        run: ctest --preset x64-release --verbose
+
+      # The build installed the page's packages; the bundler does not check types, so this does.
+      - name: Check the page's types
+        if: matrix.arch == 'x64'
+        run: npm run check --prefix app/web

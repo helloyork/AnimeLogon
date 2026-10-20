@@ -1,0 +1,5 @@
+// The settings app's page as app/web/build.mjs bundled it, built into the program (resources.cpp
+// numbers these).
+101 RCDATA "@APP_WEB_DIR@/index.html"
+102 RCDATA "@APP_WEB_DIR@/app.css"
+103 RCDATA "@APP_WEB_DIR@/app.js"

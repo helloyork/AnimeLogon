@@ -1,0 +1,14 @@
+/* The page's own frame. Everything else is styled by Fluent UI (src/), whose tokens follow the
+   Windows light or dark theme. */
+html, body, #app { height: 100%; }
+/* The browser's own parts (scroll bars, the caret) follow the Windows theme as the page does. */
+:root { color-scheme: light dark; }
+/* Scroll bars as thin as Windows 11's, with no track of their own. */
+.fui-FluentProvider * { scrollbar-width: thin; scrollbar-color: var(--colorNeutralForeground4) transparent; }
+/* The page's own provider only: Fluent gives the provider's class names to the layers it opens over
+   the page (menus, tooltips), which must not fill the window. */
+#app > .fui-FluentProvider { height: 100%; }
+body { margin: 0; overflow: hidden; user-select: none; -webkit-font-smoothing: antialiased; }
+input, textarea, .selectable { user-select: text; }
+/* Windows' own buttons are set in regular weight; Fluent's semibold reads heavy in Chinese. */
+.fui-FluentProvider .fui-Button, .fui-FluentProvider .fui-ToggleButton, .fui-FluentProvider .fui-MenuButton { font-weight: 400; }

@@ -3,6 +3,8 @@
 /out/
 .vs/
 CMakeUserPresets.json
+# The settings page's npm packages, which the build installs.
+/app/web/node_modules/
 
 # Media never enters this repository.
 *.mp4
