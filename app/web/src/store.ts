@@ -2,6 +2,7 @@
 // the person is (page, tab, selection, dialogs). Components read it with useStore; only actions
 // here change it.
 import { useSyncExternalStore } from 'react';
+import { onCalmChange } from './motion';
 import { listen, send } from './native';
 import { onPreview, pv, requestPreviewAgain, resetPreview } from './preview';
 import type { Environment, FromNative, Instance, Library, OpenTheme, SceneControls } from './types';
@@ -221,6 +222,14 @@ function receive(m: FromNative) {
   }
 }
 listen(receive);
+
+// Windows' animation effects switched while the window is open: the page draws itself again at
+// once, so videos and scenes stop or start, and an open theme's picture is asked for again, since
+// the native side draws it with or without the wallpaper as the page plays it or not (preview.ts).
+onCalmChange(() => {
+  setState({});
+  if (state.view === 'theme' && state.open) requestPreviewAgain();
+});
 
 // Pictures with a clock change every minute.
 let shownMinute = new Date().getMinutes();
