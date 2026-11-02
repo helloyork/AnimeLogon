@@ -13,7 +13,7 @@ can place videos, widgets and other content on it.
 - [x] Full-screen video on the lock screen and on the sign-in screen at startup
 - [x] Custom clock styles
 - [x] Layered HLSL and Lottie scene wallpapers, with editable parameters and layer placement
-- [ ] Widgets
+- [x] Widgets
 
 ## Requirements
 
@@ -26,11 +26,12 @@ Windows N and KN editions are not supported.
 
 ## Installation
 
-> No release has been published yet. To try AnimeLogon now, [build it from source](#building-from-source).
+> The current version is a preview (alpha) and may have problems. The programs are not code-signed.
 
-1. Download the latest version from [Releases](https://github.com/helloyork/AnimeLogon/releases).
-2. Run `install.exe` and follow the prompts.
-3. Open AnimeLogon settings from the Start menu and select **Import…** to add a video or picture.
+1. Download the zip for your computer's architecture (`x64` or `arm64`) from [Releases](https://github.com/helloyork/AnimeLogon/releases).
+2. Right-click the zip, select **Properties**, check **Unblock**, and extract it.
+3. Run `install.exe` and follow the prompts.
+4. Open AnimeLogon settings from the Start menu and select **Import…** to add a video or picture.
 
 ## Usage
 
@@ -96,7 +97,7 @@ Options:
 
 Planned:
 
-- Custom lock screen elements (widgets), defined in a declarative format
+- A theme community: browse and download themes made by others from the settings
 
 ## Contributing
 

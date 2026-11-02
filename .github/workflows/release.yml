@@ -1,0 +1,104 @@
+name: Release
+
+# Pushing a tag such as v0.1.0 or v0.1.0-alpha builds x64 and ARM64 and attaches a zip of each
+# to a draft GitHub release. The draft is published by hand once its files have been checked.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    # Two builds one after the other; anything stuck is ended well before GitHub's six hours.
+    timeout-minutes: 60
+    env:
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v7
+
+      # The settings app's page is bundled with esbuild (app/web).
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: app/web/package-lock.json
+
+      # v0.1.0-alpha is version 0.1.0 with the suffix -alpha. The numbers must be the ones in
+      # CMakeLists.txt, so that a tag cannot ship programs that carry another version.
+      - name: Read the version from the tag
+        shell: pwsh
+        run: |
+          if ($env:TAG -notmatch '^v(\d+\.\d+\.\d+)(-[0-9A-Za-z.]+)?$') {
+            throw "Tag $env:TAG is not v<major>.<minor>.<patch> with an optional -<suffix>"
+          }
+          $numbers = $Matches[1]
+          $suffix = "$($Matches[2])"
+          $project = (Select-String -Path CMakeLists.txt -Pattern 'project\(AnimeLogon VERSION (\d+\.\d+\.\d+)').Matches[0].Groups[1].Value
+          if ($project -ne $numbers) { throw "Tag $env:TAG does not match version $project in CMakeLists.txt" }
+          "VERSION=$numbers$suffix" >> $env:GITHUB_ENV
+          "SUFFIX=$suffix" >> $env:GITHUB_ENV
+          "PRERELEASE=$(if ($suffix) { 'true' } else { 'false' })" >> $env:GITHUB_ENV
+
+      # Tags are made on master, whose commits the Build workflow has already built and tested,
+      # so the tests and tools are left out here.
+      - name: Build
+        shell: pwsh
+        run: |
+          foreach ($arch in 'x64', 'arm64') {
+            cmake --preset $arch -DBUILD_TESTING=OFF -DANIMELOGON_BUILD=${{ github.run_number }} "-DANIMELOGON_VERSION_SUFFIX=$env:SUFFIX"
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+            cmake --build --preset "$arch-release"
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          }
+
+      # Each zip holds one folder: install.exe, the files it copies from its own folder
+      # (kComponents in installer/src/engine.cpp), and the licences of the code they carry.
+      # The log lists every file with its SHA-256, and what each zip holds.
+      - name: Package
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
+          $programs = 'install.exe', 'uninstall.exe', 'overlay.exe', 'launcher.exe', 'animelogon.exe', 'scene.exe', 'WebView2Loader.dll'
+          # Full paths: .NET resolves relative ones against its own current directory, not PowerShell's.
+          $stage = (New-Item -ItemType Directory -Force stage).FullName
+          $dist = (New-Item -ItemType Directory -Force dist).FullName
+          foreach ($arch in 'x64', 'arm64') {
+            $name = "AnimeLogon-$env:VERSION-$arch"
+            $dir = Join-Path $stage $name
+            New-Item -ItemType Directory -Force (Join-Path $dir licenses) | Out-Null
+            foreach ($program in $programs) { Copy-Item "build/$arch/bin/Release/$program" $dir -ErrorAction Stop }
+            Copy-Item LICENSE (Join-Path $dir LICENSE.txt)
+            Copy-Item vendor/webview2/LICENSE (Join-Path $dir licenses/WebView2.txt)
+            Copy-Item vendor/thorvg/LICENSE (Join-Path $dir licenses/ThorVG.txt)
+            Copy-Item vendor/thorvg/src/loaders/lottie/rapidjson/LICENSE (Join-Path $dir licenses/RapidJSON.txt)
+            $zip = Join-Path $dist "$name.zip"
+            $archive = [System.IO.Compression.ZipFile]::Open($zip, 'Create')
+            Get-ChildItem $dir -Recurse -File | ForEach-Object {
+              # Entry names are written with forward slashes, whichever .NET this runs on.
+              $entry = $_.FullName.Substring($stage.Length + 1).Replace('\', '/')
+              [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, $_.FullName, $entry, 'Optimal') | Out-Null
+              '{0}  {1}' -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(), $entry
+            }
+            $archive.Dispose()
+            $archive = [System.IO.Compression.ZipFile]::OpenRead($zip)
+            "$($archive.Entries.Count) entries in $name.zip"
+            $archive.Dispose()
+          }
+          Get-ChildItem $dist -Filter *.zip | ForEach-Object {
+            '{0}  {1}' -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(), $_.Name
+          } | Set-Content (Join-Path $dist SHA256SUMS.txt)
+          Get-Content (Join-Path $dist SHA256SUMS.txt)
+
+      # A draft, so that its files can be checked and its notes written before anyone sees it.
+      - name: Create a draft release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $flags = @('--draft', '--verify-tag', '--title', "AnimeLogon $env:VERSION", '--notes', "AnimeLogon $env:VERSION")
+          if ($env:PRERELEASE -eq 'true') { $flags += '--prerelease' }
+          gh release create $env:TAG @flags (Get-ChildItem dist).FullName
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }

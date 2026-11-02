@@ -12,7 +12,7 @@ AnimeLogon 使用自己绘制的叠层替换了 Windows 10/11 的锁屏界面，
 - [x] 在锁屏和开机登录界面全屏播放视频
 - [x] 自定义时钟样式
 - [x] 分层场景壁纸（HLSL 和 Lottie），可直接调整参数和各层摆放
-- [ ] 小组件
+- [x] 小组件
 
 ## 系统要求
 
@@ -24,11 +24,12 @@ AnimeLogon 使用自己绘制的叠层替换了 Windows 10/11 的锁屏界面，
 
 ## 安装
 
-> 目前尚未发布正式版本。如需试用，请[从源码构建](#从源码构建)。
+> 当前版本为预览版（alpha），可能存在问题。程序没有代码签名。
 
-1. 从 [Releases](https://github.com/helloyork/AnimeLogon/releases) 下载最新版本。
-2. 运行 `install.exe`，按提示完成安装。
-3. 从开始菜单打开 AnimeLogon 设置，选择「导入…」导入视频或图片。
+1. 从 [Releases](https://github.com/helloyork/AnimeLogon/releases) 下载与电脑架构对应的 zip 文件（`x64` 或 `arm64`）。
+2. 右键单击 zip 文件，选择 **属性**，勾选 **解除锁定**，然后解压。
+3. 运行 `install.exe`，按提示完成安装。
+4. 从开始菜单打开 AnimeLogon 设置，选择「导入…」导入视频或图片。
 
 ## 使用
 
@@ -83,7 +84,7 @@ cmake --build --preset x64-release
 
 规划中：
 
-- 自定义锁屏元素（小组件），采用声明式格式定义
+- 主题社区：在设置中浏览和下载其他用户制作的主题
 
 ## 参与贡献
 
