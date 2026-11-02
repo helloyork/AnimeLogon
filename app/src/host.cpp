@@ -20,6 +20,7 @@
 #include "animelogon/secure.h"
 #include "animelogon/text.h"
 #include "animelogon/theme.h"
+#include "animelogon/version.h"
 
 #include "commit.h"
 #include "devices.h"
@@ -402,6 +403,7 @@ void Host::SendEnvironment() {
     json::Writer w;
     w.BeginObject().Member(L"type", L"environment");
     w.Member(L"on", machine::IsOn()).Member(L"installed", !machine::InstallDir().empty());
+    w.Member(L"version", L"" ANIMELOGON_VERSION);
     w.Key(L"monitors").BeginArray();
     int n = 0;
     for (const MonitorInfo &m : monitors_) {

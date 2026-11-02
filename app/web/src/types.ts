@@ -14,6 +14,7 @@ export interface Monitor {
 export interface Environment {
   on: boolean;         // AnimeLogon is turned on (service and Windows' lock screen off)
   installed: boolean;
+  version: string;     // this program's version, as its version resource gives it
   monitors: Monitor[];
   fonts: { name: string; stored: string }[];
   devices: { id: string; name: string }[];

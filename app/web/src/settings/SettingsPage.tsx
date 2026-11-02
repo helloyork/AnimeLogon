@@ -1,10 +1,12 @@
 // 设置: what every theme shares, laid out as Windows 11's Settings app does: one card per
-// setting, its label and a line about it on the left, its control on the right.
-import { useState, type ReactNode } from 'react';
+// setting, its label and a line about it on the left, its control on the right. A setting's
+// sub-settings sit in its card, indented, with a divider above each.
+import { Children, useState, type ReactNode } from 'react';
 import {
   Body1,
   Button,
   Caption1,
+  Divider,
   Dropdown,
   makeStyles,
   mergeClasses,
@@ -13,6 +15,7 @@ import {
   Subtitle2,
   Switch,
   Text,
+  Title3,
   tokens,
 } from '@fluentui/react-components';
 import { UacShield } from '../icons';
@@ -32,6 +35,13 @@ const useStyles = makeStyles({
   },
   group: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXXS },
   heading: { marginBottom: tokens.spacingVerticalS },
+  card: {
+    display: 'flex',
+    flexDirection: 'column',
+    backgroundColor: tokens.colorNeutralBackground1,
+    border: `${tokens.strokeWidthThin} solid ${tokens.colorNeutralStroke2}`,
+    borderRadius: tokens.borderRadiusMedium,
+  },
   row: {
     display: 'flex',
     alignItems: 'center',
@@ -42,11 +52,10 @@ const useStyles = makeStyles({
     boxSizing: 'border-box',
     paddingBlock: tokens.spacingVerticalM,
     paddingInline: tokens.spacingHorizontalL,
-    backgroundColor: tokens.colorNeutralBackground1,
-    border: `${tokens.strokeWidthThin} solid ${tokens.colorNeutralStroke2}`,
-    borderRadius: tokens.borderRadiusMedium,
   },
-  sub: { paddingLeft: '48px' },
+  // Indented by about the width Windows 11 keeps for a setting's icon.
+  sub: { paddingLeft: `calc(${tokens.spacingHorizontalL} + ${tokens.spacingHorizontalXXXL})` },
+  divider: { flexGrow: 0 },
   text: { display: 'flex', flexDirection: 'column', minWidth: 0, flex: '1 1 240px' },
   quiet: { color: tokens.colorNeutralForeground3 },
   control: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS },
@@ -65,6 +74,16 @@ function Row({ title, description, children, sub }: { title: string; description
         {description && <Caption1 className={styles.quiet}>{description}</Caption1>}
       </div>
       {children && <div className={styles.control}>{children}</div>}
+    </div>
+  );
+}
+
+// One setting's card: its row, then the rows of its sub-settings, a divider above each.
+function Item({ children }: { children: ReactNode }) {
+  const styles = useStyles();
+  return (
+    <div className={styles.card}>
+      {Children.toArray(children).flatMap((row, i) => (i ? [<Divider key={'divider' + i} className={styles.divider} />, row] : [row]))}
     </div>
   );
 }
@@ -118,80 +137,104 @@ export function SettingsPage() {
   return (
     <main className={styles.scroll}>
       <div className={styles.page}>
+        <Title3 as="h1">设置</Title3>
+
         <Group title="时钟">
-          <Row title="现在显示为"><Text>{s.clock}</Text></Row>
-          <Row title="时间制式" description="「跟随区域格式」与任务栏一致。">
-            <Choice label="时间制式" value={c.hours} onChange={v => global('clock.hours', v)} options={[['auto', '跟随区域格式'], ['12', '12 小时制'], ['24', '24 小时制']]} />
-          </Row>
-          <Row title="显示上午/下午" description="仅用于 12 小时制。">
-            <OnOff label="显示上午/下午" checked={c.ampm} onChange={v => global('clock.ampm', v)} />
-          </Row>
-          <Row title="日期">
-            <Choice label="日期" value={c.date} onChange={v => global('clock.date', v)} options={[['weekday', '星期与月日'], ['long', '完整日期'], ['none', '不显示']]} />
-          </Row>
-          <Row title="语言" description="时间和日期使用的语言。">
-            <Choice label="语言" value={c.language} onChange={v => global('clock.language', v)}
-              options={[['', '跟随区域格式'], ['zh-CN', '简体中文'], ['zh-TW', '繁體中文'], ['ja-JP', '日本語'], ['ko-KR', '한국어'], ['en-US', 'English']]} />
-          </Row>
+          <Item><Row title="现在显示为"><Text>{s.clock}</Text></Row></Item>
+          <Item>
+            <Row title="时间制式" description="「跟随区域格式」与任务栏一致。">
+              <Choice label="时间制式" value={c.hours} onChange={v => global('clock.hours', v)} options={[['auto', '跟随区域格式'], ['12', '12 小时制'], ['24', '24 小时制']]} />
+            </Row>
+          </Item>
+          <Item>
+            <Row title="显示上午/下午" description="仅用于 12 小时制。">
+              <OnOff label="显示上午/下午" checked={c.ampm} onChange={v => global('clock.ampm', v)} />
+            </Row>
+          </Item>
+          <Item>
+            <Row title="日期">
+              <Choice label="日期" value={c.date} onChange={v => global('clock.date', v)} options={[['weekday', '星期与月日'], ['long', '完整日期'], ['none', '不显示']]} />
+            </Row>
+          </Item>
+          <Item>
+            <Row title="语言" description="时间和日期使用的语言。">
+              <Choice label="语言" value={c.language} onChange={v => global('clock.language', v)}
+                options={[['', '跟随区域格式'], ['zh-CN', '简体中文'], ['zh-TW', '繁體中文'], ['ja-JP', '日本語'], ['ko-KR', '한국어'], ['en-US', 'English']]} />
+            </Row>
+          </Item>
         </Group>
 
         <Group title="组件">
-          <Row title="显示组件" description="关闭后所有主题只显示壁纸。">
-            <OnOff label="显示组件" checked={set.components} onChange={v => global('components', v)} />
-          </Row>
-          <Row title="组件显示在" description="壁纸显示在每块屏幕上，组件只显示在这里。">
-            <Choice label="组件显示在" value={set.componentDisplays} onChange={v => global('componentDisplays', v)}
-              options={[['auto', '密码框所在的屏幕'], ['primary', '主屏幕'], ['all', '所有屏幕']]} />
-          </Row>
-          <Row title="显示正在播放" description="只在你自己锁屏时显示歌名和歌手，别的账户和开机登录界面上看不到。">
-            <OnOff label="显示正在播放" checked={set.media} onChange={v => global('media', v)} />
-          </Row>
+          <Item>
+            <Row title="显示组件" description="关闭后所有主题只显示壁纸。">
+              <OnOff label="显示组件" checked={set.components} onChange={v => global('components', v)} />
+            </Row>
+          </Item>
+          <Item>
+            <Row title="组件显示在" description="壁纸显示在每块屏幕上，组件只显示在这里。">
+              <Choice label="组件显示在" value={set.componentDisplays} onChange={v => global('componentDisplays', v)}
+                options={[['auto', '密码框所在的屏幕'], ['primary', '主屏幕'], ['all', '所有屏幕']]} />
+            </Row>
+          </Item>
+          <Item>
+            <Row title="显示正在播放" description="只在你自己锁屏时显示歌名和歌手，别的账户和开机登录界面上看不到。">
+              <OnOff label="显示正在播放" checked={set.media} onChange={v => global('media', v)} />
+            </Row>
+          </Item>
         </Group>
 
         <Group title="屏幕">
-          <Row title="多显示器" description={`这台电脑有 ${s.env.monitors.length} 块显示器。`}>
-            <Choice label="多显示器" value={set.monitorMode} onChange={v => global('monitorMode', v)}
-              options={[['duplicate', '每块屏幕相同'], ['span', '横跨所有屏幕'], ['per-monitor', '每块屏幕各自']]} />
-          </Row>
-          {perMonitor() && s.env.monitors.map(m => (
-            <Row key={m.key} sub title={m.name + (m.primary ? '（主）' : '')} description={`${m.width}×${m.height}`}>
-              <Choice label={m.name} value={set.screens[m.key] || ''} onChange={v => global('screen.' + m.key, v)}
-                options={[['', `跟随当前主题（${themeOf(s.lib!.current)?.name ?? ''}）`], ...s.lib!.themes.map(t => [t.id, t.name] as [string, string])]} />
+          <Item>
+            <Row title="多显示器" description={`这台电脑有 ${s.env.monitors.length} 块显示器。`}>
+              <Choice label="多显示器" value={set.monitorMode} onChange={v => global('monitorMode', v)}
+                options={[['duplicate', '每块屏幕相同'], ['span', '横跨所有屏幕'], ['per-monitor', '每块屏幕各自']]} />
             </Row>
-          ))}
+            {perMonitor() && s.env.monitors.map(m => (
+              <Row key={m.key} sub title={m.name + (m.primary ? '（主）' : '')} description={`${m.width}×${m.height}`}>
+                <Choice label={m.name} value={set.screens[m.key] || ''} onChange={v => global('screen.' + m.key, v)}
+                  options={[['', `跟随当前主题（${themeOf(s.lib!.current)?.name ?? ''}）`], ...s.lib!.themes.map(t => [t.id, t.name] as [string, string])]} />
+              </Row>
+            ))}
+          </Item>
         </Group>
 
         <Group title="声音">
-          <Row title="播放声音" description="在锁屏上播放声音。">
-            <OnOff label="播放声音" checked={set.audio.enabled} onChange={v => global('audio.enabled', v)} />
-          </Row>
-          {set.audio.enabled && (
-            <>
+          <Item>
+            <Row title="播放声音" description="在锁屏上播放声音。">
+              <OnOff label="播放声音" checked={set.audio.enabled} onChange={v => global('audio.enabled', v)} />
+            </Row>
+            {set.audio.enabled && (
               <Row sub title="输出设备">
                 <Choice label="输出设备" value={set.audio.device} onChange={v => global('audio.device', v)}
                   options={[['', '自动（跟随系统）'], ...s.env.devices.map(d => [d.id, d.name] as [string, string])]} />
               </Row>
-              <Row sub title="总音量"><Volume label="总音量" value={set.audio.volume} onDone={v => global('audio.volume', v)} /></Row>
+            )}
+            {set.audio.enabled && <Row sub title="总音量"><Volume label="总音量" value={set.audio.volume} onDone={v => global('audio.volume', v)} /></Row>}
+            {set.audio.enabled && (
               <Row sub title="视频的声音" description="播放视频壁纸自带的声音。">
                 <OnOff label="视频的声音" checked={set.audio.video} onChange={v => global('audio.video', v)} />
               </Row>
-              {set.audio.video && (
-                <Row sub title="视频声音的音量"><Volume label="视频声音的音量" value={set.audio.videoVolume} onDone={v => global('audio.videoVolume', v)} /></Row>
-              )}
-            </>
-          )}
+            )}
+            {set.audio.enabled && set.audio.video && (
+              <Row sub title="视频声音的音量"><Volume label="视频声音的音量" value={set.audio.videoVolume} onDone={v => global('audio.videoVolume', v)} /></Row>
+            )}
+          </Item>
         </Group>
 
         <Group title="系统">
-          <Row title="启用 AnimeLogon" description="关闭后锁屏恢复 Windows 默认，主题和设置保留。">
-            <UacShield />
-            <OnOff label="启用 AnimeLogon" checked={s.env.on} onChange={v => send('switch', { on: v })} />
-          </Row>
-          <Row title="日志" description="反馈问题时附上。"><Button onClick={() => send('logs')}>打开</Button></Row>
-          <Row title="卸载 AnimeLogon" description="移除本程序并还原所有系统更改。">
-            <Button icon={<UacShield />} onClick={() => send('uninstall')}>卸载</Button>
-          </Row>
-          <Row title="关于" description="AnimeLogon 0.1.0 · MIT 许可证" />
+          <Item>
+            <Row title="启用 AnimeLogon" description="关闭后锁屏恢复 Windows 默认，主题和设置保留。">
+              <UacShield />
+              <OnOff label="启用 AnimeLogon" checked={s.env.on} onChange={v => send('switch', { on: v })} />
+            </Row>
+          </Item>
+          <Item><Row title="日志" description="反馈问题时附上。"><Button onClick={() => send('logs')}>打开</Button></Row></Item>
+          <Item>
+            <Row title="卸载 AnimeLogon" description="移除本程序并还原所有系统更改。">
+              <Button icon={<UacShield />} onClick={() => send('uninstall')}>卸载</Button>
+            </Row>
+          </Item>
+          <Item><Row title="关于" description={`AnimeLogon ${s.env.version} · MIT 许可证`} /></Item>
         </Group>
       </div>
     </main>

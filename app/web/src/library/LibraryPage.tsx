@@ -3,6 +3,9 @@ import { useState, type CSSProperties } from 'react';
 import {
   Button,
   Caption1,
+  Card,
+  cardCSSVars,
+  CardPreview,
   Link,
   makeStyles,
   Menu,
@@ -15,9 +18,11 @@ import {
   MessageBarActions,
   MessageBarBody,
   mergeClasses,
+  shorthands,
   Subtitle1,
   Subtitle2,
   Text,
+  Title3,
   tokens,
 } from '@fluentui/react-components';
 import { MoreHorizontalRegular } from '@fluentui/react-icons';
@@ -97,15 +102,25 @@ const useStyles = makeStyles({
     aspectRatio: 'var(--arw) / var(--arh)',
   },
   shot: { position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', display: 'block' },
-  thumb: {
-    cursor: 'pointer',
-    outline: `${tokens.strokeWidthThin} solid ${tokens.colorNeutralStroke2}`,
-    outlineOffset: '0',
-    transitionProperty: 'outline-color, outline-offset',
-    transitionDuration: tokens.durationFaster,
-    ':focus-visible': { outline: `${tokens.strokeWidthThick} solid ${tokens.colorStrokeFocus2}` },
+  // A theme card is Fluent's selectable Card, drawn by its stroke like every card here: none of
+  // Fluent's card shadows, and the card's own corners.
+  card: {
+    [cardCSSVars.cardBorderRadiusVar]: tokens.borderRadiusXLarge,
+    boxShadow: 'none',
+    ':hover': { boxShadow: 'none' },
+    '::after': { ...shorthands.borderColor(tokens.colorNeutralStroke2) },
   },
-  inUse: { outline: `${tokens.strokeWidthThick} solid ${tokens.colorBrandStroke1}`, outlineOffset: '2px' },
+  // Fluent marks a selected card with a neutral stroke, too faint to tell the theme in use at a
+  // glance; it takes the brand colour, as the page's other selected items do.
+  inUse: {
+    '::after': { ...shorthands.borderColor(tokens.colorBrandStroke1), ...shorthands.borderWidth(tokens.strokeWidthThick) },
+  },
+  tile: {
+    position: 'relative',
+    overflow: 'hidden',
+    backgroundColor: '#000',
+    aspectRatio: 'var(--arw) / var(--arh)',
+  },
   overlay: {
     position: 'absolute',
     right: tokens.spacingHorizontalS,
@@ -117,7 +132,7 @@ const useStyles = makeStyles({
     transitionDuration: tokens.durationFaster,
   },
   overlayShown: { opacity: 1 },
-  meta: { display: 'flex', flexDirection: 'column', paddingTop: tokens.spacingVerticalS, minWidth: 0 },
+  meta: { display: 'flex', flexDirection: 'column', minWidth: 0 },
   ellipsis: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
 });
 
@@ -133,6 +148,7 @@ export function LibraryPage() {
   return (
     <main className={styles.scroll}>
       <div className={styles.page}>
+        <Title3 as="h1">主题库</Title3>
         {!s.env.installed && (
           <MessageBar intent="warning">
             <MessageBarBody>这台电脑上没有安装 AnimeLogon，改动无法保存。</MessageBarBody>
@@ -245,39 +261,48 @@ function ThemeCard({ theme: t }: { theme: ThemeEntry }) {
   const used = usedOn(t.id);
   const moves = hover && motion() && (t.wallpaperKind === 'video' || (t.wallpaperKind === 'scene' && !t.sceneStatic));
   const facts = [kindName(t.wallpaperKind), t.summary, t.modifications ? '已修改' : null, t.author && !t.builtIn ? t.author : null].filter(Boolean).join(' · ');
+  // Selecting the card puts the theme in use; it stays selected while the theme is in use, and a
+  // click on the buttons over its picture does not select it (Card leaves focusable children alone).
   return (
     <article data-theme={t.id} onPointerEnter={() => setHover(true)} onPointerLeave={() => setHover(false)}>
-      <div
-        className={mergeClasses(styles.picture, styles.thumb, used.length > 0 && styles.inUse)}
-        style={shapeVars(t.id)}
-        role="button"
-        tabIndex={0}
-        aria-label={`套用「${t.name}」`}
-        onClick={() => applyFlow(t.id)}
-        onKeyDown={e => {
-          if (e.key === 'Enter' && e.target === e.currentTarget) applyFlow(t.id);
+      <Card
+        className={mergeClasses(styles.card, used.length > 0 && styles.inUse)}
+        selected={used.length > 0}
+        onSelectionChange={e => {
+          // Space on the card's checkbox reaches Card twice, as the checkbox's change and as the
+          // same click bubbling to the card; only the change is acted on.
+          if (e.type === 'click' && e.target instanceof HTMLInputElement) return;
+          applyFlow(t.id);
         }}
+        checkbox={{ 'aria-label': `套用「${t.name}」` }}
       >
-        <img className={styles.shot} src={thumbUrl(t.id, t.revision, 480, s.tick)} alt="" draggable={false} />
-        {moves && t.wallpaperKind === 'video' && <WallpaperVideo wallpaper={t.wallpaperRef} fit={t.fit} />}
-        {moves && t.wallpaperKind === 'scene' && <SceneFrames theme={t.id} width={480} moving />}
-        {moves && s.lib!.settings.components && <img className={styles.shot} src={layerUrl(t.id, t.revision, 480, s.tick)} alt="" draggable={false} />}
-        <div className={mergeClasses(styles.overlay, (hover || menuOpen || calm()) && styles.overlayShown)} onClick={e => e.stopPropagation()}>
-          <Button size="small" onClick={() => openTheme(t.id)}>自定义</Button>
-          <Menu open={menuOpen} onOpenChange={(_, d) => setMenuOpen(d.open)}>
-            <MenuTrigger disableButtonEnhancement>
-              <Button size="small" icon={<MoreHorizontalRegular />} aria-label={`「${t.name}」的更多操作`} />
-            </MenuTrigger>
-            <MenuPopover>
-              <ThemeMenuItems theme={t} />
-            </MenuPopover>
-          </Menu>
+        <CardPreview>
+          <div className={styles.tile} style={shapeVars(t.id)}>
+            <img className={styles.shot} src={thumbUrl(t.id, t.revision, 480, s.tick)} alt="" draggable={false} />
+            {moves && t.wallpaperKind === 'video' && <WallpaperVideo wallpaper={t.wallpaperRef} fit={t.fit} />}
+            {moves && t.wallpaperKind === 'scene' && <SceneFrames theme={t.id} width={480} moving />}
+            {moves && s.lib!.settings.components && <img className={styles.shot} src={layerUrl(t.id, t.revision, 480, s.tick)} alt="" draggable={false} />}
+            <div className={mergeClasses(styles.overlay, (hover || menuOpen || calm()) && styles.overlayShown)} onClick={e => e.stopPropagation()}>
+              <Button size="small" onClick={() => openTheme(t.id)}>自定义</Button>
+              <Menu open={menuOpen} onOpenChange={(_, d) => setMenuOpen(d.open)}>
+                <MenuTrigger disableButtonEnhancement>
+                  <Button size="small" icon={<MoreHorizontalRegular />} aria-label={`「${t.name}」的更多操作`} />
+                </MenuTrigger>
+                <MenuPopover>
+                  <ThemeMenuItems theme={t} />
+                </MenuPopover>
+              </Menu>
+            </div>
+          </div>
+        </CardPreview>
+        <div className={styles.meta}>
+          <Text className={styles.ellipsis}>{t.name}</Text>
+          {/* A card colours its Text with currentColor, so the quiet colour is set on a wrapper. */}
+          <div className={mergeClasses(styles.quiet, styles.ellipsis)}>
+            <Caption1>{(used.length ? used.join('、') + ' · ' : '') + facts}</Caption1>
+          </div>
         </div>
-      </div>
-      <div className={styles.meta}>
-        <Text className={styles.ellipsis}>{t.name}</Text>
-        <Caption1 className={mergeClasses(styles.quiet, styles.ellipsis)}>{(used.length ? used.join('、') + ' · ' : '') + facts}</Caption1>
-      </div>
+      </Card>
     </article>
   );
 }

@@ -42,7 +42,7 @@ export interface State {
 }
 
 let state: State = {
-  env: { on: false, installed: false, monitors: [], fonts: [], devices: [] },
+  env: { on: false, installed: false, version: '', monitors: [], fonts: [], devices: [] },
   lib: null,
   open: null,
   clock: '',
