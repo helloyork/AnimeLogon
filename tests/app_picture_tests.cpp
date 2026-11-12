@@ -296,3 +296,41 @@ TEST(SkinPanelsSayThePointTheyAreHeldBy) {
     }
     if (SUCCEEDED(co)) CoUninitialize();
 }
+
+TEST(SkinPanelsStayOnTheirDisplay) {
+    const HRESULT co = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    SkinPreview preview;
+    Picture background;
+    background.width = 640;
+    background.height = 360;
+    background.bgra.assign((size_t)640 * 360 * 4, 0);
+    const RegionalFormat us{L"en-US", L"h:mm tt", L"dddd, MMMM d, yyyy"};
+    SYSTEMTIME now{};
+    now.wYear = 2026;
+    now.wMonth = 10;
+    now.wDay = 16;
+    now.wDayOfWeek = 5;
+    now.wHour = 15;
+    now.wMinute = 4;
+    auto place = [&](std::map<std::wstring, std::wstring> values) {
+        Picture out;
+        std::vector<SkinView::Bound> bounds;
+        CHECK(preview.Render(background, skin::Resolve(skin::Default(), values), ClockStyle{}, us, now, &out, &bounds));
+        const auto p1 = std::find_if(bounds.begin(), bounds.end(), [](const SkinView::Bound &b) { return b.key == L"p1"; });
+        CHECK(p1 != bounds.end());
+        return p1 == bounds.end() ? SkinView::Bound{} : *p1;
+    };
+    // Offsets that would carry the clock past each edge stop it at that edge.
+    const SkinView::Bound right = place({{L"p1.anchor", L"top-right"}, {L"p1.offset-x", L"50"}});
+    CHECK(right.rect.right <= 640.0f && right.rect.right >= 638.0f && right.rect.left > 0.0f);
+    const SkinView::Bound corner = place({{L"p1.anchor", L"bottom-left"}, {L"p1.offset-x", L"-50"}, {L"p1.offset-y", L"50"}});
+    CHECK(corner.rect.left >= 0.0f && corner.rect.left <= 2.0f && corner.rect.bottom <= 360.0f && corner.rect.bottom >= 358.0f);
+    const SkinView::Bound up = place({{L"p1.anchor", L"top"}, {L"p1.offset-y", L"-50"}});
+    CHECK(up.rect.top >= 0.0f && up.rect.top <= 2.0f);
+    // The point it is held by moves with it, so the settings page's marks follow.
+    CHECK(right.holdX[2] <= 640.0f && corner.holdY[2] <= 360.0f);
+    // An offset that keeps it on the display is left alone.
+    const SkinView::Bound kept = place({{L"p1.anchor", L"top"}, {L"p1.offset-y", L"10"}});
+    CHECK(std::fabs(kept.holdY[0] - (0.07f * 360 + 36.0f)) <= 1.5f);
+    if (SUCCEEDED(co)) CoUninitialize();
+}

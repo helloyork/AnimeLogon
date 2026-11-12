@@ -399,6 +399,18 @@ bool SkinView::Build(Built &built, size_t index, UINT width, UINT height) {
     const float anchorY = (row == 0 ? margin : row == 1 ? h / 2.0f : h - margin) + panel.offsetY / 100.0f * h;
     const float refY = row == 0 ? top : row == 1 ? (top + lastBaseline) / 2.0f : lastBaseline;
     built.at = D2D1::Point2F(std::floor(anchorX - refX), std::floor(anchorY - (originY + refY)));
+    // The panel stays on its display whatever its offsets say: offsets that would carry its ink past
+    // an edge (a drag that went too far, or a theme made on a display of another shape) stop it at
+    // that edge. A panel larger than the display is centred on it. The moves are whole pixels, so
+    // the text stays on the pixel grid.
+    auto inside = [](float lo, float hi, float limit) {
+        if (hi - lo >= limit) return std::round((limit - (hi - lo)) / 2.0f - lo);
+        if (lo < 0.0f) return std::ceil(-lo);
+        if (hi > limit) return std::floor(limit - hi);
+        return 0.0f;
+    };
+    built.at.x += inside(built.at.x + refX - before, built.at.x + refX + after, w);
+    built.at.y += inside(built.at.y + originY + top, built.at.y + originY + bottom, h);
     built.px = px;
 
     const std::wstring pk = L"p" + std::to_wstring(index + 1);

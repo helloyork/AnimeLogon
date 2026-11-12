@@ -1,7 +1,7 @@
 // The panel beside the picture, like a settings page (D40). It shows one level at a time, as the
 // selection says: the wallpaper and the list of components; one component; one part of it
 // (组件 › 时钟 › 时间). The breadcrumb goes back up.
-import { Fragment, useLayoutEffect, useRef, type ReactNode } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useReducer, useRef, type ReactNode } from 'react';
 import {
   Accordion,
   AccordionHeader,
@@ -34,10 +34,11 @@ import {
 import { AddRegular, ArrowResetRegular, ChevronRightRegular, MoreHorizontalRegular } from '@fluentui/react-icons';
 import { ARRIVE, calm } from '../motion';
 import { wallpaperUrl } from '../native';
-import { clearValues, edit, setValue, setValues } from '../preview';
+import { clearValues, edit, pv, setValue, setValues, subscribePreview } from '../preview';
 import { getState, instOf, leaveTheme, openDialog, select, setState, useStore } from '../store';
-import type { Instance, Part, SceneControls } from '../types';
-import { adjustment, anchorName } from './geometry';
+import type { Adjustment, Instance, Part, SceneControls } from '../types';
+import { useDraft } from './draft';
+import { adjustment, anchorName, ANCHORS, clamp, geometry, offsetLimits } from './geometry';
 import { AdjustmentField, AnchorPicker, ChoiceField, SettingField } from './fields';
 
 const COMMON_TEXT = ['font', 'weight', 'size', 'color'];
@@ -352,12 +353,24 @@ function PartView({ inst, partKey }: { inst: Instance | SceneControls; partKey: 
 }
 
 // Where a panel is: the anchor it is placed by, the offset from it, its size; then its margin
-// from the display's edges and how its lines align.
+// from the display's edges and how its lines align. While the panel is dragged or resized on the
+// stage, the fields show where it is going. The offsets go only as far as keeps it on its display.
 function PositionFields({ instId, pk }: { instId: string; pk: string }) {
   const styles = useStyles();
-  const anchor = adjustment(instId, pk + '.anchor'), cur = anchor ? anchor.value : 'top';
+  const draft = useDraft(instId);
+  const [, redraw] = useReducer((x: number) => x + 1, 0);
+  useEffect(() => subscribePreview(redraw), []);
+  const anchor = adjustment(instId, pk + '.anchor'), cur = draft?.[pk + '.anchor'] ?? (anchor ? anchor.value : 'top');
   const modified = ['anchor', 'offset-x', 'offset-y'].some(k => adjustment(instId, pk + '.' + k)?.modified);
-  const rest = [pk + '.offset-x', pk + '.offset-y', pk + '.size', pk + '.margin', pk + '.align'].map(k => adjustment(instId, k)).filter(a => !!a);
+  const g = pv.width && cur !== 'full' ? geometry(instId, pk, 1, { width: pv.width, height: pv.height }, getState().screen) : null;
+  const at = Math.max(0, ANCHORS.indexOf(cur)), lim = g ? offsetLimits(g, at % 3, Math.floor(at / 3)) : null;
+  const shown = (a: Adjustment): Adjustment => {
+    const value = draft?.[a.key] ?? a.value;
+    const range = !lim ? null : a.key === pk + '.offset-x' ? [lim.x0, lim.x1] : a.key === pk + '.offset-y' ? [lim.y0, lim.y1] : null;
+    if (!range) return { ...a, value };
+    return { ...a, min: range[0], max: range[1], value: String(clamp(+value || 0, range[0], range[1])) };
+  };
+  const rest = [pk + '.offset-x', pk + '.offset-y', pk + '.size', pk + '.margin', pk + '.align'].map(k => adjustment(instId, k)).filter(a => !!a).map(a => shown(a!));
   return (
     <>
       <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXS, paddingBlock: tokens.spacingVerticalS }}>

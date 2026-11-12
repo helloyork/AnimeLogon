@@ -18,10 +18,10 @@ import {
 import { ArrowLeftRegular, ArrowRedoRegular, ArrowUndoRegular, MoreHorizontalRegular } from '@fluentui/react-icons';
 import { BusyBar } from '../App';
 import { ThemeMenuItems } from '../library/LibraryPage';
-import { edit, endGesture, liveSet, newGesture, pendingValues, setValue } from '../preview';
+import { edit, endGesture, liveSet, newGesture, pendingValues, pv, setValue } from '../preview';
 import { applyFlow, getState, instOf, leaveTheme, multiPanel, panelKey, select, setState, themeOf, usedOn, useStore } from '../store';
 import { Canvas } from './Canvas';
-import { clamp, roundTo, valueOf } from './geometry';
+import { clamp, geometry, offsetLimits, roundTo, shownOffset, valueOf } from './geometry';
 import { Inspector } from './Inspector';
 
 const useStyles = makeStyles({
@@ -124,9 +124,13 @@ function useKeys() {
       const pk = panelKey(sel), now = performance.now();
       if (now - nudge.at > 700) nudge.gesture = newGesture();
       nudge.at = now;
+      // From where the panel is shown, and no further than keeps it on its display.
       const pending = pendingValues(inst.id);
-      const ox = clamp(roundTo(+(pending[pk + '.offset-x'] ?? nudge.ox ?? valueOf(inst.id, pk + '.offset-x')) + d[0], 0.1), -50, 50);
-      const oy = clamp(roundTo(+(pending[pk + '.offset-y'] ?? nudge.oy ?? valueOf(inst.id, pk + '.offset-y')) + d[1], 0.1), -50, 50);
+      const full = valueOf(inst.id, pk + '.anchor') === 'full';
+      const g = pv.width && !full ? geometry(inst.id, pk, 1, { width: pv.width, height: pv.height }, s.screen) : null;
+      const lim = g ? offsetLimits(g) : { x0: -50, x1: 50, y0: -50, y1: 50 }, from = g ? shownOffset(g) : null;
+      const ox = clamp(roundTo(+(pending[pk + '.offset-x'] ?? nudge.ox ?? from?.ox ?? valueOf(inst.id, pk + '.offset-x')) + d[0], 0.1), lim.x0, lim.x1);
+      const oy = clamp(roundTo(+(pending[pk + '.offset-y'] ?? nudge.oy ?? from?.oy ?? valueOf(inst.id, pk + '.offset-y')) + d[1], 0.1), lim.y0, lim.y1);
       nudge.ox = ox;
       nudge.oy = oy;
       const values: Record<string, string> = { [pk + '.offset-x']: String(ox), [pk + '.offset-y']: String(oy) };

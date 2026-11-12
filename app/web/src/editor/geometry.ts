@@ -91,26 +91,134 @@ export function geometry(instId: string, pk: string, k: number, stage: { width: 
   };
 }
 
+const anchorX = (g: Geometry, col: number) => g.f.left + [g.M, g.W / 2, g.W - g.M][col];
+const anchorY = (g: Geometry, row: number) => g.f.top + [g.M, g.H / 2, g.H - g.M][row];
+
+// How far a panel's offsets may go, in percent, with its box still on its display, when it is
+// placed by the given column and row. The native side stops a panel at the display's edges in
+// any case (skinview.cpp), so past these an offset would change nothing on the screen.
+export function offsetLimits(g: Geometry, col = g.col, row = g.row) {
+  const { f, W, H, r } = g;
+  const bx = anchorX(g, col), by = anchorY(g, row);
+  // The box either side of the point it is held by.
+  const left = g.hx[col] - r.left, right = r.left + r.width - g.hx[col];
+  const above = g.hy[row] - r.top, below = r.top + r.height - g.hy[row];
+  const span = (lo: number, hi: number): [number, number] => {
+    if (lo > hi) {
+      const mid = clamp(roundTo((lo + hi) / 2, 0.1), -50, 50);  // larger than the display: centred
+      return [mid, mid];
+    }
+    return [Math.max(-50, Math.ceil(lo * 10 - 1e-6) / 10), Math.min(50, Math.floor(hi * 10 + 1e-6) / 10)];
+  };
+  const [x0, x1] = span(((f.left + left - bx) / W) * 100, ((f.left + W - right - bx) / W) * 100);
+  const [y0, y1] = span(((f.top + above - by) / H) * 100, ((f.top + H - below - by) / H) * 100);
+  return { x0, x1: Math.max(x0, x1), y0, y1: Math.max(y0, y1) };
+}
+
+// The offsets the panel is shown at: the stored ones, unless the display's edges stop it short of
+// them (an older setting, or a theme made on a display of another shape). The picture's pixels are
+// whole, so within a pixel and a half the stored values are taken as exact.
+export function shownOffset(g: Geometry) {
+  const vx = ((g.rx - g.bx) / g.W) * 100, vy = ((g.ry - g.by) / g.H) * 100;
+  return {
+    ox: Math.abs(g.rx - g.bx - (g.ox / 100) * g.W) <= 1.5 ? g.ox : roundTo(vx, 0.1),
+    oy: Math.abs(g.ry - g.by - (g.oy / 100) * g.H) <= 1.5 ? g.oy : roundTo(vy, 0.1),
+  };
+}
+
+// A line the moving panel has snapped to, in the stage's pixels.
+export interface SnapLine {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+
+const SNAP = 6;  // how near, in stage pixels, a panel has to come to a line to snap to it
+
 // Where a panel dragged by (dx, dy) lands, said the way the sliders say it: the nearest of the
-// nine anchors and an offset from it. Near an anchor the offset snaps to zero, which puts the
-// point the panel is held by on the anchor, not the middle of its box.
-export function placeDragged(g: Geometry, dx: number, dy: number) {
-  const L0 = g.r.left + dx, T0 = g.r.top + dy, cx = L0 + g.r.width / 2, cy = T0 + g.r.height / 2;
-  const { W, H, M, f } = g, fx = cx - f.left, fy = cy - f.top;
+// nine anchors and an offset from it. Its box stays on its display. Unless `free`, it snaps when
+// the point it would be held by comes near an anchor's line (the offset is then exactly zero,
+// which puts that point on the anchor, not the middle of its box), when an edge comes near the
+// display's edge, or when an edge or its middle comes near another panel's.
+export function placeDragged(g: Geometry, dx: number, dy: number, opt: { free?: boolean; others?: Rect[] } = {}) {
+  const { f, W, H, r } = g;
+  const within = (d: number, lo: number, hi: number) => (lo > hi ? (lo + hi) / 2 : clamp(d, lo, hi));
+  const keepX = (d: number) => within(d, f.left - r.left, f.left + W - r.left - r.width);
+  const keepY = (d: number) => within(d, f.top - r.top, f.top + H - r.top - r.height);
+  dx = keepX(dx);
+  dy = keepY(dy);
+  const lines: SnapLine[] = [];
+  if (!opt.free) {
+    // Pairs of where a point of the panel is before the drag and the line it may snap to.
+    const xs: [number, number][] = [[r.left, f.left], [r.left + r.width, f.left + W]];
+    const ys: [number, number][] = [[r.top, f.top], [r.top + r.height, f.top + H]];
+    for (let i = 0; i < 3; i++) {
+      xs.push([g.hx[i], anchorX(g, i)]);
+      ys.push([g.hy[i], anchorY(g, i)]);
+    }
+    for (const o of opt.others || []) {
+      for (const at of [o.left, o.left + o.width / 2, o.left + o.width])
+        for (const p of [r.left, r.left + r.width / 2, r.left + r.width]) xs.push([p, at]);
+      for (const at of [o.top, o.top + o.height / 2, o.top + o.height])
+        for (const p of [r.top, r.top + r.height / 2, r.top + r.height]) ys.push([p, at]);
+    }
+    const nearest = (pairs: [number, number][], d: number) => {
+      let best: { by: number; at: number } | null = null;
+      for (const [p, at] of pairs) {
+        const by = at - (p + d);
+        if (Math.abs(by) < SNAP && (!best || Math.abs(by) < Math.abs(best.by))) best = { by, at };
+      }
+      return best;
+    };
+    const sx = nearest(xs, dx), sy = nearest(ys, dy);
+    if (sx) {
+      dx = keepX(dx + sx.by);
+      lines.push({ x1: sx.at, y1: f.top, x2: sx.at, y2: f.top + H });
+    }
+    if (sy) {
+      dy = keepY(dy + sy.by);
+      lines.push({ x1: f.left, y1: sy.at, x2: f.left + W, y2: sy.at });
+    }
+  }
+  const L0 = r.left + dx, T0 = r.top + dy, fx = L0 + r.width / 2 - f.left, fy = T0 + r.height / 2 - f.top;
   const col = fx < W / 3 ? 0 : fx < (W * 2) / 3 ? 1 : 2, row = fy < H / 3 ? 0 : fy < (H * 2) / 3 ? 1 : 2;
-  const bx = f.left + [M, W / 2, W - M][col], by = f.top + [M, H / 2, H - M][row];
+  const bx = anchorX(g, col), by = anchorY(g, row);
   const rx = g.hx[col] + dx, ry = g.hy[row] + dy;
   // On the same anchor, the offset moves by exactly what the pointer did.
-  let ox = col === g.col ? g.ox + (dx / W) * 100 : ((rx - bx) / W) * 100;
-  let oy = row === g.row ? g.oy + (dy / H) * 100 : ((ry - by) / H) * 100;
-  const snapX = Math.abs(rx - bx) < 7, snapY = Math.abs(ry - by) < 7;
-  if (snapX) ox = 0;
-  if (snapY) oy = 0;
-  ox = clamp(roundTo(ox, 0.1), -50, 50);
-  oy = clamp(roundTo(oy, 0.1), -50, 50);
-  // Where the panel actually sits with the snapped offset, so the moving picture snaps too.
-  const sx = snapX ? bx - rx : 0, sy = snapY ? by - ry : 0;
-  return { anchor: ANCHORS[row * 3 + col], ox, oy, col, row, bx, by, rx: rx + sx, ry: ry + sy, left: L0 + sx, top: T0 + sy, snapX, snapY };
+  const shown = shownOffset(g);
+  let ox = col === g.col ? shown.ox + (dx / W) * 100 : ((rx - bx) / W) * 100;
+  let oy = row === g.row ? shown.oy + (dy / H) * 100 : ((ry - by) / H) * 100;
+  if (Math.abs(rx - bx) < 0.5) ox = 0;
+  if (Math.abs(ry - by) < 0.5) oy = 0;
+  const lim = offsetLimits(g, col, row);
+  ox = clamp(roundTo(ox, 0.1), lim.x0, lim.x1);
+  oy = clamp(roundTo(oy, 0.1), lim.y0, lim.y1);
+  return { anchor: ANCHORS[row * 3 + col], ox, oy, col, row, bx, by, rx, ry, left: L0, top: T0, lines };
+}
+
+// A panel resized from a corner of its box grows away from the opposite corner, which stays where
+// it is. The native side scales a panel about the point it is held by, so the offsets move that
+// point to where scaling about the corner takes it.
+export function fixedCorner(g: Geometry, handle: string) {
+  const { r } = g;
+  return { x: handle.includes('w') ? r.left + r.width : r.left, y: handle.includes('n') ? r.top + r.height : r.top };
+}
+// The largest scale about that corner that keeps the box on its display.
+export function largestScale(g: Geometry, o: { x: number; y: number }) {
+  const { f, W, H, r } = g;
+  const ex = (o.x === r.left ? r.left + r.width : r.left) - o.x, ey = (o.y === r.top ? r.top + r.height : r.top) - o.y;
+  let m = Infinity;
+  if (ex > 0) m = Math.min(m, (f.left + W - o.x) / ex);
+  else if (ex < 0) m = Math.min(m, (f.left - o.x) / ex);
+  if (ey > 0) m = Math.min(m, (f.top + H - o.y) / ey);
+  else if (ey < 0) m = Math.min(m, (f.top - o.y) / ey);
+  return m;
+}
+export function offsetsScaledAbout(g: Geometry, o: { x: number; y: number }, scale: number) {
+  const shown = shownOffset(g);
+  const hx = o.x + (g.rx - o.x) * scale, hy = o.y + (g.ry - o.y) * scale;
+  return { ox: clamp(roundTo(shown.ox + ((hx - g.rx) / g.W) * 100, 0.1), -50, 50), oy: clamp(roundTo(shown.oy + ((hy - g.ry) / g.H) * 100, 0.1), -50, 50) };
 }
 
 // The smallest panel or text under a point of the stage.

@@ -29,14 +29,18 @@ import {
 } from '../preview';
 import { getState, instOf, multiPanel, panelKey, ratioLabel, screenOf, select, setState, shapeOf, spanning, useStore } from '../store';
 import type { Bound } from '../types';
+import { setDraft } from './draft';
 import {
   adjustment,
   anchorName,
   boundOf,
   clamp,
   copiesOf,
+  fixedCorner,
   geometry,
   hitTest,
+  largestScale,
+  offsetsScaledAbout,
   panelBounds,
   placeDragged,
   rectOf,
@@ -46,6 +50,7 @@ import {
   valueOf,
   type Geometry,
   type Rect,
+  type SnapLine,
 } from './geometry';
 
 const MARK = '#ffffff', EDGE = 'rgba(0, 0, 0, .55)';
@@ -138,10 +143,10 @@ interface Drag {
   by?: number;
   rx?: number;      // the point it is held by
   ry?: number;
-  snapX?: boolean;
-  snapY?: boolean;
-  // A resize: how much larger the panel is drawn than it was.
+  lines?: SnapLine[];  // what it has snapped to
+  // A resize: how much larger the panel is drawn than it was, about which point.
   scale?: number;
+  origin?: { x: number; y: number };
   readout: string;
   settling?: number;  // the request whose picture ends it
 }
@@ -205,15 +210,17 @@ export function Canvas() {
   }, [hoverInst, pv.rev, pv.url, busy]);
 
   // A finished drag stays on the stage until the picture that answers it is shown.
+  const settle = () => {
+    setDrag(null);
+    hold(null);
+    setDraft(null);
+  };
   useEffect(() => {
-    if (drag?.settling && pv.shownSeq >= drag.settling) {
-      setDrag(null);
-      hold(null);
-    }
+    if (drag?.settling && pv.shownSeq >= drag.settling) settle();
   });
   useEffect(() => {
     if (!drag?.settling) return;
-    const timer = window.setTimeout(() => { setDrag(null); hold(null); }, 4000);
+    const timer = window.setTimeout(settle, 4000);
     return () => clearTimeout(timer);
   }, [drag?.settling]);
 
@@ -235,9 +242,10 @@ export function Canvas() {
   };
   const onDown = (e: ReactPointerEvent) => {
     if (e.button !== 0 || dragRef.current?.settling) return;
-    if ((e.target as HTMLElement).dataset.handle) {
+    const handle = (e.target as HTMLElement).dataset.handle;
+    if (handle) {
       e.preventDefault();
-      startResize(e);
+      startResize(e, handle);
       return;
     }
     const p = local(e), hit = hitTest(p.x, p.y, k);
@@ -272,63 +280,93 @@ export function Canvas() {
     window.addEventListener('pointercancel', up);
   }
 
+  // The other panels on the same display, which a dragged one snaps to.
+  const othersOf = (inst: string, pk: string, screen: number) => {
+    const own = boundOf(inst, pk, screen);
+    return pv.bounds
+      .filter(b => b.instance !== 'wallpaper' && /^p\d+$/.test(b.key) && !(b.instance === inst && b.key === pk) && b.screen === own?.screen)
+      .map(b => rectOf(b, k));
+  };
+
+  // The end of a drag or resize: what it set is written, and the stage keeps showing the moved
+  // component until the picture drawn with it arrives.
+  const finish = (inst: string, last: Record<string, string> | null, lift: Lift | null, gesture: number) => {
+    if (lift && last) {
+      const seq = setValues(inst, last, gesture);
+      setDrag(d => (d ? { ...d, settling: seq } : null));
+    } else {
+      endGesture();
+      settle();
+    }
+  };
+
   function startDrag(e: ReactPointerEvent, inst: string, pk: string, partOnClick: string | null) {
-    const g = geometry(inst, pk, k, stage, getState().screen);
+    const screen = getState().screen, g = geometry(inst, pk, k, stage, screen);
     if (!g) return;
     const lift = inst !== 'wallpaper' && copiesOf(inst, pk) === 1 ? liftFor(inst) : null;
+    const others = othersOf(inst, pk, screen);
     const gesture = newGesture();
     let last: Record<string, string> | null = null;
-    track((dx, dy) => {
-      const place = placeDragged(g, dx, dy);
+    track((dx, dy, ev) => {
+      // Shift keeps to the axis it has moved along most; Ctrl drags without snapping.
+      if (ev.shiftKey) {
+        if (Math.abs(dx) >= Math.abs(dy)) dy = 0;
+        else dx = 0;
+      }
+      const place = placeDragged(g, dx, dy, { free: ev.ctrlKey, others });
       last = { [pk + '.anchor']: place.anchor, [pk + '.offset-x']: String(place.ox), [pk + '.offset-y']: String(place.oy) };
       if (lift) hold(lift);
       setDrag({ inst, pk, g, lift, left: place.left, top: place.top, anchor: place.anchor, col: place.col, row: place.row, bx: place.bx, by: place.by,
-        rx: place.rx, ry: place.ry, snapX: place.snapX, snapY: place.snapY, readout: posText(place.anchor, place.ox, place.oy) });
+        rx: place.rx, ry: place.ry, lines: place.lines, readout: posText(place.anchor, place.ox, place.oy) });
+      setDraft({ inst, values: last });
       if (!lift) liveSet(inst, last, gesture);
     }, moved => {
       if (!moved) {
-        setDrag(null);
+        settle();
         if (partOnClick) select(inst, partOnClick);
         return;
       }
-      if (lift && last) {
-        const seq = setValues(inst, last, gesture);
-        setDrag(d => (d ? { ...d, settling: seq } : null));
-      } else {
-        endGesture();
-        setDrag(null);
-      }
+      finish(inst, last, lift, gesture);
     }, e.clientX, e.clientY);
   }
 
-  function startResize(e: ReactPointerEvent) {
+  function startResize(e: ReactPointerEvent, handle: string) {
     const sel = getState().sel, inst = sel.inst;
     if (!inst || !instOf(inst)) return;
     const pk = panelKey(sel), g = geometry(inst, pk, k, stage, getState().screen);
     if (!g) return;
     const a = adjustment(inst, pk + '.size'), s0 = +(a ? a.value : 10);
-    const rs = stageRef.current!.getBoundingClientRect(), cx = rs.left + g.r.left + g.r.width / 2, cy = rs.top + g.r.top + g.r.height / 2;
-    const d0 = Math.max(8, Math.hypot(e.clientX - cx, e.clientY - cy));
+    const lo = a ? a.min : 1, hi = a ? a.max : 50;
+    // A layer filling the picture has no corner to keep: it grows about the point it is held by.
     const full = inst === 'wallpaper' && valueOf(inst, pk + '.anchor') === 'full';
+    const origin = full ? { x: g.rx, y: g.ry } : fixedCorner(g, handle);
+    const top = full ? hi : Math.max(lo, Math.min(hi, Math.floor(s0 * largestScale(g, origin) * 2) / 2));
+    // How far along the box's diagonal the pointer is, from the fixed corner; the size follows it.
+    const rs = stageRef.current!.getBoundingClientRect();
+    const far = { x: origin.x === g.r.left ? g.r.left + g.r.width : g.r.left, y: origin.y === g.r.top ? g.r.top + g.r.height : g.r.top };
+    const dx0 = far.x - origin.x || 1, dy0 = far.y - origin.y || 1, len = dx0 * dx0 + dy0 * dy0;
+    const along = (x: number, y: number) => ((x - rs.left - origin.x) * dx0 + (y - rs.top - origin.y) * dy0) / len;
+    const t0 = Math.max(0.05, along(e.clientX, e.clientY));
     const lift = inst !== 'wallpaper' && copiesOf(inst, pk) === 1 ? liftFor(inst) : null;
     const gesture = newGesture();
     let last: Record<string, string> | null = null;
     track((_dx, _dy, ev) => {
-      const size = clamp(roundTo((s0 * Math.hypot(ev.clientX - cx, ev.clientY - cy)) / d0, 0.5), a ? a.min : 1, a ? a.max : 50);
+      const size = clamp(roundTo((s0 * along(ev.clientX, ev.clientY)) / t0, 0.5), lo, top);
+      const scale = size / s0;
       last = { [pk + '.size']: String(size) };
       if (full) last[pk + '.anchor'] = 'center';
+      else {
+        const o = offsetsScaledAbout(g, origin, scale);
+        last[pk + '.offset-x'] = String(o.ox);
+        last[pk + '.offset-y'] = String(o.oy);
+      }
       if (lift) hold(lift);
-      setDrag({ inst, pk, g, lift, left: g.r.left, top: g.r.top, scale: size / s0, readout: `大小 ${size.toFixed(1)}% 屏高` });
+      setDrag({ inst, pk, g, lift, left: g.r.left, top: g.r.top, scale, origin, readout: `大小 ${size.toFixed(1)}% 屏高` });
+      setDraft({ inst, values: last });
       if (!lift) liveSet(inst, last, gesture);
     }, moved => {
-      if (!moved) return setDrag(null);
-      if (lift && last) {
-        const seq = setValues(inst, last, gesture);
-        setDrag(d => (d ? { ...d, settling: seq } : null));
-      } else {
-        endGesture();
-        setDrag(null);
-      }
+      if (!moved) return settle();
+      finish(inst, last, lift, gesture);
     }, e.clientX, e.clientY);
   }
 
@@ -354,8 +392,8 @@ export function Canvas() {
   // While dragging, the box is where the panel is going.
   if (drag && selRect && drag.inst === sel.inst) {
     if (drag.scale != null) {
-      const sc = drag.scale, ox = drag.g.rx, oy = drag.g.ry, r = drag.g.r;
-      selRect = { left: ox + (r.left - ox) * sc, top: oy + (r.top - oy) * sc, width: r.width * sc, height: r.height * sc };
+      const sc = drag.scale, o = drag.origin ?? { x: drag.g.rx, y: drag.g.ry }, r = drag.g.r;
+      selRect = { left: o.x + (r.left - o.x) * sc, top: o.y + (r.top - o.y) * sc, width: r.width * sc, height: r.height * sc };
     } else selRect = { ...selRect, left: drag.left, top: drag.top };
     partRect = null;
   }
@@ -368,7 +406,12 @@ export function Canvas() {
       hoverRects.push(rectOf(b, k));
     }
   }
-  const readoutStyle = (r: Rect): CSSProperties => ({ left: Math.max(4, r.left - 6), top: r.top - 6 - 26 < 4 ? r.top + r.height + 12 : r.top - 6 - 26 });
+  // Above the box, or below it near the top; from its left edge, or from its right edge on the
+  // right half of the stage, so the text stays on the stage.
+  const readoutStyle = (r: Rect): CSSProperties => ({
+    ...(r.left + r.width / 2 > stage.width / 2 ? { right: Math.max(4, stage.width - r.left - r.width - 6) } : { left: Math.max(4, r.left - 6) }),
+    top: r.top - 6 - 26 < 4 ? r.top + r.height + 12 : r.top - 6 - 26,
+  });
 
   /* --- the lifted component --- */
   const lifted = drag?.lift ?? null;
@@ -379,7 +422,7 @@ export function Canvas() {
     sprite = {
       backgroundImage: `url(${lifted.only})`,
       transform,
-      transformOrigin: `${drag.g.rx}px ${drag.g.ry}px`,
+      transformOrigin: `${(drag.origin ?? { x: drag.g.rx }).x}px ${(drag.origin ?? { y: drag.g.ry }).y}px`,
       ...(multi ? { clipPath: `inset(${r.top - m}px ${W - r.left - r.width - m}px ${H - r.top - r.height - m}px ${r.left - m}px)` } : {}),
     };
     if (multi) {
@@ -427,8 +470,7 @@ export function Canvas() {
                 );
               })}
               {drag && drag.scale == null && <Anchors g={drag.g} />}
-              {drag && drag.scale == null && drag.snapX && <Guide x1={drag.bx!} y1={drag.g.f.top} x2={drag.bx!} y2={drag.g.f.top + drag.g.f.height} />}
-              {drag && drag.scale == null && drag.snapY && <Guide x1={drag.g.f.left} y1={drag.by!} x2={drag.g.f.left + drag.g.f.width} y2={drag.by!} />}
+              {drag && !drag.settling && drag.lines?.map((l, i) => <Guide key={i} {...l} />)}
               {g && !whole && <Tether g={g} drag={drag} />}
             </svg>
 
