@@ -197,6 +197,42 @@ export function placeDragged(g: Geometry, dx: number, dy: number, opt: { free?: 
   return { anchor: ANCHORS[row * 3 + col], ox, oy, col, row, bx, by, rx, ry, left: L0, top: T0, lines };
 }
 
+// Where a panel is, as the panel beside the stage says it (D60): its middle, in percent of its
+// display's width and height from the left and top edges, and how far that can go with the box
+// still on the display. The middle is the point the panel is held by when it is centred (the
+// middle of its lines without a marker that hangs beside them, such as AM/PM, D57), so a clock
+// snapped to the display's middle reads 50. It is reckoned from the stored offsets, not the
+// picture's whole pixels, so a value typed in reads back as typed.
+function middle(g: Geometry) {
+  const s = shownOffset(g);
+  return { x: g.bx + (s.ox / 100) * g.W + (g.hx[1] - g.rx), y: g.by + (s.oy / 100) * g.H + (g.hy[1] - g.ry) };
+}
+export function centreOf(g: Geometry) {
+  const { f, W, H, r } = g, m = middle(g);
+  const span = (before: number, after: number, size: number): [number, number] => {
+    const lo = (before / size) * 100, hi = 100 - (after / size) * 100;
+    if (lo > hi) return [50, 50];
+    return [Math.ceil(lo * 10 - 1e-6) / 10, Math.floor(hi * 10 + 1e-6) / 10];
+  };
+  const [x0, x1] = span(g.hx[1] - r.left, r.left + r.width - g.hx[1], W);
+  const [y0, y1] = span(g.hy[1] - r.top, r.top + r.height - g.hy[1], H);
+  return { x: roundTo(((m.x - f.left) / W) * 100, 0.1), y: roundTo(((m.y - f.top) / H) * 100, 0.1), x0, x1, y0, y1 };
+}
+// Where the middle is after the panel has been moved by (dx, dy), or scaled about a point.
+export function middleMoved(g: Geometry, dx: number, dy: number, scale = 1, about?: { x: number; y: number }) {
+  const o = about ?? { x: 0, y: 0 };
+  const x = o.x + (g.hx[1] - o.x) * scale + dx, y = o.y + (g.hy[1] - o.y) * scale + dy;
+  return { x: ((x - g.f.left) / g.W) * 100, y: ((y - g.f.top) / g.H) * 100 };
+}
+// The anchor and offsets that put the middle of a panel's box at (x, y) percent of its display,
+// either left as it is when null: the anchor follows the position, as it does for a drag.
+export function placeCentre(g: Geometry, x: number | null, y: number | null) {
+  const { f, W, H } = g, m = middle(g);
+  const dx = x == null ? 0 : f.left + (x / 100) * W - m.x;
+  const dy = y == null ? 0 : f.top + (y / 100) * H - m.y;
+  return placeDragged(g, dx, dy, { free: true });
+}
+
 // A panel resized from a corner of its box grows away from the opposite corner, which stays where
 // it is. The native side scales a panel about the point it is held by, so the offsets move that
 // point to where scaling about the corner takes it.

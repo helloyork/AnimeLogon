@@ -114,7 +114,7 @@ function Head({ id, label, detail, modified, onReset, value }: { id: string; lab
 const WEIGHT_NAMES: Record<number, string> = { 100: '极细', 200: '特细', 300: '细', 400: '常规', 500: '中等', 600: '半粗', 700: '粗', 800: '特粗', 900: '黑' };
 
 // How a value reads beside its slider: in what units, scaled how, with how many digits.
-interface View {
+export interface View {
   factor: number;
   digits: number;
   unit: (v: number) => string;
@@ -151,8 +151,11 @@ export function NumberField({ id, label, detail, min, max, step, value, modified
   const styles = useStyles();
   const [live, setLive] = useState<number | null>(null);
   const gesture = useRef(0);
-  // What the native side says wins once it has answered.
-  useEffect(() => setLive(null), [value]);
+  // What the native side says wins once it has answered; while the slider is held, the slider
+  // does, since a value drawn from the moving picture trails the pointer.
+  useEffect(() => {
+    if (!gesture.current) setLive(null);
+  }, [value]);
   const shown = live ?? +value;
   const end = () => {
     if (!gesture.current) return;

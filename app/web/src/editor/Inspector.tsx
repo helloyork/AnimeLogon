@@ -1,7 +1,7 @@
 // The panel beside the picture, like a settings page (D40). It shows one level at a time, as the
 // selection says: the wallpaper and the list of components; one component; one part of it
 // (组件 › 时钟 › 时间). The breadcrumb goes back up.
-import { Fragment, useEffect, useLayoutEffect, useReducer, useRef, type ReactNode } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useReducer, useRef, useState, type ReactNode } from 'react';
 import {
   Accordion,
   AccordionHeader,
@@ -31,15 +31,15 @@ import {
   Tooltip,
   tokens,
 } from '@fluentui/react-components';
-import { AddRegular, ArrowResetRegular, ChevronRightRegular, MoreHorizontalRegular } from '@fluentui/react-icons';
+import { AddRegular, ArrowResetRegular, ChevronDownRegular, ChevronRightRegular, ChevronUpRegular, MoreHorizontalRegular } from '@fluentui/react-icons';
 import { ARRIVE, calm } from '../motion';
 import { wallpaperUrl } from '../native';
-import { clearValues, edit, pv, setValue, setValues, subscribePreview } from '../preview';
-import { getState, instOf, leaveTheme, openDialog, select, setState, useStore } from '../store';
-import type { Adjustment, Instance, Part, SceneControls } from '../types';
+import { clearValues, edit, liveSet, pv, setValue, setValues, subscribePreview } from '../preview';
+import { getState, instOf, openDialog, select, setState, setTab, useStore } from '../store';
+import type { Instance, Part, SceneControls } from '../types';
 import { useDraft } from './draft';
-import { adjustment, anchorName, ANCHORS, clamp, geometry, offsetLimits } from './geometry';
-import { AdjustmentField, AnchorPicker, ChoiceField, SettingField } from './fields';
+import { adjustment, centreOf, clamp, geometry, placeCentre } from './geometry';
+import { AdjustmentField, ChoiceField, NumberField, SettingField, type View } from './fields';
 
 const COMMON_TEXT = ['font', 'weight', 'size', 'color'];
 
@@ -81,6 +81,10 @@ const useStyles = makeStyles({
   titleRow: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS },
   foot: { display: 'flex', gap: tokens.spacingHorizontalS, paddingTop: tokens.spacingVerticalS },
   accordionPanel: { marginInline: 0, paddingBottom: tokens.spacingVerticalS },
+  place: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXS, paddingBlock: tokens.spacingVerticalS },
+  more: { alignSelf: 'flex-start', paddingInline: 0, minWidth: 0 },
+  crumb: { fontSize: tokens.fontSizeBase500, lineHeight: tokens.lineHeightBase500, color: tokens.colorNeutralForeground2 },
+  crumbNow: { fontSize: tokens.fontSizeBase500, lineHeight: tokens.lineHeightBase500, fontWeight: tokens.fontWeightSemibold },
 });
 
 /* --- shared pieces --- */
@@ -97,14 +101,16 @@ function Section({ title, aside, children }: { title: string; aside?: string; ch
   );
 }
 
+// The panel's title: where in it the person is, larger than its groups (Windows' settings).
 function Crumbs({ items }: { items: { label: string; go?: () => void }[] }) {
+  const styles = useStyles();
   return (
-    <Breadcrumb aria-label="位置" size="small">
+    <Breadcrumb aria-label="位置" size="large">
       {items.map((it, i) => (
         <Fragment key={i}>
           {i > 0 && <BreadcrumbDivider />}
           <BreadcrumbItem>
-            <BreadcrumbButton current={!it.go} onClick={it.go}>{it.label}</BreadcrumbButton>
+            <BreadcrumbButton className={it.go ? styles.crumb : styles.crumbNow} current={!it.go} onClick={it.go}>{it.label}</BreadcrumbButton>
           </BreadcrumbItem>
         </Fragment>
       ))}
@@ -133,9 +139,22 @@ function Group({ value, title, children }: { value: string; title: string; child
   const styles = useStyles();
   return (
     <AccordionItem value={value}>
-      <AccordionHeader expandIconPosition="end" size="medium">{title}</AccordionHeader>
+      <AccordionHeader expandIconPosition="end" size="large">{title}</AccordionHeader>
       <AccordionPanel className={styles.accordionPanel}>{children}</AccordionPanel>
     </AccordionItem>
+  );
+}
+
+// Which groups are open stays as the person left it while the window is open, so going from one
+// component to another does not fold and unfold them again.
+const openGroups = new Map<string, string[]>();
+function Groups({ scope, initial, children }: { scope: string; initial: string[]; children: ReactNode }) {
+  const [open, setOpen] = useState<string[]>(() => openGroups.get(scope) ?? initial);
+  return (
+    <Accordion multiple collapsible openItems={open}
+      onToggle={(_, d) => { const next = d.openItems as string[]; openGroups.set(scope, next); setOpen(next); }}>
+      {children}
+    </Accordion>
   );
 }
 
@@ -207,7 +226,7 @@ function Overview() {
         )}
         {wp.audio && (
           <Caption1 className={styles.quiet}>
-            视频的声音在<Link inline onClick={() => leaveTheme('settings')}>设置</Link>里开关。
+            视频的声音在<Link inline onClick={() => setTab('settings')}>设置</Link>里开关。
           </Caption1>
         )}
         {scene && (
@@ -223,7 +242,7 @@ function Overview() {
         )}
       </Section>
       <Divider />
-      <Section title="组件" aside={`${t.instances.length} / 8`}>
+      <Section title="组件" aside={`${t.instances.length} 个`}>
         <div className={styles.rows}>
           {t.instances.map(i => (
             <OpenRow key={i.id} title={i.label} detail={describe(i)} onOpen={() => select(i.id)}
@@ -250,7 +269,7 @@ function InstanceView({ inst }: { inst: Instance }) {
   const parts = (inst.parts || []).filter(p => (inst.panels ?? 1) > 1 || p.key.includes('.'));
   const own = (inst.settings || []).filter(st => !st.folded);
   const keys = [...(inst.settings || []).map(st => st.id), ...(inst.parts || []).flatMap(p => p.adjustments.map(a => a.key))];
-  const open = [...((inst.panels ?? 1) === 1 ? ['place'] : []), 'style', 'parts'];
+  const single = (inst.panels ?? 1) === 1;
   return (
     <>
       <div className={styles.top}>
@@ -275,21 +294,25 @@ function InstanceView({ inst }: { inst: Instance }) {
         {inst.missing ? (
           <MessageBar intent="warning"><MessageBarBody>找不到这个组件的文件。</MessageBarBody></MessageBar>
         ) : (
-          <Accordion multiple collapsible defaultOpenItems={open}>
-            {(inst.panels ?? 1) === 1 && <Group value="place" title="位置与大小"><PositionFields instId={inst.id} pk="p1" /></Group>}
-            {own.length > 0 && (
-              <Group value="style" title="样式">
+          // What a component looks like comes first; where it is, mostly set by dragging it on the
+          // stage, is folded until opened; the parts that can be set one by one follow.
+          <Groups scope="component" initial={['look', 'parts']}>
+            {(single || own.length > 0) && (
+              <Group value="look" title="外观">
+                {single && <PanelField instId={inst.id} pk="p1" attr="size" />}
                 {own.map(st => <SettingField key={st.id} instId={inst.id} setting={st} onReset={() => clearValues(inst.id, [st.id])} />)}
+                {single && <PanelField instId={inst.id} pk="p1" attr="align" />}
               </Group>
             )}
+            {single && <Group value="place" title="位置"><PlaceFields instId={inst.id} pk="p1" /></Group>}
             {parts.length > 0 && (
               <Group value="parts" title="逐项调整">
                 <div className={styles.rows}>
-                  {parts.map(p => <OpenRow key={p.key} title={p.label} detail={p.modified ? '已修改' : undefined} onOpen={() => select(inst.id, p.key)} />)}
+                  {parts.map(p => <OpenRow key={p.key} title={p.label} detail={p.modified ? '已单独设置' : undefined} onOpen={() => select(inst.id, p.key)} />)}
                 </div>
               </Group>
             )}
-          </Accordion>
+          </Groups>
         )}
         {!inst.visible && <Caption1 className={styles.quiet}>{inst.base ? '已隐藏。主题自带的组件只能隐藏，不能删除。' : '已隐藏，锁屏上不显示。'}</Caption1>}
       </div>
@@ -315,7 +338,7 @@ function PartView({ inst, partKey }: { inst: Instance | SceneControls; partKey: 
       <>
         {/^(时间|上午\/下午|日期)$/.test(pt.label) && (
           <Caption1 className={styles.quiet}>
-            时间制式、日期和语言在<Link inline onClick={() => leaveTheme('settings')}>设置 › 时钟</Link>里改，对所有主题生效。
+            时间制式、日期和语言在<Link inline onClick={() => setTab('settings')}>设置 › 时钟</Link>里改，对所有主题生效。
           </Caption1>
         )}
         <Accordion multiple collapsible defaultOpenItems={['common']}>
@@ -327,10 +350,14 @@ function PartView({ inst, partKey }: { inst: Instance | SceneControls; partKey: 
   } else if (/^p\d+$/.test(pt.key)) {
     const look = inst.id === 'wallpaper' ? pt.adjustments.filter(a => ['opacity', 'visible'].includes(attr(a.key))) : [];
     body = (
-      <Accordion multiple collapsible defaultOpenItems={['place', 'look']}>
-        <Group value="place" title="位置与大小"><PositionFields instId={inst.id} pk={pt.key} /></Group>
-        {look.length > 0 && <Group value="look" title="外观">{look.map(field)}</Group>}
-      </Accordion>
+      <Groups scope={inst.id === 'wallpaper' ? 'layer' : 'panel'} initial={['look', 'place']}>
+        <Group value="look" title="外观">
+          <PanelField instId={inst.id} pk={pt.key} attr="size" />
+          {look.map(field)}
+          <PanelField instId={inst.id} pk={pt.key} attr="align" />
+        </Group>
+        <Group value="place" title="位置"><PlaceFields instId={inst.id} pk={pt.key} /></Group>
+      </Groups>
     );
   } else {
     body = (
@@ -352,45 +379,70 @@ function PartView({ inst, partKey }: { inst: Instance | SceneControls; partKey: 
   );
 }
 
-// Where a panel is: the anchor it is placed by, the offset from it, its size; then its margin
-// from the display's edges and how its lines align. While the panel is dragged or resized on the
-// stage, the fields show where it is going. The offsets go only as far as keeps it on its display.
-function PositionFields({ instId, pk }: { instId: string; pk: string }) {
+// One of a panel's own adjustments (its size, how its lines align), showing what a resize on the
+// stage is about to set while it is under way.
+function PanelField({ instId, pk, attr }: { instId: string; pk: string; attr: string }) {
+  const draft = useDraft(instId);
+  const a = adjustment(instId, pk + '.' + attr);
+  if (!a) return null;
+  return <AdjustmentField instId={instId} a={{ ...a, value: draft?.[a.key] ?? a.value }} onReset={() => clearValues(instId, [a.key])} />;
+}
+
+const POSITION_VIEW = (unit: string): View => ({ factor: 1, digits: 1, unit: () => unit });
+
+// Where a panel is (D60): where the middle of its box is, in percent of its display. The anchor
+// follows the position, as it does for a drag, and is never shown; lining a panel up with the
+// display or with other panels is what the stage's snap lines are for. The margin from the
+// display's edges is under 更多. While the panel is dragged or resized on the stage, the fields
+// show where it is going. Every position keeps it on its display.
+function PlaceFields({ instId, pk }: { instId: string; pk: string }) {
   const styles = useStyles();
   const draft = useDraft(instId);
   const [, redraw] = useReducer((x: number) => x + 1, 0);
   useEffect(() => subscribePreview(redraw), []);
+  const [more, setMore] = useState(false);
   const anchor = adjustment(instId, pk + '.anchor'), cur = draft?.[pk + '.anchor'] ?? (anchor ? anchor.value : 'top');
   const modified = ['anchor', 'offset-x', 'offset-y'].some(k => adjustment(instId, pk + '.' + k)?.modified);
-  const g = pv.width && cur !== 'full' ? geometry(instId, pk, 1, { width: pv.width, height: pv.height }, getState().screen) : null;
-  const at = Math.max(0, ANCHORS.indexOf(cur)), lim = g ? offsetLimits(g, at % 3, Math.floor(at / 3)) : null;
-  const shown = (a: Adjustment): Adjustment => {
-    const value = draft?.[a.key] ?? a.value;
-    const range = !lim ? null : a.key === pk + '.offset-x' ? [lim.x0, lim.x1] : a.key === pk + '.offset-y' ? [lim.y0, lim.y1] : null;
-    if (!range) return { ...a, value };
-    return { ...a, min: range[0], max: range[1], value: String(clamp(+value || 0, range[0], range[1])) };
+  const full = cur === 'full';
+  const g = pv.width && !full ? geometry(instId, pk, 1, { width: pv.width, height: pv.height }, getState().screen) : null;
+  const c = g ? centreOf(g) : null;
+  const put = (x: number | null, y: number | null, gesture?: number) => {
+    if (!g) return;
+    const p = placeCentre(g, x, y);
+    const values = { [pk + '.anchor']: p.anchor, [pk + '.offset-x']: String(p.ox), [pk + '.offset-y']: String(p.oy) };
+    if (gesture) liveSet(instId, values, gesture);
+    else setValues(instId, values);
   };
-  const rest = [pk + '.offset-x', pk + '.offset-y', pk + '.size', pk + '.margin', pk + '.align'].map(k => adjustment(instId, k)).filter(a => !!a).map(a => shown(a!));
+  const reset = () => clearValues(instId, [pk + '.anchor', pk + '.offset-x', pk + '.offset-y']);
+  const margin = adjustment(instId, pk + '.margin');
   return (
     <>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXS, paddingBlock: tokens.spacingVerticalS }}>
-        <div className={styles.titleRow}>
-          <Text style={{ flex: 1 }}>位置</Text>
-          <Caption1 className={styles.quiet}>{cur === 'full' ? '铺满画面' : anchorName(cur)}</Caption1>
-          {modified && (
-            <Tooltip content="恢复这一项" relationship="label">
-              <Button appearance="subtle" size="small" icon={<ArrowResetRegular />} onClick={() => clearValues(instId, [pk + '.anchor', pk + '.offset-x', pk + '.offset-y'])} />
-            </Tooltip>
-          )}
+      {instId === 'wallpaper' && (
+        <div className={styles.place}>
+          <ToggleButton size="small" className={styles.more} checked={full} onClick={() => (full ? setValues(instId, { [pk + '.anchor']: 'center', [pk + '.offset-x']: '0', [pk + '.offset-y']: '0' }) : setValue(instId, pk + '.anchor', 'full'))}>铺满画面</ToggleButton>
         </div>
+      )}
+      {c && (
+        <>
+          <NumberField id={`pos-${instId}-${pk}-x`} label="水平位置" detail="组件中心离屏幕左边多远。" min={c.x0} max={c.x1} step={0.1}
+            value={draft?.['#x'] ?? String(clamp(c.x, c.x0, c.x1))} modified={false} view={POSITION_VIEW('% 屏宽')}
+            write={(v, gesture) => put(v, null, gesture)} onReset={reset} />
+          <NumberField id={`pos-${instId}-${pk}-y`} label="垂直位置" detail="组件中心离屏幕上边多远。" min={c.y0} max={c.y1} step={0.1}
+            value={draft?.['#y'] ?? String(clamp(c.y, c.y0, c.y1))} modified={false} view={POSITION_VIEW('% 屏高')}
+            write={(v, gesture) => put(null, v, gesture)} onReset={reset} />
+        </>
+      )}
+      {!full && (
         <div className={styles.titleRow}>
-          <AnchorPicker value={cur} onPick={v => setValues(instId, { [pk + '.anchor']: v, [pk + '.offset-x']: '0', [pk + '.offset-y']: '0' })} />
-          {instId === 'wallpaper' && (
-            <ToggleButton size="small" checked={cur === 'full'} onClick={() => setValue(instId, pk + '.anchor', 'full')}>铺满画面</ToggleButton>
+          {margin && (
+            <Button appearance="transparent" size="small" className={styles.more} icon={more ? <ChevronUpRegular /> : <ChevronDownRegular />} iconPosition="after"
+              onClick={() => setMore(!more)}>更多</Button>
           )}
+          <div style={{ flex: 1 }} />
+          {modified && <Button appearance="subtle" size="small" icon={<ArrowResetRegular />} onClick={reset}>恢复位置</Button>}
         </div>
-      </div>
-      {rest.map(a => <AdjustmentField key={a!.key} instId={instId} a={a!} onReset={() => clearValues(instId, [a!.key])} />)}
+      )}
+      {margin && !full && more && <AdjustmentField instId={instId} a={margin} onReset={() => clearValues(instId, [margin.key])} />}
     </>
   );
 }

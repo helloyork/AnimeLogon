@@ -139,18 +139,23 @@ export const multiPanel = (id: string | null) => {
 export const panelKey = (sel: Selection) => (sel.part ? sel.part.split('.')[0] : 'p1');
 
 /* --- navigation --- */
+// A theme's page sits under the library's (D59).
 export function openTheme(id: string) {
   resetPreview();
-  setState({ view: 'theme', sel: { inst: null, part: null } });
+  setState({ view: 'theme', tab: 'mine', sel: { inst: null, part: null } });
   send('open', { theme: id, seq: ++pv.seq });
 }
-export function leaveTheme(tab: Tab = 'mine') {
+// Back to the list of themes, closing the open one.
+export function leaveTheme() {
   send('close');
-  setState({ view: 'library', tab, sel: { inst: null, part: null } });
+  setState({ view: 'library', tab: 'mine', sel: { inst: null, part: null }, hover: null });
 }
+// The pages of the app bar. A theme open under the library stays open while the settings are
+// shown, so coming back finds it as it was, selection and undo included. Choosing the library
+// again while on a theme's page goes back to the list, as Windows' settings do.
 export function setTab(tab: Tab) {
-  if (state.view === 'theme') send('close');
-  setState({ view: 'library', tab, sel: { inst: null, part: null } });
+  if (tab === 'mine' && state.tab === 'mine' && state.view === 'theme') return leaveTheme();
+  setState({ tab, hover: null });
 }
 export function select(inst: string | null, part: string | null = null) {
   setState({ sel: { inst, part } });
@@ -218,7 +223,7 @@ function receive(m: FromNative) {
     case 'problem': openDialog({ kind: 'problem', text: m.text }); break;
     case 'busy': setState({ busy: m.label ? { label: m.label, percent: m.percent ?? 0 } : null }); break;
     case 'added': setState({ sel: { inst: m.instance, part: null } }); break;
-    case 'navigate': resetPreview(); setState({ view: 'theme', sel: { inst: null, part: null } }); break;
+    case 'navigate': resetPreview(); setState({ view: 'theme', tab: 'mine', sel: { inst: null, part: null } }); break;
   }
 }
 listen(receive);

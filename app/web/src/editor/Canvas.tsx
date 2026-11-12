@@ -8,8 +8,7 @@
 // ends. Without a lift (scene layers; a component drawn on several displays of a wall) the
 // picture is redrawn live as before.
 import { useEffect, useLayoutEffect, useReducer, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
-import { Button, Caption1, makeStyles, Menu, MenuItem, MenuList, MenuPopover, MenuTrigger, mergeClasses, tokens } from '@fluentui/react-components';
-import { ChevronDownRegular } from '@fluentui/react-icons';
+import { Caption1, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import { SceneFrames, WallpaperVideo } from '../media';
 import { calm } from '../motion';
 import {
@@ -32,7 +31,6 @@ import type { Bound } from '../types';
 import { setDraft } from './draft';
 import {
   adjustment,
-  anchorName,
   boundOf,
   clamp,
   copiesOf,
@@ -40,12 +38,12 @@ import {
   geometry,
   hitTest,
   largestScale,
+  middleMoved,
   offsetsScaledAbout,
   panelBounds,
   placeDragged,
   rectOf,
   roundTo,
-  signed,
   unionOf,
   valueOf,
   type Geometry,
@@ -151,7 +149,8 @@ interface Drag {
   settling?: number;  // the request whose picture ends it
 }
 
-const posText = (anchor: string, ox: number, oy: number) => `${anchorName(anchor)} · 水平 ${signed(ox)}% · 垂直 ${signed(oy)}%`;
+// Where the middle of the moving box is, as the panel's 水平位置 and 垂直位置 say it (D60).
+const centreText = (x: number, y: number) => `水平 ${x.toFixed(1)}% · 垂直 ${y.toFixed(1)}%`;
 const pad = (r: Rect, p: number): CSSProperties => ({ left: r.left - p, top: r.top - p, width: r.width + p * 2, height: r.height + p * 2 });
 
 export function Canvas() {
@@ -315,10 +314,11 @@ export function Canvas() {
       }
       const place = placeDragged(g, dx, dy, { free: ev.ctrlKey, others });
       last = { [pk + '.anchor']: place.anchor, [pk + '.offset-x']: String(place.ox), [pk + '.offset-y']: String(place.oy) };
+      const at = middleMoved(g, place.left - g.r.left, place.top - g.r.top);
       if (lift) hold(lift);
       setDrag({ inst, pk, g, lift, left: place.left, top: place.top, anchor: place.anchor, col: place.col, row: place.row, bx: place.bx, by: place.by,
-        rx: place.rx, ry: place.ry, lines: place.lines, readout: posText(place.anchor, place.ox, place.oy) });
-      setDraft({ inst, values: last });
+        rx: place.rx, ry: place.ry, lines: place.lines, readout: centreText(at.x, at.y) });
+      setDraft({ inst, values: { ...last, '#x': at.x.toFixed(1), '#y': at.y.toFixed(1) } });
       if (!lift) liveSet(inst, last, gesture);
     }, moved => {
       if (!moved) {
@@ -362,7 +362,8 @@ export function Canvas() {
       }
       if (lift) hold(lift);
       setDrag({ inst, pk, g, lift, left: g.r.left, top: g.r.top, scale, origin, readout: `大小 ${size.toFixed(1)}% 屏高` });
-      setDraft({ inst, values: last });
+      const at = middleMoved(g, 0, 0, scale, origin);
+      setDraft({ inst, values: { ...last, '#x': at.x.toFixed(1), '#y': at.y.toFixed(1) } });
       if (!lift) liveSet(inst, last, gesture);
     }, moved => {
       if (!moved) return settle();
@@ -374,7 +375,7 @@ export function Canvas() {
   const sel = s.sel;
   const whole = !!sel.inst && multiPanel(sel.inst) && !sel.part;
   const pk = panelKey(sel);
-  let selRect: Rect | null = null, partRect: Rect | null = null, g: Geometry | null = null;
+  let selRect: Rect | null = null, partRect: Rect | null = null;
   if (sel.inst && k) {
     if (whole) {
       const all = panelBounds(sel.inst);
@@ -383,7 +384,6 @@ export function Canvas() {
       const b = boundOf(sel.inst, pk, s.screen);
       if (b) {
         selRect = rectOf(b, k);
-        g = geometry(sel.inst, pk, k, stage, s.screen);
         const pb = sel.part && sel.part.includes('.') ? boundOf(sel.inst, sel.part, s.screen) : undefined;
         if (pb) partRect = rectOf(pb, k);
       }
@@ -469,9 +469,7 @@ export function Canvas() {
                   </g>
                 );
               })}
-              {drag && drag.scale == null && <Anchors g={drag.g} />}
               {drag && !drag.settling && drag.lines?.map((l, i) => <Guide key={i} {...l} />)}
-              {g && !whole && <Tether g={g} drag={drag} />}
             </svg>
 
             {hoverRects.map((r, i) => <div key={i} className={mergeClasses(styles.box, styles.hover)} style={pad(r, 4)} />)}
@@ -485,22 +483,10 @@ export function Canvas() {
           </div>
         )}
       </div>
+      {/* Which display's shape the stage has; other shapes are in the toolbar's lock screen preview. */}
       <div className={styles.foot}>
-        <Menu>
-          <MenuTrigger disableButtonEnhancement>
-            <Button appearance="subtle" size="small" icon={<ChevronDownRegular />} iconPosition="after">
-              {spanning() ? '横跨所有显示器' : `${m.name} · ${ratioLabel(m.width, m.height)}`}
-            </Button>
-          </MenuTrigger>
-          <MenuPopover>
-            <MenuList>
-              {[[16, 10], [21, 9], [32, 9], [4, 3]].map(([a, b]) => (
-                <MenuItem key={a + ':' + b} onClick={() => setState({ lock: { theme: t.id, ratio: a / b } })}>{`以 ${a}:${b} 预览锁屏`}</MenuItem>
-              ))}
-            </MenuList>
-          </MenuPopover>
-        </Menu>
-        {!s.lib!.settings.components && <Caption1 className={styles.quiet}>组件已在设置里关闭，锁屏上只显示壁纸。</Caption1>}
+        <Caption1 className={styles.quiet}>{spanning() ? '横跨所有显示器' : `${m.name} · ${ratioLabel(m.width, m.height)}`}</Caption1>
+        {!s.lib!.settings.components && <Caption1 className={styles.quiet}>· 组件已在设置里关闭，锁屏上只显示壁纸。</Caption1>}
       </div>
     </div>
   );
@@ -531,41 +517,11 @@ function Leaving({ url }: { url: string }) {
   return <img ref={ref} className={styles.layer} src={url} alt="" draggable={false} />;
 }
 
-function Anchors({ g }: { g: Geometry }) {
-  const dots = [];
-  for (let r = 0; r < 3; r++)
-    for (let c = 0; c < 3; c++)
-      dots.push(<circle key={r * 3 + c} cx={g.f.left + [g.M, g.W / 2, g.W - g.M][c]} cy={g.f.top + [g.M, g.H / 2, g.H - g.M][r]} r={3} fill="rgba(255,255,255,.7)" stroke="rgba(0,0,0,.4)" />);
-  return <>{dots}</>;
-}
-
 function Guide(p: { x1: number; y1: number; x2: number; y2: number }) {
   return (
     <>
       <line {...p} stroke="rgba(0,0,0,.45)" strokeWidth={3} />
       <line {...p} stroke="#fff" strokeWidth={1} />
-    </>
-  );
-}
-
-// The anchor the selected panel is placed by, and a dashed line to the point of it held there.
-function Tether({ g, drag }: { g: Geometry; drag: Drag | null }) {
-  let bx = g.bx, by = g.by, rx = g.rx, ry = g.ry;
-  if (drag && drag.scale == null && drag.rx != null && drag.ry != null) {
-    bx = drag.bx!;
-    by = drag.by!;
-    rx = drag.rx;
-    ry = drag.ry;
-  }
-  return (
-    <>
-      {Math.hypot(rx - bx, ry - by) > 2 && (
-        <>
-          <line x1={bx} y1={by} x2={rx} y2={ry} stroke="rgba(0,0,0,.45)" strokeWidth={3} />
-          <line x1={bx} y1={by} x2={rx} y2={ry} stroke="#fff" strokeWidth={1.2} strokeDasharray="4 3" />
-        </>
-      )}
-      <circle cx={bx} cy={by} r={5} fill="#fff" stroke="rgba(0,0,0,.55)" strokeWidth={1.5} />
     </>
   );
 }

@@ -78,7 +78,7 @@ export function App() {
   return (
     <FluentProvider theme={dark ? darkTheme : lightTheme}>
       <div className={styles.root}>
-        <Fallback>{!s.lib ? null : s.view === 'theme' && s.open ? <EditorPage /> : <LibraryShell />}</Fallback>
+        <Fallback>{!s.lib ? null : <Shell />}</Fallback>
       </div>
       <Toasts />
       <Dialogs />
@@ -87,10 +87,12 @@ export function App() {
   );
 }
 
-// The app bar over the library and the settings: the two pages, and the two things to do from either.
-function LibraryShell() {
+// The app bar stays over every page (D59): the library, a theme's own page under it, and the
+// settings. Importing and making a theme belong to the library's list, so only it shows them.
+function Shell() {
   const s = useStore();
   const styles = useStyles();
+  const themePage = s.tab === 'mine' && s.view === 'theme' && !!s.open;
   return (
     <>
       <header className={styles.bar}>
@@ -100,11 +102,15 @@ function LibraryShell() {
           <Tab value="settings">设置</Tab>
         </TabList>
         <div className={styles.spacer} />
-        <Button icon={<UacShield />} onClick={() => send('import')}>导入…</Button>
-        <Button appearance="primary" onClick={() => openDialog({ kind: 'newTheme' })}>新建主题</Button>
+        {s.tab === 'mine' && !themePage && (
+          <>
+            <Button icon={<UacShield />} onClick={() => send('import')}>导入…</Button>
+            <Button appearance="primary" onClick={() => openDialog({ kind: 'newTheme' })}>新建主题</Button>
+          </>
+        )}
       </header>
       <BusyBar />
-      {s.tab === 'settings' ? <SettingsPage /> : <LibraryPage />}
+      {s.tab === 'settings' ? <SettingsPage /> : themePage ? <EditorPage /> : <LibraryPage />}
     </>
   );
 }

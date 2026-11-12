@@ -2,21 +2,28 @@
 // the right. Changes save themselves; undo and redo go back and forth through them.
 import { useEffect } from 'react';
 import {
+  Breadcrumb,
+  BreadcrumbButton,
+  BreadcrumbDivider,
+  BreadcrumbItem,
   Button,
   Caption1,
   makeStyles,
   Menu,
+  MenuItem,
+  MenuList,
   MenuPopover,
   MenuTrigger,
-  Subtitle2,
+  mergeClasses,
+  SplitButton,
   Toolbar,
   ToolbarButton,
   ToolbarDivider,
   Tooltip,
   tokens,
+  type MenuButtonProps,
 } from '@fluentui/react-components';
-import { ArrowLeftRegular, ArrowRedoRegular, ArrowUndoRegular, MoreHorizontalRegular } from '@fluentui/react-icons';
-import { BusyBar } from '../App';
+import { ArrowRedoRegular, ArrowUndoRegular, MoreHorizontalRegular } from '@fluentui/react-icons';
 import { ThemeMenuItems } from '../library/LibraryPage';
 import { edit, endGesture, liveSet, newGesture, pendingValues, pv, setValue } from '../preview';
 import { applyFlow, getState, instOf, leaveTheme, multiPanel, panelKey, select, setState, themeOf, usedOn, useStore } from '../store';
@@ -30,13 +37,14 @@ const useStyles = makeStyles({
     display: 'flex',
     alignItems: 'center',
     gap: tokens.spacingHorizontalS,
-    minHeight: '48px',
-    paddingInline: tokens.spacingHorizontalM,
-    backgroundColor: tokens.colorNeutralBackground1,
+    minHeight: '52px',
+    paddingInline: `${tokens.spacingHorizontalL} ${tokens.spacingHorizontalM}`,
     borderBottom: `${tokens.strokeWidthThin} solid ${tokens.colorNeutralStroke2}`,
     flex: 'none',
   },
-  name: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 },
+  crumbs: { minWidth: 0 },
+  crumb: { fontSize: tokens.fontSizeBase500, lineHeight: tokens.lineHeightBase500 },
+  name: { fontWeight: tokens.fontWeightSemibold, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 },
   status: { color: tokens.colorNeutralForeground3, whiteSpace: 'nowrap' },
   spacer: { flex: 1 },
   body: { flex: 1, minHeight: 0, display: 'flex' },
@@ -52,10 +60,15 @@ export function EditorPage() {
   return (
     <div className={styles.page}>
       <header className={styles.bar} data-own-keys>
-        <Tooltip content="返回主题库" relationship="label">
-          <Button appearance="subtle" icon={<ArrowLeftRegular />} onClick={() => leaveTheme()} />
-        </Tooltip>
-        <Subtitle2 as="h1" className={styles.name}>{t.name}</Subtitle2>
+        <Breadcrumb aria-label="主题页" className={styles.crumbs}>
+          <BreadcrumbItem>
+            <BreadcrumbButton className={styles.crumb} onClick={() => leaveTheme()}>主题库</BreadcrumbButton>
+          </BreadcrumbItem>
+          <BreadcrumbDivider />
+          <BreadcrumbItem>
+            <BreadcrumbButton className={mergeClasses(styles.crumb, styles.name)} current>{t.name}</BreadcrumbButton>
+          </BreadcrumbItem>
+        </Breadcrumb>
         <Caption1 className={styles.status}>{used.length ? (used[0] === '使用中' ? '使用中' : `用于${used.join('、')}`) : t.modifications ? '已修改' : ''}</Caption1>
         <div className={styles.spacer} />
         <Toolbar aria-label="编辑" size="medium">
@@ -66,7 +79,21 @@ export function EditorPage() {
             <ToolbarButton icon={<ArrowRedoRegular />} disabled={!t.canRedo} onClick={() => edit('redo')} />
           </Tooltip>
           <ToolbarDivider />
-          <Button onClick={() => setState({ lock: { theme: t.id } })}>锁屏预览</Button>
+          {/* The lock screen at this display's shape; the menu shows it at others. */}
+          <Menu positioning="below-end">
+            <MenuTrigger disableButtonEnhancement>
+              {(trigger: MenuButtonProps) => (
+                <SplitButton menuButton={trigger} primaryActionButton={{ onClick: () => setState({ lock: { theme: t.id } }) }}>锁屏预览</SplitButton>
+              )}
+            </MenuTrigger>
+            <MenuPopover>
+              <MenuList>
+                {[[16, 9], [16, 10], [21, 9], [32, 9], [4, 3]].map(([a, b]) => (
+                  <MenuItem key={a + ':' + b} onClick={() => setState({ lock: { theme: t.id, ratio: a / b } })}>{`以 ${a}:${b} 预览`}</MenuItem>
+                ))}
+              </MenuList>
+            </MenuPopover>
+          </Menu>
           {!used.length && <Button appearance="primary" onClick={() => applyFlow(t.id)} style={{ marginLeft: tokens.spacingHorizontalS }}>套用</Button>}
           {entry && (
             <Menu>
@@ -82,7 +109,6 @@ export function EditorPage() {
           )}
         </Toolbar>
       </header>
-      <BusyBar />
       <div className={styles.body}>
         <Canvas />
         <Inspector />

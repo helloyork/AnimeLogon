@@ -35,7 +35,7 @@ std::string BatteryText() {
     <choice id="position" label="位置" detail="边距随分辨率自动调整。" default="top-right">)") + kPositions + LR"(</choice>
     <number id="size" label="大小" detail="占屏幕高度的百分比。" default="2.8" min="1.5" max="8" step="0.1"/>
     <font id="font" label="字体" detail="仅列出为所有用户安装的字体。" default=""/>
-    <color id="color" label="颜色" detail="也可以直接输入 #RRGGBB。" default="#FFFFFF"/>
+    <color id="color" label="颜色" default="#FFFFFF"/>
     <toggle id="remaining" label="剩余时间" detail="用电池时，显示大约还能用多久。" default="on" on="0.8" off="0"/>
   </settings>
   <panel anchor="$position" size="$size" margin="4" when="battery.percent">
@@ -58,7 +58,7 @@ std::string MediaText() {
     <choice id="position" label="位置" detail="边距随分辨率自动调整。" default="bottom-left">)") + kPositions + LR"(</choice>
     <number id="size" label="大小" detail="歌名的字号，占屏幕高度的百分比。" default="2.6" min="1.5" max="8" step="0.1"/>
     <font id="font" label="字体" detail="仅列出为所有用户安装的字体。" default=""/>
-    <color id="color" label="颜色" detail="也可以直接输入 #RRGGBB。" default="#FFFFFF"/>
+    <color id="color" label="颜色" default="#FFFFFF"/>
   </settings>
   <panel anchor="$position" size="$size" margin="5" when="media.title">
     <line>
@@ -87,7 +87,7 @@ std::string CountdownText() {
     <choice id="position" label="位置" detail="边距随分辨率自动调整。" default="bottom-right">)") + kPositions + LR"(</choice>
     <number id="size" label="大小" detail="天数的字号，占屏幕高度的百分比。" default="5" min="2" max="15" step="0.1"/>
     <font id="font" label="字体" detail="仅列出为所有用户安装的字体。" default=""/>
-    <color id="color" label="颜色" detail="也可以直接输入 #RRGGBB。" default="#FFFFFF"/>
+    <color id="color" label="颜色" default="#FFFFFF"/>
   </settings>
   <panel anchor="$position" size="$size" margin="5" until="$target" when="until.state!=past">
     <line when="until.state=ahead">

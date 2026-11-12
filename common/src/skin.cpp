@@ -405,14 +405,14 @@ const Offer kOffers[] = {
     {L"panel", L"offset-y", L"垂直偏移", L"屏幕高度的百分比，向下为正。", Control::Slider, -50, 50, 0.1, L"0"},
     {L"panel", L"margin", L"边距", L"离屏幕边缘的距离，短边的百分比。", Control::Slider, 0, 40, 0.5, L"7"},
     {L"panel", L"size", L"大小", L"屏幕高度的百分比，其余文字按它的比例。", Control::Slider, 1, 50, 0.5, L"10"},
-    {L"panel", L"align", L"对齐", L"多行文字之间如何对齐。", Control::Choice, 0, 0, 0, L"auto"},
+    {L"panel", L"align", L"文字对齐", L"多行文字之间如何对齐。", Control::Choice, 0, 0, 0, L"auto"},
     {L"text", L"font", L"字体", L"仅列出为所有用户安装的字体。", Control::Font, 0, 0, 0, L""},
     {L"text", L"weight", L"字重", L"字体没有的字重会用最接近的代替。", Control::Slider, 100, 900, 50, L"400"},
     {L"text", L"size", L"相对大小", L"相对于整体大小。", Control::Slider, 0.05, 2, 0.01, L"1"},
     {L"text", L"tracking", L"字距", L"相对于这段文字的字号。", Control::Slider, -0.2, 0.5, 0.005, L"0"},
     {L"text", L"space", L"前方留白", L"与前一段文字的距离，相对于整体大小。", Control::Slider, 0, 2, 0.01, L"0"},
     {L"line", L"gap", L"与上一行的距离", L"从上一行的基线算起，相对于整体大小。", Control::Slider, -1, 2, 0.01, L"0.2"},
-    {L"text", L"color", L"颜色", L"也可以直接输入 #RRGGBB 或 #RRGGBBAA。", Control::Color, 0, 0, 0, L"#FFFFFF"},
+    {L"text", L"color", L"颜色", L"", Control::Color, 0, 0, 0, L"#FFFFFF"},
     {L"text", L"opacity", L"不透明度", L"", Control::Slider, 0, 1, 0.01, L"1"},
     {L"text", L"style", L"字形", L"", Control::Choice, 0, 0, 0, L"normal"},
     {L"text", L"case", L"大小写", L"只影响拉丁字母。", Control::Choice, 0, 0, 0, L"none"},
@@ -846,7 +846,7 @@ std::string DefaultText() {
     </choice>
     <number id="size" label="大小" detail="时间的字号，占屏幕高度的百分比。" default="10" min="5" max="20" step="0.5"/>
     <font id="font" label="字体" detail="仅列出为所有用户安装的字体。" default=""/>
-    <color id="color" label="颜色" detail="也可以直接输入 #RRGGBB。" default="#FFFFFF"/>
+    <color id="color" label="颜色" default="#FFFFFF"/>
     <toggle id="shade" label="背景暗晕" detail="在时钟背后稍微压暗画面，亮色壁纸上也能看清。" default="on" on="0.22" off="0"/>
   </settings>
   <panel anchor="$position" size="$size" margin="7">
