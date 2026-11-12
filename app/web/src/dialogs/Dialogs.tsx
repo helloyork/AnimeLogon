@@ -1,6 +1,6 @@
 // Every dialog the page opens, from the store's list: the newest is on top. Fluent's Dialog
 // animates itself in and out.
-import { useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   Body1,
   Button,
@@ -184,13 +184,21 @@ function MonitorDialog({ d }: { d: Extract<DialogState, { kind: 'monitor' }> }) 
 
 // The wallpapers already here, the chosen one outlined and focused first; the last cell brings in
 // a new one from a file, as Windows' own background page has its 浏览 at the end of its pictures.
-function WallpaperGrid({ current, onPick, onImport, importLabel }: { current: string; onPick: (id: string) => void; onImport: () => void; importLabel: string }) {
+function WallpaperGrid({ current, onPick, onImport, importLabel, focusCurrent }: { current: string; onPick: (id: string) => void; onImport: () => void; importLabel: string; focusCurrent?: boolean }) {
   const s = useStore();
   const styles = useStyles();
+  // The dialog puts the focus on its first control as it opens; where the grid is the choice, it
+  // goes to the wallpaper chosen now instead, once the dialog has done so.
+  const chosen = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!focusCurrent) return;
+    const timer = window.setTimeout(() => chosen.current?.focus(), 60);
+    return () => clearTimeout(timer);
+  }, [focusCurrent]);
   return (
     <div className={styles.pictures} role="listbox" aria-label="壁纸">
       {s.lib!.wallpapers.map(w => (
-        <button key={w.id} className={styles.pick} role="option" aria-selected={current === w.id} autoFocus={current === w.id} onClick={() => onPick(w.id)}>
+        <button key={w.id} ref={current === w.id ? chosen : undefined} className={styles.pick} role="option" aria-selected={current === w.id} onClick={() => onPick(w.id)}>
           <img className={mergeClasses(styles.pickShot, current === w.id && styles.picked)} src={wallpaperUrl(w.id)} alt="" draggable={false} />
           <Text className={styles.ellipsis}>{w.name}</Text>
           <Caption1 className={mergeClasses(styles.quiet, styles.ellipsis)}>{w.meta}</Caption1>
@@ -231,7 +239,7 @@ function WallpaperDialog({ d }: { d: Extract<DialogState, { kind: 'wallpaper' }>
   const s = useStore();
   return (
     <Frame d={d} title="更换壁纸" wide actions={<Button onClick={() => closeDialog(d.id)}>取消</Button>}>
-      <WallpaperGrid current={s.open?.wallpaper.ref ?? ''} onPick={ref => { closeDialog(d.id); edit('wallpaper', { ref }); }} importLabel="从文件导入…"
+      <WallpaperGrid current={s.open?.wallpaper.ref ?? ''} focusCurrent onPick={ref => { closeDialog(d.id); edit('wallpaper', { ref }); }} importLabel="从文件导入…"
         onImport={() => { closeDialog(d.id); send('importWallpaper'); }} />
     </Frame>
   );

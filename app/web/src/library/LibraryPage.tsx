@@ -63,9 +63,13 @@ const useStyles = makeStyles({
   section: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM },
   heading: { display: 'flex', alignItems: 'baseline', gap: tokens.spacingHorizontalS },
   quiet: { color: tokens.colorNeutralForeground3 },
+  // The theme in use: its picture and what it is made of, as wide as they need and no wider.
   current: {
     display: 'grid',
-    gridTemplateColumns: 'minmax(0, 480px) minmax(0, 1fr)',
+    gridTemplateColumns: 'minmax(0, 640px) minmax(240px, 360px)',
+    alignSelf: 'flex-start',
+    maxWidth: '100%',
+    boxSizing: 'border-box',
     alignItems: 'center',
     gap: tokens.spacingHorizontalXXL,
     padding: tokens.spacingHorizontalL,
@@ -75,6 +79,8 @@ const useStyles = makeStyles({
     '@media (max-width: 760px)': { gridTemplateColumns: 'minmax(0, 1fr)' },
   },
   info: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXS, minWidth: 0 },
+  fact: { margin: 0, minWidth: 0 },
+  facts: { margin: 0, display: 'grid', gridTemplateColumns: 'auto minmax(0, 1fr)', columnGap: tokens.spacingHorizontalL, rowGap: tokens.spacingVerticalXS, marginTop: tokens.spacingVerticalS },
   actions: { display: 'flex', gap: tokens.spacingHorizontalS, marginTop: tokens.spacingVerticalM, flexWrap: 'wrap' },
   screens: {
     display: 'grid',
@@ -201,7 +207,18 @@ function Current() {
       </div>
       <div className={styles.info}>
         <Subtitle1 as="h3">{t.name}</Subtitle1>
-        <Caption1 className={styles.quiet}>{`${wallpaper} · ${showComponents ? t.summary : '组件已关闭'}`}</Caption1>
+        <dl className={styles.facts}>
+          <dt><Caption1 className={styles.quiet}>壁纸</Caption1></dt>
+          <dd className={mergeClasses(styles.fact, styles.ellipsis)}><Caption1>{wallpaper}</Caption1></dd>
+          <dt><Caption1 className={styles.quiet}>组件</Caption1></dt>
+          <dd className={mergeClasses(styles.fact, styles.ellipsis)}><Caption1>{showComponents ? t.summary || '无' : '已在设置里关闭'}</Caption1></dd>
+          {t.modifications > 0 && (
+            <>
+              <dt><Caption1 className={styles.quiet}>修改</Caption1></dt>
+              <dd className={styles.fact}><Caption1>{`${t.modifications} 项`}</Caption1></dd>
+            </>
+          )}
+        </dl>
         <div className={styles.actions}>
           <Button onClick={() => openTheme(t.id)}>自定义</Button>
           <Button onClick={() => setState({ lock: { theme: t.id } })}>锁屏预览</Button>
@@ -271,6 +288,9 @@ function ThemeCard({ theme: t }: { theme: ThemeEntry }) {
           // Space on the card's checkbox reaches Card twice, as the checkbox's change and as the
           // same click bubbling to the card; only the change is acted on.
           if (e.type === 'click' && e.target instanceof HTMLInputElement) return;
+          // The theme in use is already applied; with a theme for each display, choosing it
+          // again still asks which display to put it on.
+          if (used.length && !perMonitor()) return;
           applyFlow(t.id);
         }}
         checkbox={{ 'aria-label': `套用「${t.name}」` }}

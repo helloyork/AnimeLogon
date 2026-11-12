@@ -345,6 +345,12 @@ export function AdjustmentField({ instId, a, onReset }: { instId: string; a: Adj
   const common = { id, label: a.label, detail: a.detail || undefined, modified: a.modified, onReset };
   switch (a.control) {
     case 'slider':
+      // A font's weight is one of its named weights, as Windows' and Office's font lists say them.
+      if (a.key.endsWith('.weight')) {
+        const options = [];
+        for (let w = Math.ceil(a.min / 100) * 100; w <= a.max; w += 100) options.push({ value: String(w), label: `${WEIGHT_NAMES[w] ?? ''}（${w}）` });
+        return <ChoiceField {...common} options={options} value={String(Math.round(+a.value / 100) * 100)} write={write} />;
+      }
       return <NumberField {...common} min={a.min} max={a.max} step={a.step} value={a.value} view={viewFor(a.key, a.step)} write={write} />;
     case 'choice':
       return <ChoiceField {...common} options={a.options} value={a.value} write={write} />;

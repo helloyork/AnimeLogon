@@ -24,7 +24,12 @@ const useStyles = makeStyles({
     borderBottom: '2px solid rgba(255,255,255,.65)', textAlign: 'left', color: 'rgba(255,255,255,.6)', boxSizing: 'border-box',
   },
   note: { color: 'rgba(255,255,255,.6)', fontSize: '12px', marginTop: '10px' },
-  hint: { position: 'absolute', left: 0, right: 0, bottom: '28px', textAlign: 'center', color: 'rgba(255,255,255,.75)', fontSize: tokens.fontSizeBase300, textShadow: '0 1px 6px rgba(0,0,0,.6)' },
+  // The preview's own words sit in the corner opposite its exit, off the lock screen's middle and
+  // bottom, where its clock and components usually are.
+  hint: {
+    position: 'absolute', top: '12px', left: '16px', zIndex: 3, padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalM}`,
+    borderRadius: tokens.borderRadiusMedium, backgroundColor: 'rgba(0,0,0,.55)', color: 'rgba(255,255,255,.85)', fontSize: tokens.fontSizeBase300,
+  },
   exit: { position: 'absolute', top: '12px', right: '16px', zIndex: 3 },
 });
 
