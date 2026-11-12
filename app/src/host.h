@@ -51,7 +51,7 @@ private:
 
     // --- the open theme
     void Edited(bool ok, bool live, int seq);
-    void RenderPreview();
+    void RenderPreview(bool live = false);
     bool Save();
 
     // --- what needs the elevated helper
@@ -95,6 +95,8 @@ private:
     // The open theme's picture, at the size the page shows it. When the page may play video and
     // the wallpaper is one, the picture is the components alone (a PNG) to lay over the video.
     UINT previewW_ = 0, previewH_ = 0;
+    // The size it was last drawn at: smaller than that while a live edit is under way.
+    UINT drawnW_ = 0, drawnH_ = 0;
     bool previewMotion_ = false, previewLayer_ = false;
     std::vector<uint8_t> previewBytes_;
     std::vector<Bound> bounds_;

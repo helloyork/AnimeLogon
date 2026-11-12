@@ -428,7 +428,7 @@ void Host::SendEnvironment() {
 void Host::SendPreview(int seq) {
     json::Writer w;
     w.BeginObject().Member(L"type", L"preview").Key(L"rev").Int(previewRev_).Key(L"seq").Int(seq);
-    w.Member(L"width", (int)previewW_).Member(L"height", (int)previewH_).Member(L"layer", previewLayer_);
+    w.Member(L"width", (int)drawnW_).Member(L"height", (int)drawnH_).Member(L"layer", previewLayer_);
     w.Key(L"bounds").BeginArray();
     for (const Bound &b : bounds_) {
         w.BeginObject().Member(L"instance", b.instance).Member(L"key", b.key).Member(L"screen", (int)b.screen);
@@ -485,32 +485,42 @@ bool Host::Save() {
     return false;
 }
 
-void Host::RenderPreview() {
+// A live edit (a slider or a key still moving something) is drawn no wider than this: a large
+// window's picture takes several times as long to draw and encode, and would trail the control.
+// The page scales it to the stage; the full size is drawn once the gesture ends.
+constexpr UINT kLiveWidth = 1280;
+
+void Host::RenderPreview(bool live) {
     bounds_.clear();
     previewBytes_.clear();
     screens_.clear();
     previewLayer_ = false;
-    if (library_.open().empty() || previewW_ < 16 || previewH_ < 16) return;
+    drawnW_ = previewW_;
+    drawnH_ = previewH_;
+    if (live && drawnW_ > kLiveWidth) {
+        drawnH_ = std::max(16u, (UINT)std::lround((double)previewH_ * kLiveWidth / previewW_));
+        drawnW_ = kLiveWidth;
+    }
+    if (library_.open().empty() || drawnW_ < 16 || drawnH_ < 16) return;
     const theme::Theme t = library_.Edited(library_.open());
     // A video wallpaper plays in the page itself, under the components drawn here.
     scene::Document sceneDoc;
     previewLayer_ = library_.LoadScene(library_.open(),&sceneDoc) || (previewMotion_ && IsVideo(library_, t.wallpaper));
-    screens_ = Wall(previewW_, previewH_);
+    screens_ = Wall(drawnW_, drawnH_);
     Picture p;
-    if (pictures_.Theme(t, previewW_, previewH_, previewLayer_ ? Draw::ComponentsOnly : Draw::Everything, &p, &bounds_,
+    if (pictures_.Theme(t, drawnW_, drawnH_, previewLayer_ ? Draw::ComponentsOnly : Draw::Everything, &p, &bounds_,
                         &screens_))
         previewBytes_ = previewLayer_ ? Png(p) : Bmp(p);
     ++previewRev_;
 }
 
 void Host::Edited(bool ok, bool live, int seq) {
-    if (ok) RenderPreview();
-    if (live && ok) {
-        SendPreview(seq);
-        return;
+    // The page's controls show the state, so it goes before the picture, which takes longer.
+    if (!ok || !live) {
+        if (ok) Save();
+        SendState();
     }
-    if (ok) Save();
-    SendState();
+    if (ok) RenderPreview(live);
     SendPreview(seq);
 }
 
