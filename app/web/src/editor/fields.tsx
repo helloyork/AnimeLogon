@@ -38,6 +38,8 @@ const useStyles = makeStyles({
   grow: { flex: 1, minWidth: 0 },
   value: { color: tokens.colorNeutralForeground3, fontVariantNumeric: 'tabular-nums' },
   line: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS },
+  // A switch sits at the end of its label's row, as in Windows' settings.
+  row: { flexDirection: 'row' },
   slider: { flex: 1, minWidth: 0, marginInline: `calc(-1 * ${tokens.spacingHorizontalS})` },
   // Fluent marks every step on the rail; at a tenth of a percent that is a thousand marks.
   rail: { '::before': { backgroundImage: 'none' } },
@@ -93,7 +95,7 @@ function Head({ id, label, detail, modified, onReset, value }: { id: string; lab
     <div className={styles.head}>
       <div className={styles.grow}>
         {detail ? (
-          <Tooltip content={detail} relationship="description" positioning="before">
+          <Tooltip content={detail} relationship="description" positioning="above-start">
             <Label htmlFor={id} className={styles.label}>{label}</Label>
           </Tooltip>
         ) : <Label htmlFor={id}>{label}</Label>}
@@ -121,9 +123,10 @@ export function viewFor(key: string, step: number): View {
   const attr = key.split('.').pop() || '', panel = /^p\d+\.[^.]+$/.test(key);
   const plain = (unit: string, digits: number): View => ({ factor: 1, digits, unit: () => unit });
   switch (attr) {
-    case 'offset-x': case 'offset-y': return plain('%', 1);
+    case 'offset-x': return plain('% 屏宽', 1);
+    case 'offset-y': return plain('% 屏高', 1);
     case 'size': return panel ? plain('% 屏高', 1) : plain('倍', 2);
-    case 'margin': return plain('%', 1);
+    case 'margin': return plain('% 短边', 1);
     case 'weight': return { factor: 1, digits: 0, unit: v => WEIGHT_NAMES[Math.round(v / 100) * 100] || '' };
     case 'tracking': case 'x': case 'y': case 'blur': return plain('em', 3);
     case 'space': case 'gap': return plain('em', 2);
@@ -203,7 +206,7 @@ export function ChoiceField({ id, label, detail, options, value, modified, write
 export function ToggleField({ id, label, detail, value, modified, write, onReset }: { id: string; label: string; detail?: string; value: boolean; modified: boolean; write: (on: boolean) => void; onReset: () => void }) {
   const styles = useStyles();
   return (
-    <div className={mergeClasses(styles.field, styles.line)}>
+    <div className={mergeClasses(styles.field, styles.line, styles.row)}>
       <div className={styles.grow}><Head id={id} label={label} detail={detail} modified={modified} onReset={onReset} /></div>
       <Switch id={id} checked={value} onChange={(_, d) => write(d.checked)} />
     </div>
