@@ -170,7 +170,7 @@ bool Host::Create(int show) {
     // shell asks for.
     const UINT dpi = GetDpiForSystem();
     const int w = MulDiv(1240, dpi, 96), h = MulDiv(800, dpi, 96);
-    hwnd_ = CreateWindowExW(0, kClass, L"AnimeLogon", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, w, h, nullptr,
+    hwnd_ = CreateWindowExW(0, kClass, paths::Sandbox().empty() ? L"AnimeLogon" : L"AnimeLogon（沙盒）", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, w, h, nullptr,
                             nullptr, wc.hInstance, this);
     if (!hwnd_) return false;
     const BOOL immersiveDark = dark_;
@@ -402,7 +402,9 @@ void Host::SendState() {
 void Host::SendEnvironment() {
     json::Writer w;
     w.BeginObject().Member(L"type", L"environment");
-    w.Member(L"on", machine::IsOn()).Member(L"installed", !machine::InstallDir().empty());
+    // A sandbox (paths.h) stands for an installed AnimeLogon that is on, whatever this machine has.
+    const bool sandbox = !paths::Sandbox().empty();
+    w.Member(L"on", sandbox || machine::IsOn()).Member(L"installed", sandbox || !machine::InstallDir().empty());
     w.Member(L"version", L"" ANIMELOGON_VERSION);
     w.Key(L"monitors").BeginArray();
     int n = 0;
@@ -803,6 +805,10 @@ void Host::OnMessage(const json::Value &m) {
     } else if (op == L"logs") {
         ShellExecuteW(hwnd_, L"open", paths::LogDir().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
     } else if (op == L"uninstall") {
+        if (!paths::Sandbox().empty()) {
+            Problem(L"这是沙盒里的设置，不能卸载这台电脑上的 AnimeLogon。");
+            return;
+        }
         const std::wstring dir = machine::InstallDir();
         if (!dir.empty()) ShellExecuteW(hwnd_, L"runas", (dir + L"\\uninstall.exe").c_str(), nullptr, nullptr, SW_SHOWNORMAL);
     }
@@ -1058,6 +1064,11 @@ void Host::ExportTheme(const std::wstring &id) {
 }
 
 void Host::Switch(bool on) {
+    if (!paths::Sandbox().empty()) {
+        Problem(L"这是沙盒里的设置，不能启用或关闭这台电脑上的 AnimeLogon。");
+        SendEnvironment();
+        return;
+    }
     const int code = commit::RunElevated(hwnd_, on ? L"--switch-on" : L"--switch-off");
     if (code == commit::kOk) Toast(on ? L"已启用，下次锁屏生效" : L"已关闭，锁屏恢复 Windows 默认");
     else if (code == commit::kDeclined) Toast(L"已取消");

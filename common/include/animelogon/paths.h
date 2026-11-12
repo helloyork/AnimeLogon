@@ -5,6 +5,14 @@
 
 namespace animelogon::paths {
 
+// A settings window started with --sandbox <dir> (app/src/main.cpp) keeps everything it reads
+// and writes under <dir>, laid out as on a machine: <dir>\ProgramData\AnimeLogon for the data
+// and <dir>\LocalAppData\AnimeLogon for the person's own files. It is for looking at a build
+// apart from what is installed. Only that unelevated window sets it; nothing elevated or run by
+// the system ever does. Empty outside a sandbox.
+void UseSandbox(const std::wstring &root);
+const std::wstring &Sandbox();
+
 // %ProgramData%\AnimeLogon. Created by the installer with an administrators-only DACL.
 std::wstring DataDir();
 std::wstring LogDir();

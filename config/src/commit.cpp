@@ -8,6 +8,7 @@
 #include "animelogon/paths.h"
 #include "animelogon/wallpaper.h"
 
+#include "scratch.h"
 #include "store.h"
 
 using namespace animelogon;
@@ -143,7 +144,30 @@ std::wstring Quote(const std::wstring &arg) {
     return out + L"\"";
 }
 
+// A sandboxed window (paths.h) has no administrator to ask and no installation to change: what the
+// helper would do to the machine's stores is done here to the sandbox's copy, and what would change
+// the machine itself, switching AnimeLogon on or off, is refused.
+static int RunInSandbox(const std::wstring &args) {
+    int argc = 0;
+    wchar_t **argv = CommandLineToArgvW((L"animelogon.exe " + args).c_str(), &argc);
+    if (!argv) return kFailed;
+    const std::vector<std::wstring> list(argv + 1, argv + argc);
+    LocalFree(argv);
+    std::vector<Command> commands;
+    if (Parse(list, &commands) != kOk) return kBadArgs;
+    for (const Command &c : commands)
+        if (c.name == L"--switch-on" || c.name == L"--switch-off") return kFailed;
+    const scratch::PlainTarget target(paths::DataDir());
+    for (const Command &c : commands) {
+        const int code = Execute(c, target);
+        ALOG(L"commit (sandbox): %s -> %d", c.name.c_str(), code);
+        if (code != kOk) return code;
+    }
+    return kOk;
+}
+
 int RunElevated(HWND owner, const std::wstring &args) {
+    if (!paths::Sandbox().empty()) return RunInSandbox(args);
     wchar_t self[MAX_PATH * 2];
     GetModuleFileNameW(nullptr, self, ARRAYSIZE(self));
     SHELLEXECUTEINFOW ei{};

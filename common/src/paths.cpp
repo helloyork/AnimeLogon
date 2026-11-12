@@ -20,7 +20,16 @@ static std::wstring KnownFolder(REFKNOWNFOLDERID id, const wchar_t *fallback) {
     return dir;
 }
 
+static std::wstring g_sandbox;
+
+void UseSandbox(const std::wstring &root) {
+    g_sandbox = root;
+    while (g_sandbox.size() > 3 && g_sandbox.back() == L'\\') g_sandbox.pop_back();
+}
+const std::wstring &Sandbox() { return g_sandbox; }
+
 std::wstring DataDir() {
+    if (!g_sandbox.empty()) return g_sandbox + L"\\ProgramData\\AnimeLogon";
     static const std::wstring dir =
         KnownFolder(FOLDERID_ProgramData, L"C:\\ProgramData") + L"\\AnimeLogon";
     return dir;
@@ -33,6 +42,7 @@ std::wstring BackgroundPath() { return DataDir() + L"\\background.png"; }
 std::wstring PausedMarkerPath() { return DataDir() + L"\\paused"; }
 
 std::wstring UserDataDir() {
+    if (!g_sandbox.empty()) return g_sandbox + L"\\LocalAppData\\AnimeLogon";
     return KnownFolder(FOLDERID_LocalAppData, L"") + L"\\AnimeLogon";
 }
 

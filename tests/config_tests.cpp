@@ -881,3 +881,25 @@ TEST(CommitSceneRechecksEveryAssetAndWritesXmlAfresh) {
     CHECK(store::CommitPackage(target,dir) == commit::kFailed);
     secure::RemoveTree(root);
 }
+// A settings window started with --sandbox keeps to a copy of the data: its paths are the
+// sandbox's, its files count as trusted, its store commands run there without elevation, and
+// switching AnimeLogon on or off is refused rather than done to the machine.
+TEST(SandboxKeepsTheWindowToItsOwnCopy) {
+    const std::wstring scratch = ScratchDir(), box = scratch + L"\\box";
+    paths::UseSandbox(box + L"\\");
+    CHECK(paths::DataDir() == box + L"\\ProgramData\\AnimeLogon");
+    CHECK(paths::UserDataDir() == box + L"\\LocalAppData\\AnimeLogon");
+    const std::wstring theme = paths::DataDir() + L"\\themes\\0123456789abcdef";
+    CHECK(paths::CreateDirectories(theme));
+    CHECK(WriteAll(theme + L"\\theme.xml", "<theme/>", 8));
+    std::wstring why;
+    CHECK(secure::IsTrustedDirectory(theme, &why));
+    CHECK(secure::IsTrusted(theme + L"\\theme.xml", &why));
+    CHECK(!secure::IsTrusted(theme + L"\\missing.xml", &why));
+    CHECK(commit::RunElevated(nullptr, L"--switch-off") == commit::kFailed);
+    CHECK(commit::RunElevated(nullptr, L"--remove-theme 0123456789abcdef") == commit::kOk);
+    CHECK(GetFileAttributesW(theme.c_str()) == INVALID_FILE_ATTRIBUTES);
+    paths::UseSandbox(L"");
+    CHECK(paths::DataDir() != box + L"\ProgramData\AnimeLogon");
+    secure::RemoveTree(scratch);
+}
