@@ -18,6 +18,7 @@ import {
   Text,
   tokens,
 } from '@fluentui/react-components';
+import { FolderOpenRegular } from '@fluentui/react-icons';
 import { UacShield } from '../icons';
 import { send, wallpaperUrl } from '../native';
 import { edit } from '../preview';
@@ -67,6 +68,8 @@ const useStyles = makeStyles({
     backgroundColor: '#000',
   },
   picked: { outline: `${tokens.strokeWidthThick} solid ${tokens.colorBrandStroke1}`, outlineOffset: '2px' },
+  shielded: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalXS },
+  browse: { display: 'grid', placeItems: 'center', backgroundColor: tokens.colorNeutralBackground3, color: tokens.colorNeutralForeground2 },
   ellipsis: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
 });
 
@@ -179,18 +182,25 @@ function MonitorDialog({ d }: { d: Extract<DialogState, { kind: 'monitor' }> }) 
   );
 }
 
-function WallpaperGrid({ current, onPick }: { current: string; onPick: (id: string) => void }) {
+// The wallpapers already here, the chosen one outlined and focused first; the last cell brings in
+// a new one from a file, as Windows' own background page has its 浏览 at the end of its pictures.
+function WallpaperGrid({ current, onPick, onImport, importLabel }: { current: string; onPick: (id: string) => void; onImport: () => void; importLabel: string }) {
   const s = useStore();
   const styles = useStyles();
   return (
     <div className={styles.pictures} role="listbox" aria-label="壁纸">
       {s.lib!.wallpapers.map(w => (
-        <button key={w.id} className={styles.pick} role="option" aria-selected={current === w.id} onClick={() => onPick(w.id)}>
+        <button key={w.id} className={styles.pick} role="option" aria-selected={current === w.id} autoFocus={current === w.id} onClick={() => onPick(w.id)}>
           <img className={mergeClasses(styles.pickShot, current === w.id && styles.picked)} src={wallpaperUrl(w.id)} alt="" draggable={false} />
           <Text className={styles.ellipsis}>{w.name}</Text>
           <Caption1 className={mergeClasses(styles.quiet, styles.ellipsis)}>{w.meta}</Caption1>
         </button>
       ))}
+      <button className={styles.pick} onClick={onImport}>
+        <span className={mergeClasses(styles.pickShot, styles.browse)}><FolderOpenRegular fontSize={28} /></span>
+        <Text className={mergeClasses(styles.ellipsis, styles.shielded)}><UacShield />{importLabel}</Text>
+        <Caption1 className={mergeClasses(styles.quiet, styles.ellipsis)}>图片或视频</Caption1>
+      </button>
     </div>
   );
 }
@@ -208,8 +218,9 @@ function NewThemeDialog({ d }: { d: Extract<DialogState, { kind: 'newTheme' }> }
         <Field label="名称">
           <Input value={name} maxLength={40} autoFocus onFocus={e => e.currentTarget.select()} onChange={(_, data) => setName(data.value)} />
         </Field>
-        <Field label="壁纸" hint="新主题带一个时钟。要用新的图片或视频，请用「导入…」。">
-          <WallpaperGrid current={wallpaper} onPick={setWallpaper} />
+        <Field label="壁纸" hint="新主题带一个时钟。">
+          <WallpaperGrid current={wallpaper} onPick={setWallpaper} importLabel="导入为新主题…"
+            onImport={() => { closeDialog(d.id); send('import'); }} />
         </Field>
       </div>
     </Frame>
@@ -219,11 +230,9 @@ function NewThemeDialog({ d }: { d: Extract<DialogState, { kind: 'newTheme' }> }
 function WallpaperDialog({ d }: { d: Extract<DialogState, { kind: 'wallpaper' }> }) {
   const s = useStore();
   return (
-    <Frame d={d} title="更换壁纸" wide actions={<>
-      <Button icon={<UacShield />} onClick={() => { closeDialog(d.id); send('importWallpaper'); }}>从文件导入…</Button>
-      <Button onClick={() => closeDialog(d.id)}>取消</Button>
-    </>}>
-      <WallpaperGrid current={s.open?.wallpaper.ref ?? ''} onPick={ref => { closeDialog(d.id); edit('wallpaper', { ref }); }} />
+    <Frame d={d} title="更换壁纸" wide actions={<Button onClick={() => closeDialog(d.id)}>取消</Button>}>
+      <WallpaperGrid current={s.open?.wallpaper.ref ?? ''} onPick={ref => { closeDialog(d.id); edit('wallpaper', { ref }); }} importLabel="从文件导入…"
+        onImport={() => { closeDialog(d.id); send('importWallpaper'); }} />
     </Frame>
   );
 }

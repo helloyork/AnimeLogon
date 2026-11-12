@@ -42,7 +42,6 @@ import {
   resetFlow,
   screenTheme,
   setState,
-  setTab,
   shapeOf,
   themeOf,
   usedOn,
@@ -158,7 +157,7 @@ export function LibraryPage() {
           <MessageBar intent="info">
             <MessageBarBody>AnimeLogon 已关闭，锁屏显示 Windows 默认界面。</MessageBarBody>
             <MessageBarActions>
-              <Button size="small" onClick={() => setTab('settings')}>打开设置</Button>
+              <Button size="small" icon={<UacShield />} onClick={() => send('switch', { on: true })}>启用</Button>
             </MessageBarActions>
           </MessageBar>
         )}

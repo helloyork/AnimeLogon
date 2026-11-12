@@ -99,15 +99,15 @@ function Group({ title, children }: { title: string; children: ReactNode }) {
 }
 
 // Windows writes 开 / 关 beside a switch.
-export function OnOff({ checked, onChange, label }: { checked: boolean; onChange: (on: boolean) => void; label: string }) {
-  return <Switch checked={checked} onChange={(_, d) => onChange(d.checked)} label={checked ? '开' : '关'} labelPosition="before" aria-label={label} />;
+export function OnOff({ checked, onChange, label, disabled }: { checked: boolean; onChange: (on: boolean) => void; label: string; disabled?: boolean }) {
+  return <Switch checked={checked} disabled={disabled} onChange={(_, d) => onChange(d.checked)} label={checked ? '开' : '关'} labelPosition="before" aria-label={label} />;
 }
 
-function Choice({ options, value, onChange, label }: { options: [string, string][]; value: string; onChange: (v: string) => void; label: string }) {
+function Choice({ options, value, onChange, label, disabled }: { options: [string, string][]; value: string; onChange: (v: string) => void; label: string; disabled?: boolean }) {
   const styles = useStyles();
   const selected = options.find(o => o[0] === value) || options[0];
   return (
-    <Dropdown className={styles.dropdown} aria-label={label} value={selected[1]} selectedOptions={[selected[0]]} onOptionSelect={(_, d) => d.optionValue != null && onChange(d.optionValue)}>
+    <Dropdown className={styles.dropdown} aria-label={label} disabled={disabled} value={selected[1]} selectedOptions={[selected[0]]} onOptionSelect={(_, d) => d.optionValue != null && onChange(d.optionValue)}>
       {options.map(([v, l]) => <Option key={v} value={v}>{l}</Option>)}
     </Dropdown>
   );
@@ -139,16 +139,22 @@ export function SettingsPage() {
       <div className={styles.page}>
         <Title3 as="h1">设置</Title3>
 
+        {/* The switch for the whole program comes first, as Windows' own settings put theirs. */}
+        <Item>
+          <Row title="启用 AnimeLogon" description="关闭后锁屏恢复 Windows 默认，主题和设置保留。">
+            <UacShield />
+            <OnOff label="启用 AnimeLogon" checked={s.env.on} onChange={v => send('switch', { on: v })} />
+          </Row>
+        </Item>
+
         <Group title="时钟">
           <Item><Row title="现在显示为"><Text>{s.clock}</Text></Row></Item>
           <Item>
             <Row title="时间制式" description="「跟随区域格式」与任务栏一致。">
               <Choice label="时间制式" value={c.hours} onChange={v => global('clock.hours', v)} options={[['auto', '跟随区域格式'], ['12', '12 小时制'], ['24', '24 小时制']]} />
             </Row>
-          </Item>
-          <Item>
-            <Row title="显示上午/下午" description="仅用于 12 小时制。">
-              <OnOff label="显示上午/下午" checked={c.ampm} onChange={v => global('clock.ampm', v)} />
+            <Row sub title="显示上午/下午" description="仅用于 12 小时制。">
+              <OnOff label="显示上午/下午" checked={c.ampm} disabled={c.hours === '24'} onChange={v => global('clock.ampm', v)} />
             </Row>
           </Item>
           <Item>
@@ -186,7 +192,7 @@ export function SettingsPage() {
         <Group title="屏幕">
           <Item>
             <Row title="多显示器" description={`这台电脑有 ${s.env.monitors.length} 块显示器。`}>
-              <Choice label="多显示器" value={set.monitorMode} onChange={v => global('monitorMode', v)}
+              <Choice label="多显示器" value={set.monitorMode} disabled={s.env.monitors.length < 2} onChange={v => global('monitorMode', v)}
                 options={[['duplicate', '每块屏幕相同'], ['span', '横跨所有屏幕'], ['per-monitor', '每块屏幕各自']]} />
             </Row>
             {perMonitor() && s.env.monitors.map(m => (
@@ -200,7 +206,7 @@ export function SettingsPage() {
 
         <Group title="声音">
           <Item>
-            <Row title="播放声音" description="在锁屏上播放声音。">
+            <Row title="播放声音">
               <OnOff label="播放声音" checked={set.audio.enabled} onChange={v => global('audio.enabled', v)} />
             </Row>
             {set.audio.enabled && (
@@ -222,12 +228,6 @@ export function SettingsPage() {
         </Group>
 
         <Group title="系统">
-          <Item>
-            <Row title="启用 AnimeLogon" description="关闭后锁屏恢复 Windows 默认，主题和设置保留。">
-              <UacShield />
-              <OnOff label="启用 AnimeLogon" checked={s.env.on} onChange={v => send('switch', { on: v })} />
-            </Row>
-          </Item>
           <Item><Row title="日志" description="反馈问题时附上。"><Button onClick={() => send('logs')}>打开</Button></Row></Item>
           <Item>
             <Row title="卸载 AnimeLogon" description="移除本程序并还原所有系统更改。">
