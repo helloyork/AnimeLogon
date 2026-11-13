@@ -10,6 +10,9 @@ target_sources(animelogon_tests PRIVATE overlay_tests.cpp ${PROJECT_SOURCE_DIR}/
 # Which of the other displays get a still after a wake, what each is cut from, and the blur.
 target_sources(animelogon_tests PRIVATE stills_tests.cpp ${PROJECT_SOURCE_DIR}/overlay/src/stills.cpp)
 target_include_directories(animelogon_tests PRIVATE ${PROJECT_SOURCE_DIR}/overlay/src)
+# The installer taking back an uninstall's deletions at the next restart.
+target_sources(animelogon_tests PRIVATE restart_tests.cpp ${PROJECT_SOURCE_DIR}/installer/src/restart.cpp)
+target_include_directories(animelogon_tests PRIVATE ${PROJECT_SOURCE_DIR}/installer/src)
 target_link_libraries(animelogon_tests PRIVATE animelogon_common)
 # The strings, read in Simplified Chinese (common_tests.cpp's main), which the tests expect.
 animelogon_locales_rc(test_locales)

@@ -36,6 +36,7 @@ animelogon_add_executable(setup_preview WIN32 LOCALES
         ${PROJECT_SOURCE_DIR}/installer/src/wizards.cpp
         ${PROJECT_SOURCE_DIR}/installer/src/engine.cpp
         ${PROJECT_SOURCE_DIR}/installer/src/payload.cpp
+        ${PROJECT_SOURCE_DIR}/installer/src/restart.cpp
     DESCRIPTION "AnimeLogon Setup Preview"
     LIBS mfuuid ole32 oleaut32 shell32 comctl32 d2d1 dwrite dwmapi)
 # A console program, though its windows need the manifest of a windowed one (common controls 6).

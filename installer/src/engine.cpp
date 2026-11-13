@@ -32,6 +32,7 @@
 #include "animelogon/wallpaper.h"
 
 #include "payload.h"
+#include "restart.h"
 
 #pragma comment(lib, "mfuuid.lib")
 
@@ -524,6 +525,9 @@ Report Install(const std::wstring &targetDir, const InstallOptions &options) {
 
     at(0.20, "install.step.copy");
     if (!paths::CreateDirectories(targetDir)) return fail(Tr("install.error.mkdir", {{L"dir", targetDir}}));
+    // An uninstall with no restart since left what it could not delete, uninstall.exe and the
+    // directory at least, to be deleted at the next restart: that would now take the new copy.
+    restart::KeepInstalled(targetDir);
     size_t placed = 0;
     for (const wchar_t *component : kComponents) {
         e = Place(component, targetDir + L"\\" + component, true);
