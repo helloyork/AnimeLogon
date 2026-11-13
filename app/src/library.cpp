@@ -53,9 +53,13 @@ bool Number(const std::wstring &text, double *out) {
     return end && *end == L'\0';
 }
 
+// A brightness as the page shows it, in whole percents: 0.49, not the float's 0.49000000953674316.
+double Percents(float brightness) { return std::round(brightness * 100.0) / 100.0; }
+
 bool Empty(const InstanceOverrides &o) { return !o.ref && !o.visible && o.values.empty(); }
 bool Empty(const ThemeOverrides &o) {
-    return !o.wallpaper && !o.fit && !o.wake && !o.wakeSeconds && o.wallpaperValues.empty() && o.instances.empty();
+    return !o.wallpaper && !o.fit && !o.wake && !o.wakeSeconds && !o.brightness && o.wallpaperValues.empty() &&
+           o.instances.empty();
 }
 
 // The value `key` has, given `values`: a setting's, or an adjustment's as the page shows it.
@@ -170,7 +174,7 @@ theme::Theme Library::Edited(const std::wstring &id) const { return theme::Edite
 int Library::Modifications(const std::wstring &id) const {
     const ThemeOverrides &o = set_.OverridesFor(id);
     int n = (o.wallpaper ? 1 : 0) + (o.fit ? 1 : 0) + (o.wake ? 1 : 0) + (o.wakeSeconds ? 1 : 0) +
-            (int)o.wallpaperValues.size();
+            (o.brightness ? 1 : 0) + (int)o.wallpaperValues.size();
     for (const auto &[instance, io] : o.instances) n += (io.ref ? 1 : 0) + (io.visible ? 1 : 0) + (int)io.values.size();
     return n;
 }
@@ -588,6 +592,17 @@ bool Library::SetWakeSeconds(float seconds, int gesture) {
     return true;
 }
 
+bool Library::SetBrightness(float brightness, int gesture) {
+    if (open_.empty() || !(brightness >= kBrightnessMin - 0.0001f && brightness <= kBrightness)) return false;
+    Step(gesture);
+    // The page sends whole percents; kept to them, settings.ini reads 0.7 rather than 0.69999.
+    brightness = std::round(brightness * 100.0f) / 100.0f;
+    if (std::fabs(brightness - Own(open_).brightness) < 0.001f) Overrides().brightness.reset();
+    else Overrides().brightness = brightness;
+    Tidy();
+    return true;
+}
+
 bool Library::Reset() {
     if (open_.empty() || !set_.themeOverrides.count(open_)) return false;
     Step(0);
@@ -783,6 +798,7 @@ void Library::WriteLibrary(json::Writer &w) const {
         w.Member(L"id", e.id).Member(L"name", e.builtIn ? i18n::Label(e.name) : e.name).Member(L"author", e.author).Member(L"builtIn", e.builtIn);
         w.Member(L"wallpaper", WallpaperName(edited.wallpaper)).Member(L"wallpaperKind", WallpaperKindName(*this, edited.wallpaper));
         w.Member(L"wallpaperRef", edited.wallpaper).Member(L"fit", ToString(edited.fit));
+        w.Member(L"brightness", Percents(edited.brightness));
         w.Member(L"wake", ToString(edited.wake)).Member(L"wakeSeconds", (double)edited.wakeSeconds);
         const auto *wallpaper=Wallpaper(edited.wallpaper);
         w.Member(L"sceneStatic",wallpaper && wallpaper->kind == WallpaperKind::Scene && wallpaper->sceneFps == 0);
@@ -860,6 +876,8 @@ void Library::WriteOpen(json::Writer &w) const {
     w.Member(L"fit", ToString(edited.fit)).Member(L"fitModified", o.fit.has_value());
     // What the theme itself says, to put back.
     w.Member(L"ownWallpaper", own.wallpaper).Member(L"ownFit", ToString(own.fit));
+    w.Member(L"brightness", Percents(edited.brightness)).Member(L"brightnessModified", o.brightness.has_value());
+    w.Member(L"ownBrightness", Percents(own.brightness));
     w.Member(L"wake", ToString(edited.wake)).Member(L"wakeModified", o.wake.has_value());
     w.Member(L"wakeSeconds", (double)edited.wakeSeconds).Member(L"wakeSecondsModified", o.wakeSeconds.has_value());
     w.Member(L"ownWake", ToString(own.wake)).Member(L"ownWakeSeconds", (double)own.wakeSeconds);

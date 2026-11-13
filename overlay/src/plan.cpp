@@ -12,6 +12,7 @@ using animelogon::ResolvedTheme;
 Wallpaper WallpaperOf(const ResolvedTheme &theme) {
     Wallpaper w;
     w.fit = theme.fit;
+    w.brightness = theme.brightness;
     if (!theme.wallpaper) return w;
     const animelogon::WallpaperInfo &info = *theme.wallpaper;
     w.id = info.id;
@@ -105,10 +106,13 @@ std::wstring Describe(const Display &d) {
     case Source::Scene: wallpaper = L"scene " + d.wallpaper.id; break;
     case Source::Gradient: wallpaper = L"the built-in wallpaper"; break;
     }
-    return animelogon::Format(L"display %s%s %ldx%ld: theme %s, %s, %s, %zu component(s)%s", d.monitorKey.c_str(),
+    const std::wstring brightness = d.wallpaper.brightness < animelogon::kBrightness
+                                        ? animelogon::Format(L" at %g brightness", d.wallpaper.brightness)
+                                        : std::wstring();
+    return animelogon::Format(L"display %s%s %ldx%ld: theme %s, %s, %s%s, %zu component(s)%s", d.monitorKey.c_str(),
                               d.primary ? L" (primary)" : L"", d.rect.right - d.rect.left, d.rect.bottom - d.rect.top,
                               d.themeId.c_str(), wallpaper.c_str(),
-                              animelogon::ToString(d.wallpaper.fit), d.components.size(),
+                              animelogon::ToString(d.wallpaper.fit), brightness.c_str(), d.components.size(),
                               d.components.empty() ? L"" : d.showComponents ? L", drawn here" : L", not drawn here");
 }
 
@@ -121,6 +125,7 @@ std::vector<size_t> ShowBuiltInInstead(std::vector<Wallpaper> *shown, const std:
         builtIn.source = Source::Gradient;
         builtIn.id = animelogon::kDefaultWallpaper;
         builtIn.fit = w.fit;
+        builtIn.brightness = w.brightness;
         w = builtIn;
         changed.push_back(i);
     }

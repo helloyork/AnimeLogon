@@ -109,7 +109,9 @@ private:
         for (const auto &[name, value] : e.attributes) {
             if (name == L"ref") ref = &value;
             else if (name == L"fit") fit = &value;
-            else return Fail(e, L"unknown attribute " + name + L" on <wallpaper>");
+            else if (name == L"brightness") {
+                if (!ParseBrightness(value, &theme_->brightness)) return Fail(e, L"a bad brightness " + value);
+            } else return Fail(e, L"unknown attribute " + name + L" on <wallpaper>");
         }
         if (!ref || !fit) return Fail(e, L"<wallpaper> needs ref and fit");
         if (!IsWallpaperRefIn(form_, *ref)) return Fail(e, L"a bad wallpaper ref " + *ref);
@@ -279,6 +281,7 @@ Theme Edited(const Theme &theme, const ThemeOverrides &overrides, std::vector<st
     if (overrides.fit) e.fit = *overrides.fit;
     if (overrides.wake) e.wake = *overrides.wake;
     if (overrides.wakeSeconds) e.wakeSeconds = *overrides.wakeSeconds;
+    if (overrides.brightness) e.brightness = *overrides.brightness;
     for (const auto &[id, o] : overrides.instances) {
         Instance *instance = nullptr;
         for (Instance &i : e.components)
@@ -310,6 +313,8 @@ std::string Normalize(const Theme &theme) {
     xml::Element wallpaper;
     wallpaper.name = L"wallpaper";
     wallpaper.attributes = {{L"ref", theme.wallpaper}, {L"fit", ToString(theme.fit)}};
+    // Like <wake>, only when it is not the default.
+    if (theme.brightness != kBrightness) wallpaper.attributes.emplace_back(L"brightness", Format(L"%g", theme.brightness));
     root.children.push_back(std::move(wallpaper));
     // Written only when it is not the default, so a theme that never set it stays as it was.
     if (theme.wake != WakeStyle::Fade || theme.wakeSeconds != kWakeSeconds) {

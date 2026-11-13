@@ -42,6 +42,8 @@ struct Wallpaper {
     animelogon::skin::Values values;
     int sceneTrialWidth = 0, sceneTrialHeight = 0, sceneFps = 60, sceneScale = 100;
     animelogon::Scaling fit = animelogon::Scaling::Fill;
+    // How bright it is drawn (settings.h kBrightness): the theme's, whatever stands in for it.
+    float brightness = animelogon::kBrightness;
 };
 
 struct Component {

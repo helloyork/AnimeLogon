@@ -108,8 +108,9 @@ std::wstring KindOf(const plan::Wallpaper &w) {
     return L"no wallpaper";
 }
 
-// The display's picture of its wallpaper, at its size, B G R. A wallpaper that cannot be shown
-// gives way to the built-in one, as it does on the screen. `what` says which it is, for the log.
+// The display's picture of its wallpaper, at its size and its theme's brightness, B G R: what
+// the display was showing. A wallpaper that cannot be shown gives way to the built-in one, as it
+// does on the screen. `what` says which it is, for the log.
 std::vector<uint8_t> Picture(const stills::Still &still, std::wstring *what) {
     std::vector<uint8_t> bgr;
     std::wstring why;
@@ -119,10 +120,12 @@ std::vector<uint8_t> Picture(const stills::Still &still, std::wstring *what) {
                         : stills::Compose(still, &bgr, &why);
     if (ok) {
         *what = KindOf(still.wallpaper);
-        return bgr;
+    } else {
+        *what = L"the built-in wallpaper, as " + KindOf(still.wallpaper) + L" cannot be shown (" + why + L")";
+        bgr = stills::BuiltIn(still);
     }
-    *what = L"the built-in wallpaper, as " + KindOf(still.wallpaper) + L" cannot be shown (" + why + L")";
-    return stills::BuiltIn(still);
+    animelogon::ApplyBrightness(bgr.data(), bgr.size() / 3, 3, still.wallpaper.brightness);
+    return bgr;
 }
 
 // A top-down 32-bit DIB of the still, ready to be put in a layered window.

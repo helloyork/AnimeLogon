@@ -432,3 +432,31 @@ TEST(SkinPanelsStayOnTheirDisplay) {
     CHECK(std::fabs(kept.holdY[0] - (0.07f * 360 + 36.0f)) <= 1.5f);
     if (SUCCEEDED(co)) CoUninitialize();
 }
+
+// The wallpaper is drawn at the theme's brightness, as the logon screen draws it, and the
+// components over it are not darkened.
+TEST(AppPicturesDrawTheWallpaperAtTheThemesBrightness) {
+    const HRESULT co = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    OneThemeStores stores;
+    app::Library library(stores);
+    app::Pictures pictures(library);
+    theme::Theme t = library.Edited(kTheme);
+    Picture full, dim, everything;
+    CHECK(pictures.Theme(t, 320, 180, app::Draw::WallpaperOnly, &full));
+    t.brightness = 0.5f;
+    CHECK(pictures.Theme(t, 320, 180, app::Draw::WallpaperOnly, &dim));
+    bool half = full.bgra.size() == dim.bgra.size() && !full.bgra.empty();
+    for (size_t i = 0; half && i < full.bgra.size(); i += 4)
+        for (size_t c = 0; c < 3; ++c) half = half && dim.bgra[i + c] == (uint8_t)(full.bgra[i + c] * 0.5f + 0.5f);
+    CHECK(half);
+    std::vector<app::Bound> bounds;
+    CHECK(pictures.Theme(t, 320, 180, app::Draw::Everything, &everything, &bounds));
+    uint8_t brightest = 0;
+    for (const app::Bound &b : bounds)
+        if (b.key == L"p1")
+            for (UINT y = (UINT)std::max(0.0f, b.rect.top); y < (UINT)b.rect.bottom && y < everything.height; ++y)
+                for (UINT x = (UINT)std::max(0.0f, b.rect.left); x < (UINT)b.rect.right && x < everything.width; ++x)
+                    brightest = std::max(brightest, everything.bgra[((size_t)y * everything.width + x) * 4 + 2]);
+    CHECK(brightest > 200);
+    if (SUCCEEDED(co)) CoUninitialize();
+}

@@ -50,6 +50,7 @@ ResolvedTheme Themed(const Settings &s, std::wstring id, const ThemeStore &store
     r.fit = edited.fit;
     r.wake = edited.wake;
     r.wakeSeconds = edited.wakeSeconds;
+    r.brightness = edited.brightness;
     r.componentDisplays = s.componentDisplays;
 
     if (edited.wallpaper != kNoWallpaper) {

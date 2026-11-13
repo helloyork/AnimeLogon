@@ -100,8 +100,8 @@ public:
     // Only instances that were added can be removed; the theme's own can be hidden.
     bool RemoveInstance(const std::wstring &instance);
     // Gives each theme of `targets` the open theme's components as they are now: the same
-    // components, shown or hidden alike, with the same values. A target keeps its wallpaper, its fit
-    // and its wake transition; the components and adjustments it had are replaced. The targets do
+    // components, shown or hidden alike, with the same values. A target keeps its wallpaper, its fit,
+    // its brightness and its wake transition; the components and adjustments it had are replaced. The targets do
     // not follow later edits, and this is no step to undo on the open theme's page. Returns how
     // many themes changed, or -1, changing nothing, when settings.ini would grow past
     // kMaxSettingsBytes.
@@ -111,6 +111,8 @@ public:
     // How the open theme gives way to the sign-in screen when woken, and over how long.
     bool SetWake(animelogon::WakeStyle style);
     bool SetWakeSeconds(float seconds, int gesture);
+    // How bright the open theme's wallpaper is drawn, kBrightnessMin to 1.
+    bool SetBrightness(float brightness, int gesture);
     bool Reset();
     bool Undo();
     bool Redo();

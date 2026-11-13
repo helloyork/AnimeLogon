@@ -22,6 +22,7 @@ export interface Environment {
   user: string;        // the name Windows' sign-in screen greets this person by
   accountPicture: boolean;  // they have an account picture, served as `account`
   wallpaperEngine: boolean; // Wallpaper Engine keeps wallpapers on this computer (app/src/workshop.h)
+  steam: boolean;           // the Steam edition, with the Steam Workshop (app/src/host_steam.cpp)
   // The file types each kind of import takes, as extensions without the dot: the ones the file
   // dialog for that kind lists (app/src/importable.h).
   importable: Record<ImportKind, string[]>;
@@ -62,6 +63,7 @@ export interface ThemeEntry {
   wallpaperKind: WallpaperKind;
   wallpaperRef: string;
   fit: Fit;
+  brightness: number;       // how bright the wallpaper is drawn, 0.1 to 1
   wake: Wake;
   wakeSeconds: number;
   sceneStatic: boolean;
@@ -179,6 +181,9 @@ export interface OpenTheme {
   fitModified: boolean;
   ownWallpaper: string;
   ownFit: Fit;
+  brightness: number;
+  brightnessModified: boolean;
+  ownBrightness: number;
   wake: Wake;
   wakeModified: boolean;
   wakeSeconds: number;

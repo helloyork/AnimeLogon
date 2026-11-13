@@ -2,7 +2,7 @@
 // theme.xml declares a theme in the strict XML subset components use (xml.h):
 //
 //   <theme format="1" name="Seaside" author="Nomen">
-//     <wallpaper ref="3f2a9c0d11e4b7a8" fit="fill"/>
+//     <wallpaper ref="3f2a9c0d11e4b7a8" fit="fill" brightness="0.7"/>
 //     <wake style="slide" duration="0.8"/>
 //     <component id="clock" ref="clock">
 //       <set key="p1.anchor" value="bottom-left"/>
@@ -10,7 +10,8 @@
 //     </component>
 //   </theme>
 //
-// - <wallpaper ref fit>, exactly once. `fit` is fill, fit or stretch.
+// - <wallpaper ref fit brightness?>, exactly once. `fit` is fill, fit or stretch; `brightness`,
+//   from 0.1 to 1, how bright the wallpaper is drawn (settings.h kBrightness), 1 without it.
 // - <wake style? duration?>, at most once: how the logon screen gives way to the sign-in screen
 //   when woken (settings.h WakeStyle: fade, zoom, slide or cut) and over how many seconds
 //   (0.1 to 2). Without it, a fade over 0.5 s.
@@ -64,6 +65,7 @@ struct Theme {
     Scaling fit = Scaling::Fill;
     WakeStyle wake = WakeStyle::Fade;
     float wakeSeconds = kWakeSeconds;
+    float brightness = kBrightness;
     std::vector<Instance> components;
 
     const Instance *Find(const std::wstring &instanceId) const;
