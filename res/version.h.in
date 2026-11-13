@@ -13,4 +13,8 @@
 #define ANIMELOGON_COMPANY       "@ANIMELOGON_COMPANY@"
 #define ANIMELOGON_COPYRIGHT     "@ANIMELOGON_COPYRIGHT@"
 
+// The program icon (res/animelogon.ico) in every executable. Explorer shows the icon group with the
+// lowest ID, so nothing else may use a lower one.
+#define ANIMELOGON_ICON_ID       1
+
 #endif

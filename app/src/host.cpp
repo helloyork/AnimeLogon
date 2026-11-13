@@ -162,6 +162,7 @@ bool Host::Create(int show) {
     wc.lpfnWndProc = Proc;
     wc.hInstance = GetModuleHandleW(nullptr);
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    wc.hIcon = LoadIconW(wc.hInstance, MAKEINTRESOURCEW(ANIMELOGON_ICON_ID));
     wc.hbrBackground = CreateSolidBrush(dark_ ? RGB(32, 32, 32) : RGB(243, 243, 243));
     wc.lpszClassName = kClass;
     if (!RegisterClassExW(&wc)) return false;
@@ -173,6 +174,7 @@ bool Host::Create(int show) {
     hwnd_ = CreateWindowExW(0, kClass, paths::Sandbox().empty() ? L"AnimeLogon" : L"AnimeLogon（沙盒）", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, w, h, nullptr,
                             nullptr, wc.hInstance, this);
     if (!hwnd_) return false;
+    SetIcons();
     const BOOL immersiveDark = dark_;
     DwmSetWindowAttribute(hwnd_, DWMWA_USE_IMMERSIVE_DARK_MODE, &immersiveDark, sizeof(immersiveDark));
     ShowWindow(hwnd_, show_);
@@ -201,6 +203,25 @@ LRESULT CALLBACK Host::Proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     return self ? self->Handle(msg, wp, lp) : DefWindowProcW(hwnd, msg, wp, lp);
 }
 
+// Gives the window icons loaded at the sizes its monitor's DPI calls for, so the title bar and the
+// taskbar use the drawing made for that size (the .ico has separate ones for 16 to 32 px) instead of
+// scaling the class icon. Runs again when the window moves to a monitor with another DPI; the icons it
+// replaces are its own, so it destroys them.
+void Host::SetIcons() {
+    const UINT dpi = GetDpiForWindow(hwnd_);
+    const HINSTANCE instance = GetModuleHandleW(nullptr);
+    auto set = [&](WPARAM which, int metric) {
+        const int size = GetSystemMetricsForDpi(metric, dpi);
+        auto *icon = static_cast<HICON>(LoadImageW(instance, MAKEINTRESOURCEW(ANIMELOGON_ICON_ID), IMAGE_ICON,
+                                                   size, size, LR_DEFAULTCOLOR));
+        if (!icon) return;
+        auto *old = reinterpret_cast<HICON>(SendMessageW(hwnd_, WM_SETICON, which, reinterpret_cast<LPARAM>(icon)));
+        if (old) DestroyIcon(old);
+    };
+    set(ICON_SMALL, SM_CXSMICON);
+    set(ICON_BIG, SM_CXICON);
+}
+
 LRESULT Host::Handle(UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
     case WM_SIZE:
@@ -216,6 +237,7 @@ LRESULT Host::Handle(UINT msg, WPARAM wp, LPARAM lp) {
         const RECT *r = reinterpret_cast<const RECT *>(lp);
         SetWindowPos(hwnd_, nullptr, r->left, r->top, r->right - r->left, r->bottom - r->top,
                      SWP_NOZORDER | SWP_NOACTIVATE);
+        SetIcons();
         return 0;
     }
     case WM_GETMINMAXINFO: {

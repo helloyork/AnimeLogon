@@ -1,3 +1,5 @@
+<img src="res/animelogon.svg" alt="" width="72">
+
 # AnimeLogon
 
 [![Build](https://github.com/helloyork/AnimeLogon/actions/workflows/build.yml/badge.svg?branch=develop)](https://github.com/helloyork/AnimeLogon/actions/workflows/build.yml)

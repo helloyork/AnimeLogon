@@ -37,6 +37,7 @@ private:
     LRESULT Handle(UINT msg, WPARAM wp, LPARAM lp);
     void StartWebView();
     void Fit();
+    void SetIcons();
 
     // --- talking to the page
     void Send(const json::Writer &message);
