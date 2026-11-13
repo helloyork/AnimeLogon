@@ -26,6 +26,9 @@ struct Battery {
     BatteryState state = BatteryState::None;  // None: no battery, or it could not be read
     int percent = -1;                         // 0..100, -1 when unknown
     int secondsLeft = -1;                     // while discharging; -1 when unknown
+    // On mains power: plugged in, or a machine with no battery at all (which runs on nothing
+    // else). False when running on the battery, and when Windows cannot tell.
+    bool mains = false;
 };
 
 enum class MediaState { None, Playing, Paused };

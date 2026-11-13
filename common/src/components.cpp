@@ -26,8 +26,9 @@ const wchar_t *const kPositions = LR"(
       <option value="bottom-right" label="右下"/>
     )";
 
-// The battery: its icon and charge, and while on battery roughly how long it will last.
-// Drawn only on a machine that has a battery.
+// The battery: its icon and charge, and while on battery roughly how long it will last. On a
+// machine with no battery, a plug and 交流电源 instead, unless that is switched off; nothing when
+// Windows cannot tell where the power comes from.
 std::string BatteryText() {
     return ToUtf8(std::wstring(LR"(<?xml version="1.0" encoding="utf-8"?>
 <component format="1" name="电量" author="AnimeLogon">
@@ -37,12 +38,15 @@ std::string BatteryText() {
     <font id="font" label="字体" detail="仅列出为所有用户安装的字体。" default=""/>
     <color id="color" label="颜色" default="#FFFFFF"/>
     <toggle id="remaining" label="剩余时间" detail="使用电池供电时，显示预计剩余使用时间。" default="on" on="0.8" off="0"/>
+    <toggle id="mains" label="无电池时显示电源状态" detail="在没有电池的设备上显示「交流电源」。" default="on" on="1" off="0"/>
   </settings>
-  <panel anchor="$position" size="$size" margin="4" when="battery.percent">
+  <panel anchor="$position" size="$size" margin="4" when="power.source">
     <line>
       <text label="电池图标" value="{battery.glyph}" font="Segoe Fluent Icons" color="$color" size="0.95"/>
-      <text value="{battery.percent}%" font="$font" weight="semibold" color="$color" space="0.3"/>
+      <text value="{battery.percent}%" when="battery.percent" font="$font" weight="semibold" color="$color" space="0.3"/>
       <text value="{battery.remaining}" when="battery.state=discharging" font="$font" color="$color" opacity="$remaining" size="0.8" space="0.45"/>
+      <text label="电源图标" value="&#xE95F;" when="battery.state=none" font="Segoe Fluent Icons" color="$color" opacity="$mains" size="0.95"/>
+      <text label="「交流电源」" value="交流电源" when="battery.state=none" font="$font" weight="semibold" color="$color" opacity="$mains" space="0.3"/>
     </line>
     <shadow label="阴影" blur="0.08" opacity="0.3" y="0.03"/>
   </panel>
@@ -50,7 +54,8 @@ std::string BatteryText() {
 )");
 }
 
-// What is playing in the signed-in person's session, on their own lock screen only.
+// What is playing in the signed-in person's session, on their own lock screen only. When nothing
+// is, nothing -- as Windows' own media controls go -- unless 未在播放 is switched on.
 std::string MediaText() {
     return ToUtf8(std::wstring(LR"(<?xml version="1.0" encoding="utf-8"?>
 <component format="1" name="正在播放" author="AnimeLogon">
@@ -59,11 +64,14 @@ std::string MediaText() {
     <number id="size" label="大小" detail="标题文字的字号，以屏幕高度的百分比计。" default="2.6" min="1.5" max="8" step="0.1"/>
     <font id="font" label="字体" detail="仅列出为所有用户安装的字体。" default=""/>
     <color id="color" label="颜色" default="#FFFFFF"/>
+    <toggle id="idle" label="无播放内容时显示提示" detail="没有正在播放的媒体时显示「未在播放」。" default="off" on="0.7" off="0"/>
   </settings>
-  <panel anchor="$position" size="$size" margin="5" when="media.title">
+  <panel anchor="$position" size="$size" margin="5">
     <line>
       <text label="播放状态图标" value="{media.glyph}" font="Segoe Fluent Icons" color="$color" size="0.7" opacity="0.85"/>
       <text value="{media.title}" font="$font" weight="semibold" color="$color" space="0.4"/>
+      <text label="提示图标" value="&#xEC4F;" when="!media.title" font="Segoe Fluent Icons" color="$color" opacity="$idle" size="0.7"/>
+      <text label="「未在播放」" value="未在播放" when="!media.title" font="$font" color="$color" opacity="$idle" space="0.4"/>
     </line>
     <line gap="0.3" when="media.artist">
       <text value="{media.artist}" font="$font" color="$color" opacity="0.8" size="0.8"/>

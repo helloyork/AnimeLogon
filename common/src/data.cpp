@@ -27,6 +27,9 @@ const std::vector<Variable> kVariables = {
     {L"battery.glyph", Kind::Text, Source::Battery, {}, L"电池图标"},
     {L"battery.level", Kind::Fraction, Source::Battery, {}, L"电量进度条"},
     {L"battery.state", Kind::State, Source::Battery, {L"none", L"charging", L"discharging", L"plugged"}, L""},
+    // Where the power comes from: the battery, or mains power (plugged in, or no battery at all);
+    // none when Windows cannot tell.
+    {L"power.source", Kind::State, Source::Battery, {L"none", L"battery", L"mains"}, L""},
     {L"media.title", Kind::Text, Source::Media, {}, L"标题"},
     {L"media.artist", Kind::Text, Source::Media, {}, L"艺术家"},
     {L"media.album", Kind::Text, Source::Media, {}, L"专辑"},
@@ -94,7 +97,10 @@ bool IsRemoved(wchar_t c) {
 Battery ReadBattery() {
     Battery b;
     SYSTEM_POWER_STATUS s{};
-    if (!GetSystemPowerStatus(&s) || s.BatteryFlag == 128 || s.BatteryFlag == 255) return b;
+    if (!GetSystemPowerStatus(&s)) return b;
+    // 128: there is no battery, so whatever ACLineStatus says, it runs on mains power.
+    b.mains = s.ACLineStatus == 1 || s.BatteryFlag == 128;
+    if (s.BatteryFlag == 128 || s.BatteryFlag == 255) return b;
     if (s.BatteryLifePercent <= 100) b.percent = s.BatteryLifePercent;
     if (s.BatteryFlag & 8) b.state = BatteryState::Charging;
     else if (s.ACLineStatus == 1) b.state = BatteryState::Plugged;
@@ -235,6 +241,8 @@ std::wstring StateOf(const std::wstring &name, const Context &context, const SYS
         }
         return L"none";
     }
+    if (name == L"power.source")
+        return s.battery.mains ? L"mains" : s.battery.state == BatteryState::Discharging ? L"battery" : L"none";
     if (name == L"media.state")
         return s.media.state == MediaState::Playing ? L"playing" : s.media.state == MediaState::Paused ? L"paused" : L"none";
     if (name == L"until.state") {

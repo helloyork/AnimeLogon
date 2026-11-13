@@ -673,6 +673,13 @@ bool Host::SceneFrame(const std::wstring &id, UINT width, UINT height, double ti
     w.EndArray(); *bounds=w.text(); return true;
 }
 
+data::Snapshot Host::LockData(bool *ready) {
+    data::Snapshot s;
+    s.battery = data::ReadBattery();
+    s.media = previewMedia_.Get(library_.settings().media, ready);
+    return s;
+}
+
 void Host::OnResource(ICoreWebView2WebResourceRequestedEventArgs *args) {
     ComPtr<ICoreWebView2WebResourceRequest> request;
     LPWSTR raw = nullptr;
@@ -759,9 +766,15 @@ void Host::OnResource(ICoreWebView2WebResourceRequestedEventArgs *args) {
     } else if (path.rfind(L"lock/", 0) == 0 && EndsWith(path, L"/entrance.json")) {
         // How each panel of a theme's visible components comes in, for the lock-screen preview
         // to play with one picture per panel (below): the same values the logon screen reads.
+        // `ready` is false until what is playing has been read, and the pictures would not yet
+        // show it: the page asks again. A panel of a component that shows what is playing is
+        // `live`: the page draws it again every second, as the logon screen moves its progress
+        // bar and follows a song starting, changing or stopping.
         const std::wstring id = path.substr(5, path.size() - 5 - 14);
+        bool ready = false;
+        LockData(&ready);
         json::Writer w;
-        w.BeginArray();
+        w.BeginObject().Member(L"ready", ready).Key(L"parts").BeginArray();
         if (library_.Entry(id) && library_.settings().components) {
             const theme::Theme t = library_.Edited(id);
             for (const theme::Instance &i : t.components) {
@@ -771,19 +784,21 @@ void Host::OnResource(ICoreWebView2WebResourceRequestedEventArgs *args) {
                 for (const auto &[key, value] : i.sets)
                     if (skin::Accepts(skin, key, value)) values[key] = value;
                 const skin::Resolved r = skin::Resolve(skin, values);
+                const std::vector<data::Source> sources = skin::SourcesOf(skin);
+                const bool live = std::find(sources.begin(), sources.end(), data::Source::Media) != sources.end();
                 for (size_t k = 0; k < r.panels.size(); ++k) {
-                    const skin::Panel &p = r.panels[k];
-                    const wchar_t *how = p.enter == skin::Enter::Rise   ? L"rise"
-                                         : p.enter == skin::Enter::Zoom ? L"zoom"
-                                         : p.enter == skin::Enter::None ? L"none"
+                    const skin::Panel &panel = r.panels[k];
+                    const wchar_t *how = panel.enter == skin::Enter::Rise   ? L"rise"
+                                         : panel.enter == skin::Enter::Zoom ? L"zoom"
+                                         : panel.enter == skin::Enter::None ? L"none"
                                                                         : L"fade";
                     w.BeginObject().Member(L"part", i.id + L".p" + std::to_wstring(k + 1)).Member(L"enter", how);
-                    w.Member(L"delay", (double)p.enterDelay).Member(L"duration", (double)p.enterDuration);
-                    w.Member(L"size", (double)p.size).EndObject();
+                    w.Member(L"delay", (double)panel.enterDelay).Member(L"duration", (double)panel.enterDuration);
+                    w.Member(L"size", (double)panel.size).Member(L"live", live).EndObject();
                 }
             }
         }
-        w.EndArray();
+        w.EndArray().EndObject();
         const std::string text = ToUtf8(w.text());
         body.assign(text.begin(), text.end());
         type = L"application/json";
@@ -798,7 +813,8 @@ void Host::OnResource(ICoreWebView2WebResourceRequestedEventArgs *args) {
             if (shaped) Shape(id, w, &h);
             const std::vector<Screen> wall = shaped ? Wall(w, h) : std::vector<Screen>();
             std::vector<Bound> placed;
-            if (pictures_.Theme(library_.Edited(id), w, h, Draw::ComponentsOnly, &p, &placed, &wall, part)) {
+            const data::Snapshot now = LockData(nullptr);
+            if (pictures_.Theme(library_.Edited(id), w, h, Draw::ComponentsOnly, &p, &placed, &wall, part, &now)) {
                 body = Png(p);
                 for (const Bound &b : placed)
                     if (b.holds) {
@@ -831,8 +847,9 @@ void Host::OnResource(ICoreWebView2WebResourceRequestedEventArgs *args) {
             if (shaped) Shape(id, w, &h);
             const std::vector<Screen> wall = shaped ? Wall(w, h) : std::vector<Screen>();
             const theme::Theme t = library_.Edited(id);
+            const data::Snapshot now = LockData(nullptr);
             if (pictures_.Theme(t, w, h, full && library_.settings().components ? Draw::Everything : Draw::WallpaperOnly, &p,
-                                nullptr, &wall))
+                                nullptr, &wall, L"", &now))
                 body = Bmp(p);
         }
         type = L"image/bmp";

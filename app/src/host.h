@@ -79,6 +79,10 @@ private:
     void Shape(const std::wstring &themeId, UINT width, UINT *height) const;
     bool SceneFrame(const std::wstring &id, UINT width, UINT height, double time, bool motion,
                     std::vector<uint8_t> *bytes, std::wstring *bounds);
+    // What the lock-screen preview draws components with, as this person's own lock screen would:
+    // the battery now, and what is playing in this session if settings.ini's `media` allows it.
+    // `ready` is false until what is playing has been read once (it is read on a thread of its own).
+    animelogon::data::Snapshot LockData(bool *ready);
     // Where the displays are in a picture `width` x `height` when spanning; empty otherwise.
     std::vector<Screen> Wall(UINT width, UINT height) const { return app::Wall(library_.settings(), monitors_, width, height); }
 
