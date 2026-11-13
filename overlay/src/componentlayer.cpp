@@ -71,6 +71,16 @@ bool ComponentLayer::Tick() {
     return changed;
 }
 
+void ComponentLayer::SetEntrance(float seconds) {
+    for (auto &view : views_) view->SetEntrance(seconds);
+}
+
+bool ComponentLayer::Entering() const {
+    for (const auto &view : views_)
+        if (view->Entering()) return true;
+    return false;
+}
+
 bool ComponentLayer::Draw(IDXGISurface *surface, UINT width, UINT height, size_t slot, const std::vector<size_t> &which,
                           float opacity) {
     if (which.empty()) return true;

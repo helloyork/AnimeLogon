@@ -101,6 +101,9 @@ std::vector<std::wstring> AdjustmentsOf(const Skin &skin, const std::wstring &se
 // --- the skin with its settings applied --------------------------------------------------
 
 enum class Align { Auto, Left, Center, Right };
+// How a panel comes in once the logon screen's wallpaper is up: fading in, rising a little while
+// it fades, growing a little while it fades, or at once.
+enum class Enter { Fade, Rise, Zoom, None };
 enum class Case { None, Upper, Lower };
 
 // A text, or a bar: what a line holds, in order.
@@ -148,6 +151,9 @@ struct Panel {
     uint32_t backdropColor = 0xFF000000;
     std::optional<data::Condition> when;
     data::Date until;  // what until.* counts down to
+    Enter enter = Enter::Fade;
+    float enterDelay = 0.0f;     // seconds after the wallpaper is up
+    float enterDuration = 0.4f;  // seconds
 };
 
 struct Resolved {

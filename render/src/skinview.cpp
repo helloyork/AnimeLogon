@@ -482,6 +482,25 @@ std::vector<SkinView::Bound> SkinView::Bounds(size_t slot) const {
     return out;
 }
 
+namespace {
+
+// How far in a panel is, 0 to 1, `seconds` after the wallpaper came up.
+float Arrived(const skin::Panel &panel, float seconds) {
+    if (seconds < 0.0f) return 1.0f;
+    const float t = seconds - panel.enterDelay;
+    if (panel.enter == skin::Enter::None || panel.enterDuration <= 0.0f) return t >= 0.0f ? 1.0f : 0.0f;
+    return std::clamp(t / panel.enterDuration, 0.0f, 1.0f);
+}
+
+}  // namespace
+
+bool SkinView::Entering() const {
+    if (entrance_ < 0.0f) return false;
+    for (const skin::Panel &p : skin_.panels)
+        if (Arrived(p, entrance_) < 1.0f) return true;
+    return false;
+}
+
 bool SkinView::Draw(ID2D1Bitmap1 *target, UINT width, UINT height, size_t slot, float opacity) {
     if (!dc_) return false;
     if (slot >= slots_.size()) slots_.resize(slot + 1);
@@ -500,41 +519,54 @@ bool SkinView::Draw(ID2D1Bitmap1 *target, UINT width, UINT height, size_t slot, 
     }
     dc_->SetTarget(target);
     dc_->BeginDraw();
-    bool layered = false;
-    if (opacity < 1.0f) {
-        // The layer covers only what the panels can touch: one the size of the target costs a
-        // full-screen blend per frame while the skin fades in.
+    // What panel i can touch: its text, its shadows and its backdrop. A layer covers only that: one
+    // the size of the target costs a full-screen blend per frame while a panel fades.
+    auto areaOf = [&](size_t i) {
         D2D1_RECT_F area = D2D1::RectF(FLT_MAX, FLT_MAX, -FLT_MAX, -FLT_MAX);
         auto add = [&](float left, float top, float right, float bottom) {
             area = D2D1::RectF(std::min(area.left, left), std::min(area.top, top), std::max(area.right, right),
                                std::max(area.bottom, bottom));
         };
-        for (size_t i = 0; i < s.panels.size(); ++i) {
-            const Built &b = s.panels[i];
-            if (!b.text) continue;
-            const D2D1_SIZE_U size = b.text->GetPixelSize();
-            add(b.at.x, b.at.y, b.at.x + (float)size.width, b.at.y + (float)size.height);
-            for (const skin::Shadow &sh : skin_.panels[i].shadows) {
-                const float x = b.at.x + std::round(sh.x * b.px), y = b.at.y + std::round(sh.y * b.px);
-                const float blur = std::ceil(3.0f * std::max(0.5f, sh.blur * b.px)) + 1.0f;
-                add(x - blur, y - blur, x + (float)size.width + blur, y + (float)size.height + blur);
-            }
-            if (b.backdrop) {
-                const D2D1_ELLIPSE &e = b.backdropArea;
-                add(e.point.x - e.radiusX, e.point.y - e.radiusY, e.point.x + e.radiusX, e.point.y + e.radiusY);
-            }
+        const Built &b = s.panels[i];
+        const D2D1_SIZE_U size = b.text->GetPixelSize();
+        add(b.at.x, b.at.y, b.at.x + (float)size.width, b.at.y + (float)size.height);
+        for (const skin::Shadow &sh : skin_.panels[i].shadows) {
+            const float x = b.at.x + std::round(sh.x * b.px), y = b.at.y + std::round(sh.y * b.px);
+            const float blur = std::ceil(3.0f * std::max(0.5f, sh.blur * b.px)) + 1.0f;
+            add(x - blur, y - blur, x + (float)size.width + blur, y + (float)size.height + blur);
         }
-        layered = area.right > area.left && area.bottom > area.top;  // else there is nothing to draw
-        if (layered)
-            dc_->PushLayer(D2D1::LayerParameters1(area, nullptr, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
-                                                  D2D1::IdentityMatrix(), std::max(0.0f, opacity)),
-                           nullptr);
-    }
+        if (b.backdrop) {
+            const D2D1_ELLIPSE &e = b.backdropArea;
+            add(e.point.x - e.radiusX, e.point.y - e.radiusY, e.point.x + e.radiusX, e.point.y + e.radiusY);
+        }
+        return area;
+    };
     for (size_t i = 0; i < s.panels.size(); ++i) {
         const Built &b = s.panels[i];
         if (!b.text) continue;
-        if (b.backdrop) dc_->FillEllipse(b.backdropArea, b.backdrop.Get());
         const skin::Panel &panel = skin_.panels[i];
+        // On its way in: faded (smoothly), and for rise and zoom also moved, easing out so that it
+        // settles rather than stops.
+        const float k = Arrived(panel, entrance_);
+        const float shown = opacity * (panel.enter == skin::Enter::None ? k : k * k * (3.0f - 2.0f * k));
+        if (shown <= 0.0f) continue;
+        const float eased = 1.0f - (1.0f - k) * (1.0f - k) * (1.0f - k);
+        const D2D1_RECT_F area = areaOf(i);
+        D2D1_MATRIX_3X2_F move = D2D1::IdentityMatrix();
+        if (k < 1.0f && panel.enter == skin::Enter::Rise) {
+            move = D2D1::Matrix3x2F::Translation(0.0f, std::round((1.0f - eased) * 0.35f * b.px));
+        } else if (k < 1.0f && panel.enter == skin::Enter::Zoom) {
+            const float scale = 0.9f + 0.1f * eased;
+            move = D2D1::Matrix3x2F::Scale(scale, scale,
+                                           D2D1::Point2F((area.left + area.right) / 2.0f, (area.top + area.bottom) / 2.0f));
+        }
+        dc_->SetTransform(move);
+        const bool layered = shown < 1.0f && area.right > area.left && area.bottom > area.top;
+        if (layered)
+            dc_->PushLayer(D2D1::LayerParameters1(area, nullptr, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+                                                  D2D1::IdentityMatrix(), shown),
+                           nullptr);
+        if (b.backdrop) dc_->FillEllipse(b.backdropArea, b.backdrop.Get());
         for (size_t k = 0; k < panel.shadows.size() && k < shadows_.size(); ++k) {
             const skin::Shadow &sh = panel.shadows[k];
             ID2D1Effect *effect = shadows_[k].Get();
@@ -545,8 +577,9 @@ bool SkinView::Draw(ID2D1Bitmap1 *target, UINT width, UINT height, size_t slot, 
             dc_->DrawImage(effect, D2D1::Point2F(b.at.x + std::round(sh.x * b.px), b.at.y + std::round(sh.y * b.px)));
         }
         dc_->DrawImage(b.text.Get(), b.at);
+        if (layered) dc_->PopLayer();
+        dc_->SetTransform(D2D1::IdentityMatrix());
     }
-    if (layered) dc_->PopLayer();
     const HRESULT hr = dc_->EndDraw();
     dc_->SetTarget(nullptr);
     return SUCCEEDED(hr);

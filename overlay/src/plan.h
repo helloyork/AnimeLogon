@@ -68,6 +68,10 @@ struct Display {
 struct Plan {
     std::vector<Display> displays;  // in EnumerateMonitors' order, the primary display first
     animelogon::ComponentDisplays componentDisplays = animelogon::ComponentDisplays::Auto;
+    // How every display gives way when woken: as the primary display's theme says, since a wake
+    // anywhere takes all of them away together.
+    animelogon::WakeStyle wake = animelogon::WakeStyle::Fade;
+    float wakeSeconds = animelogon::kWakeSeconds;
     std::vector<std::wstring> problems;  // what ResolveTheme replaced or dropped, for the log
 };
 

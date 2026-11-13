@@ -5,10 +5,112 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { SceneFrames, WallpaperVideo } from '../media';
 import { calm } from '../motion';
-import { layerUrl, lockUrl } from '../native';
+import { lockUrl, ORIGIN } from '../native';
 import { motion } from '../preview';
 import { setState, shapeOf, themeOf, useStore } from '../store';
 import { Button } from '../ui/controls';
+
+// What Windows 11 shows once the lock screen has gone, drawn after its own layout at 1920 x 1080
+// and scaled with the display (sizes are in cqh of the frame): the wallpaper blurred and darkened
+// as Windows does behind the password box, the account picture, the name, the PIN box and its two
+// links, and the network, accessibility and power buttons in the corner. It is a sketch: nothing
+// in it can be typed into.
+function SignIn({ still }: { still: string }) {
+  const { env } = useStore();
+  return (
+    <div className="lock-signin" aria-hidden="true">
+      <img className="lock-blur" src={still} alt="" />
+      <div className="lock-box">
+        {env.accountPicture ? (
+          <img className="lock-avatar" src={ORIGIN + 'account'} alt="" />
+        ) : (
+          <svg className="lock-avatar" viewBox="0 0 100 100">
+            <circle cx="50" cy="50" r="50" fill="rgba(255,255,255,.22)" />
+            <circle cx="50" cy="39" r="17" fill="#fff" />
+            <path d="M18 84c4-17 17-26 32-26s28 9 32 26a50 50 0 0 1-64 0z" fill="#fff" />
+          </svg>
+        )}
+        <div className="lock-name">{env.user || '用户'}</div>
+        <div className="lock-pin"><span>PIN</span></div>
+        <div className="lock-link">我忘记了我的 PIN</div>
+        <div className="lock-link">登录选项</div>
+      </div>
+      <div className="lock-tray">
+        <span>{''}</span>
+        <span>{''}</span>
+        <span>{''}</span>
+      </div>
+    </div>
+  );
+}
+
+// One panel of a component on its way in, as the logon screen brings it: its picture alone over
+// nothing, where it is (fractions of the frame), and its entrance as the component says.
+interface Entering {
+  part: string;
+  enter: 'fade' | 'rise' | 'zoom' | 'none';
+  delay: number;
+  duration: number;
+  size: number;  // the panel's em, in percent of the display's height
+  url: string;
+  box: number[];
+}
+
+// Each visible panel's picture and entrance, fetched and decoded before anything comes in, so that
+// none of them is late. Null until then.
+function useEntering(id: string, query: string) {
+  const [parts, setParts] = useState<Entering[] | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const urls: string[] = [];
+    setParts(null);
+    (async () => {
+      const list: Omit<Entering, 'url' | 'box'>[] = await fetch(`${ORIGIN}lock/${id}/entrance.json?${query}`).then(r => r.json()).catch(() => []);
+      const out: Entering[] = [];
+      for (const e of list) {
+        try {
+          const r = await fetch(`${ORIGIN}lock/${id}/part/${e.part}.png?${query}`);
+          if (!r.ok) continue;
+          const url = URL.createObjectURL(await r.blob());
+          urls.push(url);
+          const img = new Image();
+          img.src = url;
+          await img.decode();
+          out.push({ ...e, url, box: (r.headers.get('X-Part-Box') || '0,0,1,1').split(',').map(Number) });
+        } catch { /* a panel that cannot be drawn is left out, as the logon screen leaves it out */ }
+      }
+      if (alive) setParts(out);
+    })();
+    return () => {
+      alive = false;
+      urls.forEach(u => URL.revokeObjectURL(u));
+    };
+  }, [id, query]);
+  return parts;
+}
+
+// A panel's picture: hidden and, for rise and zoom, set back until `go`; then it comes in after its
+// delay, over its duration, as SkinView draws it on the logon screen (opacity eased in and out, the
+// motion easing out: 0.35 em up, or from 90 % of its size). When the screen is woken it leaves with
+// the rest.
+function EnteringPart({ p, go, woke, leave }: { p: Entering; go: boolean; woke: boolean; leave: number }) {
+  const still = calm() || p.enter === 'none';
+  const away = p.enter === 'rise' ? `translateY(${(0.35 * p.size).toFixed(3)}cqh)` : p.enter === 'zoom' ? 'scale(.9)' : 'none';
+  const [x0, y0, x1, y1] = p.box;
+  const style: CSSProperties = {
+    opacity: go && !woke ? 1 : 0,
+    transform: go || still ? 'none' : away,
+    transformOrigin: `${(((x0 + x1) / 2) * 100).toFixed(2)}% ${(((y0 + y1) / 2) * 100).toFixed(2)}%`,
+    transition: woke
+      ? `opacity ${leave}s ease`
+      : !go
+        ? 'none'
+        : still
+          ? `opacity 0s linear ${calm() ? 0 : p.delay}s`
+          : `opacity ${p.duration}s ease-in-out ${p.delay}s, transform ${p.duration}s cubic-bezier(.33, 1, .68, 1) ${p.delay}s`,
+  };
+  return <img className="lock-fill" src={p.url} style={style} alt="" />;
+}
 
 export function LockPreview({ theme: id, ratio }: { theme: string; ratio?: number }) {
   const s = useStore();
@@ -21,17 +123,18 @@ export function LockPreview({ theme: id, ratio }: { theme: string; ratio?: numbe
   const video = !!t && t.wallpaperKind === 'video' && motion();
   const scene = !!t && t.wallpaperKind === 'scene';
   const [started, setStarted] = useState(!(video || scene));
-  const [loaded, setLoaded] = useState(false);
-  const [componentsIn, setComponentsIn] = useState(false);
   const [woke, setWoke] = useState(false);
-  const close = () => setState({ lock: null });
-
-  // As the logon screen does: the components come in a moment after the wallpaper is moving.
+  const parts = useEntering(id, query);
+  // As the logon screen does: the components start coming in once the wallpaper is up (moving,
+  // for a video or a scene), each after its own delay. A frame later, so that each picture is
+  // first drawn where it starts from.
+  const [go, setGo] = useState(false);
   useEffect(() => {
-    if (!loaded || !started || woke) return;
-    const timer = window.setTimeout(() => setComponentsIn(true), 300);
-    return () => clearTimeout(timer);
-  }, [loaded, started, woke]);
+    if (!parts || !started || go) return;
+    const frame = requestAnimationFrame(() => requestAnimationFrame(() => setGo(true)));
+    return () => cancelAnimationFrame(frame);
+  }, [parts, started, go]);
+  const close = () => setState({ lock: null });
 
   useEffect(() => {
     root.current?.focus();
@@ -48,31 +151,35 @@ export function LockPreview({ theme: id, ratio }: { theme: string; ratio?: numbe
 
   if (!t) return null;
   const fade = (on: boolean, seconds: number): CSSProperties => ({ opacity: on ? 1 : 0, transition: calm() ? 'none' : `opacity ${seconds}s ease` });
+  // Woken, everything over the sign-in screen leaves together as the theme's wake transition says,
+  // the way the logon screen moves its windows: fading, growing as it fades, sliding up, or at once.
+  const wake = calm() ? 'cut' : t.wake, leave = wake === 'cut' ? 0 : t.wakeSeconds;
+  const leaving: CSSProperties = !woke
+    ? {}
+    : wake === 'slide'
+      ? { transform: 'translateY(-100%)', transition: `transform ${leave}s ease-in-out` }
+      : wake === 'zoom'
+        ? { transform: 'scale(1.08)', opacity: 0, transition: `transform ${leave}s cubic-bezier(.33, 1, .68, 1), opacity ${leave}s ease-in-out` }
+        : { opacity: 0, transition: wake === 'cut' ? 'none' : `opacity ${leave}s linear` };
   return (
     <div ref={root} className="lock" role="dialog" aria-label="锁屏预览" tabIndex={-1} onPointerDown={() => setWoke(true)}>
       <div className="lock-frame" style={{ width: `min(100vw, ${(100 * aspect).toFixed(2)}vh)`, height: `min(100vh, ${(100 / aspect).toFixed(2)}vw)` }}>
-        <div className="lock-signin">
-          <img className="lock-blur" src={lockUrl(id, 'still', query)} alt="" />
-          <div className="lock-box">
-            <div className="lock-avatar">A</div>
-            <div className="lock-name">用户</div>
-            <div className="lock-pin">PIN</div>
-            <div className="lock-note">Windows 登录界面（示意）</div>
-          </div>
+        <SignIn still={lockUrl(id, 'still', query)} />
+
+        <div className="lock-fill" style={leaving}>
+          <img className="lock-fill" src={lockUrl(id, 'still', query)} alt="" />
+          {video && (
+            <WallpaperVideo wallpaper={t.wallpaperRef} fit={t.fit} fade={false} onPlaying={() => setStarted(true)}
+              style={fade(started, 0)} />
+          )}
+          {scene && (
+            <SceneFrames theme={id} width={w} height={ratio ? h : 0} moving={motion() && !t.sceneStatic} onFrame={() => setStarted(true)}
+              style={fade(started, 0)} />
+          )}
+          {parts?.map(p => <EnteringPart key={p.part} p={p} go={go} woke={false} leave={0} />)}
         </div>
-        <img className="lock-fill" style={fade(!woke, 0.5)} src={lockUrl(id, 'still', query)} alt="" />
-        {video && (
-          <WallpaperVideo wallpaper={t.wallpaperRef} fit={t.fit} fade={false} onPlaying={() => setStarted(true)}
-            style={{ ...fade(started && !woke, woke ? 0.5 : 0) }} />
-        )}
-        {scene && (
-          <SceneFrames theme={id} width={w} height={ratio ? h : 0} moving={motion() && !t.sceneStatic} onFrame={() => setStarted(true)}
-            style={fade(started && !woke, woke ? 0.5 : 0)} />
-        )}
-        <img className="lock-fill" style={fade(componentsIn && !woke, woke ? 0.5 : 0.4)} onLoad={() => setLoaded(true)}
-          src={video || scene ? layerUrl(id, t.revision, w, s.tick, ratio ? h : 0) : lockUrl(id, 'full', query)} alt="" />
       </div>
-      <div className="lock-hint">{woke ? '之后是 Windows 的登录界面' : '按任意键或单击，模拟唤醒'}</div>
+      <div className="lock-hint">{woke ? '这里是 Windows 的登录界面（示意）' : '按任意键或单击，模拟唤醒'}</div>
       <Button size="sm" className="lock-exit" onPointerDown={e => e.stopPropagation()} onClick={close}>退出预览 (Esc)</Button>
     </div>
   );

@@ -233,7 +233,10 @@ bool Pictures::Wallpaper(const std::wstring &ref, Scaling fit, UINT width, UINT 
 }
 
 bool Pictures::Theme(const theme::Theme &theme, UINT width, UINT height, Draw draw, Picture *out,
-                     std::vector<Bound> *bounds, const std::vector<Screen> *screens) {
+                     std::vector<Bound> *bounds, const std::vector<Screen> *screens, const std::wstring &only) {
+    const size_t dot = only.find(L'.');
+    const std::wstring onlyInstance = only.substr(0, dot);
+    const size_t onlyPanel = dot == std::wstring::npos ? 0 : (size_t)_wtoi(only.c_str() + dot + 2);
     if (!width || !height) return false;
     Picture drawn;
     if (draw == Draw::ComponentsOnly) drawn = Clear(width, height);
@@ -259,14 +262,20 @@ bool Pictures::Theme(const theme::Theme &theme, UINT width, UINT height, Draw dr
             Picture part = whole ? std::move(drawn) : Crop(drawn, r);
             for (const theme::Instance &i : theme.components) {
                 skin::Skin skin;
-                if (!i.visible || !library_.LoadSkin(i.ref, &skin)) continue;
+                if (!i.visible || (!only.empty() && i.id != onlyInstance) || !library_.LoadSkin(i.ref, &skin)) continue;
                 // Only the values the component takes, as the logon screen resolves them.
                 skin::Values values;
                 for (const auto &[key, value] : i.sets)
                     if (skin::Accepts(skin, key, value)) values[key] = value;
+                skin::Resolved resolved = skin::Resolve(skin, values);
+                if (!only.empty()) {
+                    if (!onlyPanel || onlyPanel > resolved.panels.size()) continue;
+                    skin::Panel alone = std::move(resolved.panels[onlyPanel - 1]);
+                    resolved.panels.assign(1, std::move(alone));
+                }
                 Picture next;
                 std::vector<SkinView::Bound> placed;
-                if (!preview_.Render(part, skin::Resolve(skin, values), library_.settings().clock, format, now, &next,
+                if (!preview_.Render(part, resolved, library_.settings().clock, format, now, &next,
                                      bounds ? &placed : nullptr, draw == Draw::ComponentsOnly, &sample))
                     continue;
                 part = std::move(next);

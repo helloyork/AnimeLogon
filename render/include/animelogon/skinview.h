@@ -37,6 +37,13 @@ public:
     // cache per display.
     bool Draw(ID2D1Bitmap1 *target, UINT width, UINT height, size_t slot, float opacity = 1.0f);
 
+    // The logon screen brings each panel in as its `enter`, `enter-delay` and `enter-duration`
+    // say, counted from the moment the wallpaper is up: `seconds` is how long ago that was.
+    // Negative (the default, and what previews use) draws every panel in place.
+    void SetEntrance(float seconds) { entrance_ = seconds; }
+    // Whether some panel is still on its way in at the time last set.
+    bool Entering() const;
+
     ID2D1DeviceContext *context() const { return dc_.Get(); }
 
     // Where each panel and text was last drawn in `slot`, in the target's pixels, named as
@@ -93,6 +100,7 @@ private:
     // Panel, line, text: the words, or for a bar its fraction; empty where nothing is drawn.
     std::vector<std::vector<std::vector<std::wstring>>> words_;
     unsigned version_ = 0;
+    float entrance_ = -1.0f;
     SYSTEMTIME shown_{};
     data::Snapshot data_;
     unsigned dataVersion_ = 0, dataShown_ = 0;

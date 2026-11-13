@@ -52,8 +52,6 @@ namespace {
 constexpr wchar_t kWindowClass[] = L"AnimeLogonOverlay";
 constexpr int kRescueHotkeyId = 0xA10E;  // Ctrl+Alt+F11
 constexpr float kFadeSeconds = 0.5f;
-// The components fade in once the wallpaper is up.
-constexpr float kClockFadeInSeconds = 0.4f;
 // How long after the compositor's frame the next picture is drawn: right after one frame
 // leaves nearly a whole frame of slack for the next, which a late wake-up would not.
 constexpr double kAfterComposeSeconds = 0.001;
@@ -782,14 +780,28 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
             t = (double)(screen::AwakeMs() - clockStart - dark) / 1000.0;
         }
 
-        float opacity = 1.0f;
+        // Woken: the screen gives way to the sign-in screen as the primary display's theme says
+        // (plan.h): fading, growing as it fades, sliding up off the display, or at once.
+        float opacity = 1.0f, leaveScale = 1.0f, leaveRise = 0.0f;
         if (g_overlay.woke) {
-            const float k = (float)(now - g_overlay.fadeStart) / 1000.0f / kFadeSeconds;
-            opacity = k >= 1.0f ? 0.0f : 1.0f - k;
-            if (k >= 1.0f) {  // faded out: hand the screen back and park
+            const float seconds = plan.wake == animelogon::WakeStyle::Cut ? 0.0f : plan.wakeSeconds;
+            const float k = seconds > 0.0f ? (float)(now - g_overlay.fadeStart) / 1000.0f / seconds : 1.0f;
+            const float c = std::min(k, 1.0f), smooth = c * c * (3.0f - 2.0f * c);
+            switch (plan.wake) {
+            case animelogon::WakeStyle::Zoom:
+                opacity = 1.0f - smooth;
+                leaveScale = 1.0f + 0.08f * (1.0f - (1.0f - c) * (1.0f - c) * (1.0f - c));
+                break;
+            case animelogon::WakeStyle::Slide: leaveRise = -smooth; break;
+            case animelogon::WakeStyle::Cut: opacity = 0.0f; break;
+            default: opacity = 1.0f - c; break;
+            }
+            if (k >= 1.0f) {  // gone: hand the screen back and park
+                opacity = 0.0f;
                 done = true;
                 end = LiveEnd::Dismissed;
             }
+            presenter.SetLeave(leaveScale, leaveRise);
         }
         if (!opt.windowed) g_otherDisplays.Live(g_overlay.woke, WakeProgress(now));
 
@@ -821,9 +833,11 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
             fresh = scenes.Tick(sceneInputs,draw,(float)(1/refresh)) || fresh;
             if (!track.empty() && scenes.Static(track)) { audio.FadeOut(.2f); track.clear(); }
             if (componentsFading) {
-                const float k = std::min(1.0f, (float)(now - start) / 1000.0f / kClockFadeInSeconds);
-                componentsFading = k < 1.0f;
-                presenter.SetComponentOpacity(k * k * (3.0f - 2.0f * k));
+                // Each panel comes in as its component says (enter, enter-delay, enter-duration),
+                // counted from the first tick with the wallpaper up.
+                layer.SetEntrance((float)(now - start) / 1000.0f);
+                componentsFading = layer.Entering();
+                presenter.SetComponentOpacity(1.0f);
             }
             bool ready = true, changed = false, firstFresh = false;
             const std::vector<Presenter::Picture> pictures = compose(t, &ready, &changed, &firstFresh);

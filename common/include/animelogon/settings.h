@@ -31,6 +31,16 @@ enum class Scaling {
     Stretch,  // fill the display, ignoring the aspect ratio
 };
 
+// How the logon screen gives way to Windows' sign-in screen when it is woken: a theme's wake
+// transition, over its duration in seconds (kWakeSeconds, between kWakeSecondsMin and Max).
+enum class WakeStyle {
+    Fade,   // fades out
+    Zoom,   // grows a little as it fades
+    Slide,  // slides up off the display, as Windows' own lock screen does
+    Cut,    // goes at once
+};
+constexpr float kWakeSeconds = 0.5f, kWakeSecondsMin = 0.1f, kWakeSecondsMax = 2.0f;
+
 // Which displays components are drawn on. Auto is the display Windows puts its password box on.
 enum class ComponentDisplays { Auto, Primary, All };
 
@@ -66,6 +76,8 @@ struct InstanceOverrides {
 struct ThemeOverrides {
     std::optional<std::wstring> wallpaper;  // a wallpaper id, "default" or "none"
     std::optional<Scaling> fit;
+    std::optional<WakeStyle> wake;     // theme.<theme id>.wake
+    std::optional<float> wakeSeconds;  // theme.<theme id>.wake-duration
     skin::Values wallpaperValues;  // scene settings and pN layer adjustments
     std::map<std::wstring, InstanceOverrides> instances;  // by instance id
 };
@@ -117,6 +129,10 @@ bool IsTypedValueText(std::wstring_view value);
 const wchar_t *ToString(MonitorMode mode);
 const wchar_t *ToString(Scaling scaling);
 bool Parse(std::wstring_view text, Scaling *out);  // fill, fit or stretch
+const wchar_t *ToString(WakeStyle style);
+bool Parse(std::wstring_view text, WakeStyle *out);  // fade, zoom, slide or cut
+// A wake transition's duration in seconds, within its range.
+bool ParseWakeSeconds(std::wstring_view text, float *out);
 const wchar_t *ToString(ComponentDisplays displays);
 bool Parse(std::wstring_view text, ComponentDisplays *out);  // auto, primary or all
 const wchar_t *ToString(OtherDisplays displays);
