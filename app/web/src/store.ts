@@ -8,7 +8,7 @@ import { listen, send } from './native';
 import { onPreview, pv, requestPreviewAgain, resetPreview } from './preview';
 import type { Environment, FromNative, ImportKind, Instance, Library, OpenTheme, SceneControls, Workshop } from './types';
 
-export type Tab = 'mine' | 'settings';
+export type Tab = 'mine' | 'discover' | 'settings';
 
 export interface Selection {
   inst: string | null;  // an instance id, or 'wallpaper' for a scene's layers
@@ -53,7 +53,7 @@ export interface State {
 }
 
 let state: State = {
-  env: { on: false, installed: false, setupPending: false, others: [], version: '', user: '', accountPicture: false, lang: '', langChoice: '', wallpaperEngine: false, importable: { video: [], picture: [], package: [] }, monitors: [], fonts: [], devices: [] },
+  env: { on: false, installed: false, setupPending: false, others: [], version: '', user: '', accountPicture: false, lang: '', langChoice: '', wallpaperEngine: false, steam: false, importable: { video: [], picture: [], package: [] }, monitors: [], fonts: [], devices: [] },
   lib: null,
   open: null,
   clock: '',
@@ -178,11 +178,11 @@ export function select(inst: string | null, part: string | null = null) {
 }
 // Back, as a window's back button, Alt+Left or the mouse's back button go: up one level of where one
 // is (a part to its component, a component to the theme's list), out of a theme's page to the
-// library, and from the settings back to the page left for them. Nothing while a dialog or the
+// library, and from the settings or the discover page back to the page left for them. Nothing while a dialog or the
 // lock-screen preview is over the page: Esc closes those.
 export function goBack() {
   if (state.dialogs.length || state.lock || state.setup) return;
-  if (state.tab === 'settings') return setTab('mine');
+  if (state.tab === 'settings' || state.tab === 'discover') return setTab('mine');
   if (state.view !== 'theme') return;
   const { inst, part } = state.sel;
   if (part) return select(inst === 'wallpaper' ? null : inst, null);

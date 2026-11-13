@@ -1,0 +1,188 @@
+/* 发现, the Steam Workshop (src/steam/DiscoverPage.tsx): the search, sort and filters across the top,
+   then the results, which scroll, beside the item chosen, which scrolls on its own. */
+.discover { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+
+.disc-head {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  padding: var(--s4) var(--s6) var(--s3);
+  border-bottom: 1px solid var(--border);
+}
+.disc-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); min-width: 0; }
+.disc-search { flex: 0 1 320px; gap: 6px; }
+.disc-search svg { flex: none; color: var(--text-3); }
+.disc-search input::-webkit-search-cancel-button { cursor: pointer; }
+.select.disc-sort { width: 136px; min-width: 0; }
+.select.disc-days { width: 128px; min-width: 0; }
+.select.disc-type, .select.disc-res { width: 128px; min-width: 0; }
+.disc-steam { margin-left: auto; }
+.disc-sep { width: 1px; height: 20px; margin: 0 var(--s2); background: var(--border-strong); }
+
+/* A filter that stays pressed. */
+.btn.toggle[aria-pressed=true] { background: var(--surface-hover); border-color: var(--accent); }
+.btn.toggle > svg { width: 12px; height: 12px; }
+
+/* Mature content: the switch, what it does, and why it starts off. */
+.disc-mature { display: flex; align-items: center; gap: var(--s2); min-width: 0; font-size: 13px; line-height: 20px; cursor: pointer; }
+.disc-mature-text { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: var(--s2); min-width: 0; }
+
+.disc-body { position: relative; flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+.disc-body.with-detail { grid-template-columns: minmax(0, 1fr) 380px; }
+.disc-results { min-height: 0; padding: var(--s5) var(--s6) var(--s8); }
+.disc-count { margin-bottom: var(--s3); }
+
+.disc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: var(--s5) var(--s4); }
+.dcard-cell { min-width: 0; }
+.dcard {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 13px;
+  line-height: 20px;
+  text-align: left;
+  cursor: pointer;
+}
+.dcard:focus-visible { outline: none; }
+.dname { color: var(--text-1); font-size: 14px; }
+.dpic {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  aspect-ratio: 16 / 9;
+  margin-bottom: 6px;
+  border-radius: var(--r-md);
+  background: var(--surface-3);
+}
+.dpic > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.dpic::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px var(--border);
+  pointer-events: none;
+  transition: box-shadow .12s;
+}
+.dcard:hover .dpic::after { box-shadow: inset 0 0 0 1px var(--border-strong); }
+.dcard.on .dpic,
+.dcard:focus-visible .dpic { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* No preview, or one that could not be fetched. */
+.dpic-none { position: absolute; inset: 0; display: grid; place-items: center; color: var(--text-3); background: var(--surface-3); }
+/* Shown only while mature content is: what this one is marked as. */
+.dbadge {
+  position: absolute;
+  left: 6px;
+  top: 6px;
+  padding: 0 6px;
+  border-radius: var(--r-xs);
+  background: rgba(20, 20, 22, .72);
+  color: #fff;
+  font-size: 12px;
+  line-height: 20px;
+}
+/* While the first page comes. */
+.dcard.ghost { cursor: default; }
+.dline { display: block; width: 60%; height: 12px; margin-top: 4px; border-radius: var(--r-xs); background: var(--surface-3); }
+
+.disc-end { display: flex; align-items: center; justify-content: center; gap: var(--s3); min-height: 56px; padding-top: var(--s5); }
+
+/* Steam cannot be used, nothing matched, or the query failed: what it is and what to do. */
+.disc-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s2);
+  max-width: 440px;
+  margin: var(--s12) auto;
+  text-align: center;
+}
+.disc-state-acts { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--s2); margin-top: var(--s3); }
+
+/* The item chosen. */
+.disc-detail { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-left: 1px solid var(--border); background: var(--surface-1); }
+.dd-scroll { display: flex; flex-direction: column; gap: var(--s3); min-height: 0; overflow-y: auto; padding: var(--s3) var(--s5) var(--s6); }
+/* Each part keeps its height; the pane scrolls instead. */
+.dd-scroll > * { flex: none; }
+.dd-top { display: flex; justify-content: flex-end; margin-right: -8px; }
+.dd-pic { position: relative; flex: none; overflow: hidden; aspect-ratio: 16 / 9; border-radius: var(--r-md); background: var(--surface-3); }
+.dd-pic > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.dd-pic::after { content: ""; position: absolute; inset: 0; border-radius: inherit; box-shadow: inset 0 0 0 1px var(--border); pointer-events: none; }
+.dd-title { margin-top: var(--s1); font: 600 16px/24px var(--font); overflow-wrap: anywhere; }
+.dd-title + .t-cap { margin-top: calc(-1 * var(--s2)); }
+.dd-acts { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); margin-top: var(--s1); }
+.dd-progress { display: flex; align-items: center; gap: var(--s2); }
+.dd-steam { align-self: flex-start; font-size: 13px; }
+.dd-problem { display: flex; align-items: flex-start; gap: 6px; }
+.dd-problem > svg { flex: none; margin-top: 1px; color: var(--warn); }
+.dd-facts { margin-top: var(--s1); }
+.dd-text { color: var(--text-2); font-size: 13px; line-height: 20px; white-space: pre-line; overflow-wrap: anywhere; }
+.dd-text ul, .dd-text ol { margin: 0; padding-left: 20px; white-space: normal; }
+.dd-text li { white-space: pre-line; }
+.dd-text blockquote { margin: 0; padding-left: var(--s3); border-left: 2px solid var(--border-strong); }
+.dd-text code { font-family: var(--font-mono); font-size: 12px; }
+.dd-text hr { margin: var(--s2) 0; border: 0; border-top: 1px solid var(--border); }
+.bb-h { display: block; color: var(--text-1); font-weight: 600; }
+
+/* The library's 创意工坊 tab (src/steam/WorkshopShelf.tsx). */
+.subtabs { display: flex; gap: 2px; margin-left: -12px; }
+.subtabs button {
+  height: 32px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-2);
+  font: 600 16px/24px var(--font);
+  cursor: pointer;
+}
+.subtabs button:hover { color: var(--text-1); }
+.subtabs button.on { color: var(--text-1); background: var(--surface-3); }
+.shelf .notice { margin-bottom: var(--s4); }
+.shelf-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s3); margin-bottom: var(--s4); }
+.shelf-bar .actions { display: flex; gap: var(--s2); margin-left: auto; }
+.shelf-empty { display: flex; flex-direction: column; align-items: flex-start; gap: var(--s3); padding: var(--s4) 0; }
+.shelf-note { padding: var(--s4) 0; }
+.shelf-problem { color: var(--warn); }
+.tcard .hit.still { cursor: default; }
+.tcard.picked .thumb { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tcard .over.top { align-items: flex-start; justify-content: flex-start; }
+/* The box an item is chosen by, in the picture's corner: shown while pointed at and once chosen. */
+.pick {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-xs);
+  background: rgba(20, 20, 22, .55);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .7);
+  color: var(--on-accent);
+  opacity: 0;
+  transition: opacity .12s;
+}
+button.pick { pointer-events: auto; cursor: pointer; }
+.tcard:hover .pick,
+.tcard:focus-within .pick,
+.pick.on { opacity: 1; }
+.pick.on { background: var(--accent); box-shadow: none; }
+
+/* Too narrow for both: the item chosen comes over the results. */
+@media (max-width: 900px) {
+  .disc-head { padding: var(--s3) var(--s5); }
+  .disc-search { flex: 1 1 200px; }
+  .disc-results { padding: var(--s4) var(--s5) var(--s8); }
+  .disc-body.with-detail { grid-template-columns: minmax(0, 1fr); }
+  .disc-detail { position: absolute; top: 0; right: 0; bottom: 0; z-index: 2; width: min(380px, 100%); box-shadow: var(--shadow-pop); }
+  .disc-sep { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dpic::after, .pick { transition: none; }
+}

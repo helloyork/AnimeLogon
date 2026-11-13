@@ -332,6 +332,7 @@ bool Host::Create(int show, const std::wstring &reveal) {
     }
     ShowWindow(hwnd_, show_);
     UpdateWindow(hwnd_);
+    StartSteam();
     StartWebView();
     SetTimer(hwnd_,1,500,nullptr);
     // Opening the app brings the icon back, after "退出" in its menu too.
@@ -437,6 +438,9 @@ LRESULT Host::Handle(UINT msg, WPARAM wp, LPARAM lp) {
     case kWorkshopFound:
         FoundWorkshop();
         return 0;
+    case kSteamLines:
+        OnSteamLines();
+        return 0;
     case kPageMessage:
         if (!inbox_.empty()) {
             const json::Value m = std::move(inbox_.front());
@@ -451,6 +455,7 @@ LRESULT Host::Handle(UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     case WM_DESTROY:
         scenePreviews_.clear(); KillTimer(hwnd_,1);
+        StopSteam();
         if (controller_) controller_->Close();
         PostQuitMessage(0);
         return 0;
@@ -534,6 +539,7 @@ void Host::StartWebView() {
                                                COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_DENY_CORS)))
                                            ALOG(L"WebView2: %s cannot be mapped; its wallpapers show without previews",
                                                 workshopFolders_[i].path.c_str());
+                                   MapSteamFixture(view_.Get());
                                    EventRegistrationToken token{};
                                    view_->AddWebResourceRequestedFilter((std::wstring(kOrigin) + L"*").c_str(),
                                                                         COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL);
@@ -677,6 +683,8 @@ void Host::SendEnvironment() {
     w.Member(L"user", AccountName()).Member(L"accountPicture", !AccountPicture().empty());
     // Whether there are Wallpaper Engine wallpapers to offer; the page asks for them when it shows them.
     w.Member(L"wallpaperEngine", !workshopFolders_.empty());
+    // The Steam edition, with the Steam Workshop: the discover page and the Workshop's themes.
+    w.Member(L"steam", steam_ != nullptr);
     // The file types each kind of import takes, which the page lists where it asks for the kind.
     w.Key(L"importable").BeginObject();
     Extensions(w, L"video", importable::kVideos);
@@ -1083,6 +1091,7 @@ void Host::OnMessage(const json::Value &m) {
         return;
     }
     const std::wstring op = m[L"op"].Str();
+    if (op.rfind(L"steam", 0) == 0 && OnSteamMessage(op, m)) return;
     const int seq = (int)m[L"seq"].Num();
     const int gesture = (int)m[L"gesture"].Num();
     const bool live = m[L"live"].Bool();
@@ -1298,7 +1307,7 @@ void Host::StartImport(std::vector<ImportJob> jobs, bool wallpaper) {
             const bool scene = EndsWith(j.source, L".alscene");
             const bool package = !wallpaper && EndsWith(j.source, L".altheme");
             results[i] = scene       ? staging::Scene(j.source, j.dir, cancel_, progressed)
-                         : package   ? staging::Package(j.source, j.dir, cancel_, progressed)
+                         : package   ? staging::Package(j.source, j.dir, cancel_, progressed, j.name)
                          : wallpaper ? staging::Wallpaper(j.source, j.dir, cancel_, progressed, j.name)
                                      : staging::Media(j.source, j.dir, cancel_, progressed, j.name);
         }
@@ -1361,6 +1370,8 @@ void Host::FinishImport() {
                 continue;
             }
             const std::wstring why = results[i].error.empty() ? i18n::Tr("msg.import_failed") : results[i].error;
+            // A Workshop item's card says it too, until it is tried again.
+            if (!importJobs_[i].item.empty() && !cancel_.load()) steamProblems_[importJobs_[i].item] = why;
             if (results.size() == 1) problems = why;
             else {
                 const ImportJob &j = importJobs_[i];
@@ -1369,15 +1380,26 @@ void Host::FinishImport() {
         }
         if (!staged.empty()) {
             const std::set<std::wstring> before = InstalledThemeIds();
-            // All of them on one prompt, unless they are more than one command line holds.
+            // All of them on one prompt, unless they are more than one command line holds. An
+            // update goes in together with taking away the theme it replaces, on the same line.
+            std::vector<std::wstring> groups;
+            const steam_workshop::Reuse reuse = StagedReuse(staged);
+            for (size_t k = 0; k < staged.size(); ++k) {
+                const ImportJob &j = importJobs_[staged[k]];
+                groups.push_back(L"--commit-package " + commit::Quote(j.dir) + ReplaceCommands(j, reuse));
+            }
             int code = commit::kOk;
             std::wstring args;
-            for (size_t k = 0; k < staged.size() && code == commit::kOk; ++k) {
-                args += (args.empty() ? L"" : L" ") + std::wstring(L"--commit-package ") + commit::Quote(importJobs_[staged[k]].dir);
-                const bool last = k + 1 == staged.size();
-                if (last || args.size() + 100 > kMaxElevatedArgs) {
+            size_t commands = 0, runs = 0;
+            for (size_t k = 0; k < groups.size() && code == commit::kOk; ++k) {
+                args += (args.empty() ? L"" : L" ") + groups[k];
+                ++commands;
+                const bool last = k + 1 == groups.size();
+                if (last || args.size() + 1 + groups[k + 1].size() > kMaxElevatedArgs) {
+                    ALOG(L"import: %zu package(s) on elevated command line %zu", commands, ++runs);
                     code = commit::RunElevated(hwnd_, args);
                     args.clear();
+                    commands = 0;
                 }
             }
             // The new themes are the entries that were not there before.
@@ -1386,7 +1408,17 @@ void Host::FinishImport() {
                 if (!before.count(id)) added.push_back(id);
             library_.Reload();
             pictures_.Forget();
-            if (importJobs_.size() == 1) {
+            const bool fromSteam = !importJobs_[staged[0]].item.empty();
+            const int updates = fromSteam ? RecordSteamInstalls(staged, added, results) : 0;
+            if (fromSteam) {
+                // Brought in from the Workshop, many or one: what is shown stays as it is, but for an
+                // update of a theme in use, which has taken its place.
+                if (added.size() == 1) {
+                    const ThemeEntry *e = library_.Entry(added[0]);
+                    Toast(i18n::Tr(updates ? "msg.steam.updated" : "msg.steam.installed", {{L"name", e ? e->name : results[staged[0]].name}}));
+                } else if (!added.empty())
+                    Toast(i18n::Tr("msg.imported_many", {{L"n", std::to_wstring(added.size())}}));
+            } else if (importJobs_.size() == 1) {
                 // What was just imported is what the person wants to see next.
                 if (code == commit::kOk) {
                     const bool applied = added.size() == 1 && library_.Apply(added[0], L"all");
@@ -1407,6 +1439,7 @@ void Host::FinishImport() {
     }
     for (const ImportJob &j : importJobs_) secure::RemoveTree(j.dir);  // best effort; each holds only its own staging
     importJobs_.clear();
+    if (steam_ && !steamShown_.empty()) SendSteamItems();
     if (edited) Edited(true, false, 0);
     else SendState();
 }
@@ -1586,6 +1619,8 @@ void Host::RemoveTheme(const std::wstring &id) {
     else if (gone) Problem(i18n::Tr("msg.deleted_partly", {{L"name", name}}));
     else Problem(i18n::Tr("msg.delete_failed"));
     SendState();
+    // A theme from the Workshop that goes is no longer installed there.
+    if (gone && steam_ && !steamShown_.empty()) SendSteamItems();
 }
 
 void Host::ExportTheme(const std::wstring &id) {

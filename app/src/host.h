@@ -8,7 +8,11 @@
 
 #include <atomic>
 #include <deque>
+#include <map>
+#include <memory>
 #include <string>
+#include <functional>
+#include <set>
 #include <thread>
 #include <vector>
 
@@ -22,6 +26,8 @@
 #include "json.h"
 #include "library.h"
 #include "pictures.h"
+#include "steam_client.h"
+#include "steam_workshop.h"
 #include "workshop.h"
 #include "agent.h"
 #include "animelogon/scenepreview.h"
@@ -70,6 +76,10 @@ private:
     // the import directory it is staged in.
     struct ImportJob {
         std::wstring source, name, dir;
+        // From the Steam Workshop: the item, Steam's time of its last update and its .altheme's
+        // write time (for workshop.ini), and the theme it replaces when it is that theme's update.
+        std::wstring item, replaces;
+        long long updated = 0, fileTime = 0;
     };
     // A theme from a picture, video or .altheme the person picks, the file dialog listing the
     // types of `kind` (importable.h); with `wallpaper`, a picture or video as a wallpaper alone,
@@ -94,6 +104,51 @@ private:
     void Switch(bool on);
     // Installs `theme` as a new theme (and runs `then` on the same command line); its new id, or empty.
     std::wstring CommitTheme(const animelogon::theme::Theme &theme, const std::wstring &then = L"");
+    // What of the installed wallpapers and components the jobs `staged` are to use again; looked
+    // at only when one of them is an update.
+    steam_workshop::Reuse StagedReuse(const std::vector<size_t> &staged) const;
+    // What the elevated helper runs after installing the update staged for `job`: the theme it
+    // replaces goes, with the wallpaper and components only that theme used, unless a package
+    // staged with it is to use them again (`reuse`). Empty when it replaces nothing.
+    std::wstring ReplaceCommands(const ImportJob &job, const steam_workshop::Reuse &reuse) const;
+
+    // --- the Steam Workshop (host_steam.cpp): only in the Steam edition, whose helper is in a
+    // steam\ folder beside the program (steam_client.h)
+    struct SteamRequest {
+        std::wstring kind;  // the operation asked
+        int seq = 0;        // the page's number for a query, to drop answers it no longer waits for
+        std::wstring item;
+        bool on = false;
+    };
+    // Shown item by item in the library: an item, what workshop.ini has for it and its folder.
+    struct SteamShown {
+        steam_workshop::Item item;
+        steam_workshop::Folder folder;
+        steam_workshop::State state = steam_workshop::State::NotDownloaded;
+        steam_workshop::Record record;
+        bool recorded = false;
+    };
+    static constexpr UINT kSteamLines = WM_APP + 16;  // the helper wrote something, or has gone
+    void StartSteam();
+    void StopSteam();
+    // The fixture's folder as a host name for its preview pictures, when the stand-in for Steam's
+    // library is in use (development only). Before the page loads, as every mapping.
+    void MapSteamFixture(ICoreWebView2 *view);
+    // A page message about the Workshop; false when `op` is not one.
+    bool OnSteamMessage(const std::wstring &op, const json::Value &m);
+    void OnSteamLines();
+    long long SteamAsk(const SteamRequest &request, const std::function<void(json::Writer &)> &params = {});
+    void SteamAnswered(const SteamRequest &request, const json::Value &answer);
+    void SteamEvent(const json::Value &event);
+    void AskSubscribed();
+    void SendSteamItems();
+    void SendSteamStatus(const json::Value &status);
+    void InstallFromSteam(const json::Value &ids);
+    void SteamDownload(const std::wstring &item, bool hurry);
+    // After an import: what was installed from the Workshop goes into workshop.ini, and an update
+    // takes over the place of the theme it replaced. Returns how many of the jobs were updates.
+    int RecordSteamInstalls(const std::vector<size_t> &staged, const std::vector<std::wstring> &added,
+                            const std::vector<staging::Result> &results);
 
     // The proportions of what a theme is shown on, for its pictures (wall.h): the wall of every
     // display when spanning, otherwise the display (the theme's own in per-monitor mode, else
@@ -167,6 +222,19 @@ private:
     std::thread scanner_;
     bool scanning_ = false;
     workshop::Found workshop_, scanned_;
+
+    // The Steam Workshop. `steam_` is there only in the Steam edition; the helper runs once the
+    // page first asks about the Workshop.
+    std::unique_ptr<steam::Client> steam_;
+    std::map<long long, SteamRequest> steamWaiting_;
+    std::wstring steamState_;                     // the last status: ok, not_running...
+    bool steamItemsAsked_ = false, steamItemsAgain_ = false;
+    bool steamFromHelper_ = false;                // steamItems_ is the helper's word, not a look in folders
+    std::vector<steam_workshop::Item> steamItems_;
+    std::vector<SteamShown> steamShown_;          // what the page was last told, which it names items from
+    std::map<std::wstring, std::pair<double, double>> steamDownloads_;  // item -> bytes done, total
+    std::set<std::wstring> steamDownloadAsked_;   // items this window asked Steam to download
+    std::map<std::wstring, std::wstring> steamProblems_;  // item -> why it could not be installed
 };
 
 }  // namespace app

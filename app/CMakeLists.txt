@@ -9,8 +9,9 @@ find_program(NPM_EXECUTABLE NAMES npm.cmd npm REQUIRED)
 set(APP_WEB_SRC ${CMAKE_CURRENT_SOURCE_DIR}/web)
 set(APP_WEB_DIR ${CMAKE_CURRENT_BINARY_DIR}/web)
 # The page's strings are res/locales/*.json, which it bundles.
+# So are the Steam Workshop's tags, steam/tags.json.
 file(GLOB_RECURSE app_web_sources CONFIGURE_DEPENDS ${APP_WEB_SRC}/src/*.ts ${APP_WEB_SRC}/src/*.tsx ${APP_WEB_SRC}/src/*.css
-     ${PROJECT_SOURCE_DIR}/res/locales/*.json)
+     ${PROJECT_SOURCE_DIR}/res/locales/*.json ${PROJECT_SOURCE_DIR}/steam/tags.json)
 add_custom_command(OUTPUT ${APP_WEB_SRC}/node_modules/.package-lock.json
     # npm is a .cmd script: called through cmd so that the build step goes on after it.
     COMMAND cmd /c npm ci --ignore-scripts --no-audit --no-fund
@@ -38,11 +39,14 @@ animelogon_add_executable(app WIN32 LOCALES
         src/agent.cpp
         src/frame.cpp
         src/host.cpp
+        src/host_steam.cpp
         src/library.cpp
         src/pictures.cpp
         src/json.cpp
         src/resources.cpp
+        src/steam_client.cpp
         src/steam_library.cpp
+        src/steam_workshop.cpp
         src/tray.cpp
         src/traymenu.cpp
         src/workshop.cpp
@@ -59,7 +63,8 @@ animelogon_add_executable(app WIN32 LOCALES
     DESCRIPTION "AnimeLogon"
     LIBS animelogon_render animelogon_scene_preview webview2::loader mfplat mfreadwrite mfuuid mmdevapi ole32 shell32 shlwapi comdlg32 secur32 advapi32
          dwmapi delayimp windowsapp)
-target_include_directories(app PRIVATE src ${config_src})
+# steam/src for the app id the Steam helper is started with (appid.h), the only file of it used here.
+target_include_directories(app PRIVATE src ${config_src} ${PROJECT_SOURCE_DIR}/steam/src)
 add_dependencies(app app_web)
 # The agent reads Windows' media controls through C++/WinRT, which needs C++20's <coroutine>:
 # under C++17 it falls back to <experimental/coroutine>, which newer MSVC refuses to compile.
