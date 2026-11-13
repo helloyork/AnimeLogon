@@ -1,0 +1,95 @@
+/* Wallpaper Engine's video wallpapers (dialogs/Workshop.tsx): a search bar, then the list to choose
+   from beside the one chosen last, large. The list scrolls; the dialog keeps its height. */
+.we-dialog.fui-DialogSurface { width: min(1040px, calc(100vw - 48px)); max-width: none; }
+.we-dialog .fui-DialogContent { overflow: hidden; }
+.we { display: flex; flex-direction: column; gap: var(--s4); height: min(620px, calc(100vh - 220px)); min-height: 240px; }
+
+.we-bar { display: flex; align-items: center; gap: var(--s3); min-width: 0; }
+.we-search { flex: none; gap: 6px; width: 240px; }
+.we-search svg { flex: none; color: var(--text-3); }
+.we-search input::-webkit-search-cancel-button { cursor: pointer; }
+.we-bar .t-cap { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.we-all { margin-left: auto; flex: none; }
+
+.we-main { display: grid; flex: 1; grid-template-columns: minmax(0, 1fr) 320px; gap: var(--s6); min-height: 0; }
+/* The padding keeps the chosen pictures' outlines inside the scrolled area. */
+.we-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  align-content: start;
+  gap: var(--s4) var(--s3);
+  overflow-y: auto;
+  margin: -4px;
+  padding: 4px;
+}
+.we-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 13px;
+  line-height: 20px;
+  text-align: left;
+  cursor: pointer;
+}
+.we-card:focus-visible { outline: none; }
+.we-pic { position: relative; display: block; overflow: hidden; aspect-ratio: 16 / 9; margin-bottom: 6px; border-radius: var(--r-sm); background: #000; }
+.we-pic > img,
+.we-pic > video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.we-pic::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px var(--border);
+  pointer-events: none;
+  transition: box-shadow .12s;
+}
+.we-card:hover .we-pic::after { box-shadow: inset 0 0 0 1px var(--border-strong); }
+.we-card.on .we-pic,
+.we-card:focus-visible .we-pic { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* With several allowed: a box in the corner, shown while pointed at and once chosen. */
+.we-check {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--r-xs);
+  background: rgba(20, 20, 22, .55);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .7);
+  color: var(--on-accent);
+  opacity: 0;
+  transition: opacity .12s;
+}
+.we-card:hover .we-check,
+.we-card:focus-visible .we-check,
+.we-card.on .we-check { opacity: 1; }
+.we-card.on .we-check { background: var(--accent); box-shadow: none; }
+
+.we-detail { display: flex; flex-direction: column; gap: var(--s3); min-width: 0; overflow-y: auto; }
+.we-big { position: relative; flex: none; overflow: hidden; border-radius: var(--r-md); background: #000; }
+.we-big > img,
+.we-big > video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.we-big::after { content: ""; position: absolute; inset: 0; border-radius: inherit; box-shadow: inset 0 0 0 1px var(--border); pointer-events: none; }
+.we-title { margin: var(--s1) 0 0; font: 600 14px/20px var(--font); overflow-wrap: anywhere; }
+
+.we-empty { display: flex; flex-direction: column; gap: var(--s2); padding: var(--s6) 0 var(--s2); }
+.we-sum { align-self: center; }
+
+/* Too narrow for both: the list alone, its pictures playing as they are pointed at. */
+@media (max-width: 820px) {
+  .we-main { grid-template-columns: minmax(0, 1fr); }
+  .we-detail { display: none; }
+  .we-search { width: 180px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .we-check, .we-pic::after { transition: none; }
+}

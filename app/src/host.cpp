@@ -45,6 +45,15 @@ constexpr wchar_t kWallpaperHost[] = L"wallpapers.animelogon.invalid";
 constexpr UINT kImportProgress = WM_APP + 10;
 constexpr UINT kImportDone = WM_APP + 11;
 constexpr UINT kPageMessage = WM_APP + 12;
+constexpr UINT kWorkshopFound = WM_APP + 13;
+
+// A folder of Wallpaper Engine's wallpapers, read-only, so the page can show their previews and
+// play their videos before they are imported: r0.workshop.animelogon.invalid for the first.
+std::wstring WorkshopHost(size_t folder) { return L"r" + std::to_wstring(folder) + L".workshop.animelogon.invalid"; }
+
+// The elevated helper's command line is kept short enough for any way Windows passes it on;
+// installing more than fit takes another prompt.
+constexpr size_t kMaxElevatedArgs = 2000;
 
 std::wstring PickFile(HWND owner, const wchar_t *filter, const wchar_t *extension, bool save,
                       const std::wstring &suggested) {
@@ -190,6 +199,7 @@ Host::~Host() {
         cancel_ = true;
         worker_.join();
     }
+    if (scanner_.joinable()) scanner_.join();
 }
 
 bool Host::Create(int show) {
@@ -303,10 +313,13 @@ LRESULT Host::Handle(UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     }
     case kImportProgress:
-        if (importing_) Busy(importLabel_, importPermille_.load() / 10);
+        if (importing_) Busy(ImportLabel(), importPermille_.load() / 10);
         return 0;
     case kImportDone:
         FinishImport();
+        return 0;
+    case kWorkshopFound:
+        FoundWorkshop();
         return 0;
     case kPageMessage:
         if (!inbox_.empty()) {
@@ -398,6 +411,16 @@ void Host::StartWebView() {
                                            kWallpaperHost, WallpapersDir().c_str(),
                                            COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_DENY_CORS)))
                                        ALOG(L"WebView2: the wallpaper store cannot be mapped; videos show as stills");
+                                   // Wallpaper Engine's folders likewise, for their previews and
+                                   // videos before they are imported. Found once, here: a
+                                   // mapping made after the page has loaded does not reach it.
+                                   workshopFolders_ = workshop::Folders();
+                                   for (size_t i = 0; view3 && i < workshopFolders_.size(); ++i)
+                                       if (FAILED(view3->SetVirtualHostNameToFolderMapping(
+                                               WorkshopHost(i).c_str(), workshopFolders_[i].path.c_str(),
+                                               COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_DENY_CORS)))
+                                           ALOG(L"WebView2: %s cannot be mapped; its wallpapers show without previews",
+                                                workshopFolders_[i].path.c_str());
                                    EventRegistrationToken token{};
                                    view_->AddWebResourceRequestedFilter((std::wstring(kOrigin) + L"*").c_str(),
                                                                         COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL);
@@ -491,6 +514,8 @@ void Host::SendEnvironment() {
     w.Member(L"version", L"" ANIMELOGON_VERSION);
     // Who the sign-in screen would greet, for the lock-screen preview.
     w.Member(L"user", AccountName()).Member(L"accountPicture", !AccountPicture().empty());
+    // Whether there are Wallpaper Engine wallpapers to offer; the page asks for them when it shows them.
+    w.Member(L"wallpaperEngine", !workshopFolders_.empty());
     w.Key(L"monitors").BeginArray();
     int n = 0;
     for (const MonitorInfo &m : monitors_) {
@@ -942,6 +967,12 @@ void Host::OnMessage(const json::Value &m) {
         Import(false);
     } else if (op == L"importWallpaper") {
         Import(true);
+    } else if (op == L"cancelImport") {
+        cancel_ = true;
+    } else if (op == L"workshop") {
+        FindWorkshop();
+    } else if (op == L"importWorkshop") {
+        ImportWorkshop(m[L"items"], m[L"wallpaper"].Bool());
     } else if (op == L"importComponent") {
         ImportComponent(m[L"add"].Bool());
     } else if (op == L"newTheme") {
@@ -989,86 +1020,202 @@ void Host::Import(bool wallpaper) {
                              L"所有文件\0*.*\0",
                              nullptr, false, L"");
     if (source.empty()) return;
-    importDir_ = staging::NewImportDir();
-    if (importDir_.empty()) {
-        Problem(L"无法创建临时目录 " + paths::UserDataDir() + L"\\import。");
-        return;
+    StartImport({{source, L"", L""}}, wallpaper);
+}
+
+void Host::StartImport(std::vector<ImportJob> jobs, bool wallpaper) {
+    if (importing_ || jobs.empty()) return;
+    for (ImportJob &j : jobs) {
+        j.dir = staging::NewImportDir();
+        if (j.dir.empty()) {
+            for (const ImportJob &made : jobs)
+                if (!made.dir.empty()) secure::RemoveTree(made.dir);
+            Problem(L"无法创建临时目录 " + paths::UserDataDir() + L"\\import。");
+            return;
+        }
     }
-    const bool scene = EndsWith(source, L".alscene");
-    importWallpaper_ = wallpaper && !scene;
-    const bool package = !wallpaper && EndsWith(source, L".altheme");
-    importLabel_ = package ? L"正在读取「" + FileStem(source) + L"」"
-                   : staging::LooksLikePicture(source) ? L"正在处理「" + FileStem(source) + L"」"
-                                                       : L"正在转码「" + FileStem(source) + L"」";
+    // A scene brought in for a theme's wallpaper comes as a theme of its own.
+    importWallpaper_ = wallpaper && jobs.size() == 1 && !EndsWith(jobs[0].source, L".alscene");
+    importJobs_ = jobs;
+    importResults_.clear();
     cancel_ = false;
     importing_ = true;
     importPermille_ = 0;
-    Busy(importLabel_, 0);
-    worker_ = std::thread([this, source, package, wallpaper, scene, dir = importDir_] {
+    importIndex_ = 0;
+    Busy(ImportLabel(), 0);
+    worker_ = std::thread([this, jobs = std::move(jobs), wallpaper] {
         const HRESULT co = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-        auto progressed = [this](double f) {
-            importPermille_ = (int)(f * 1000);
-            PostMessageW(hwnd_, kImportProgress, 0, 0);
-        };
-        staging::Result r;
-        if (SUCCEEDED(co)) {
-            r = scene       ? staging::Scene(source, dir, cancel_, progressed)
-                : package   ? staging::Package(source, dir, cancel_, progressed)
-                : wallpaper ? staging::Wallpaper(source, dir, cancel_, progressed)
-                            : staging::Media(source, dir, cancel_, progressed);
-            CoUninitialize();
-        } else {
-            r.error = L"无法初始化 COM，无法导入。";
+        std::vector<staging::Result> results(jobs.size());
+        for (size_t i = 0; i < jobs.size() && !cancel_; ++i) {
+            const ImportJob &j = jobs[i];
+            importIndex_ = (int)i;
+            // The bar goes once across for all of them.
+            auto progressed = [this, i, n = jobs.size()](double f) {
+                importPermille_ = (int)((i + std::clamp(f, 0.0, 1.0)) * 1000 / n);
+                PostMessageW(hwnd_, kImportProgress, 0, 0);
+            };
+            progressed(0);
+            if (FAILED(co)) {
+                results[i].error = L"无法初始化 COM，无法导入。";
+                continue;
+            }
+            const bool scene = EndsWith(j.source, L".alscene");
+            const bool package = !wallpaper && EndsWith(j.source, L".altheme");
+            results[i] = scene       ? staging::Scene(j.source, j.dir, cancel_, progressed)
+                         : package   ? staging::Package(j.source, j.dir, cancel_, progressed)
+                         : wallpaper ? staging::Wallpaper(j.source, j.dir, cancel_, progressed, j.name)
+                                     : staging::Media(j.source, j.dir, cancel_, progressed, j.name);
         }
-        importResult_ = r;
+        if (SUCCEEDED(co)) CoUninitialize();
+        importResults_ = std::move(results);
         PostMessageW(hwnd_, kImportDone, 0, 0);
     });
+}
+
+// What the busy bar says: the file being staged now, and which of how many when there are several.
+std::wstring Host::ImportLabel() const {
+    if (importJobs_.empty()) return L"";
+    const size_t i = std::min<size_t>((size_t)importIndex_.load(), importJobs_.size() - 1);
+    const ImportJob &j = importJobs_[i];
+    const std::wstring name = j.name.empty() ? FileStem(j.source) : j.name;
+    std::wstring label = !importWallpaper_ && EndsWith(j.source, L".altheme") ? L"正在读取「" + name + L"」"
+                         : staging::LooksLikePicture(j.source)                ? L"正在处理「" + name + L"」"
+                                                                              : L"正在转码「" + name + L"」";
+    if (importJobs_.size() > 1) label += Format(L"（%zu/%zu）", i + 1, importJobs_.size());
+    return label;
 }
 
 void Host::FinishImport() {
     if (worker_.joinable()) worker_.join();
     importing_ = false;
     Busy(L"", 0);
-    const staging::Result r = importResult_;
+    std::vector<staging::Result> results = std::move(importResults_);
+    results.resize(importJobs_.size());
     bool edited = false;
-    if (r.ok && importWallpaper_) {
-        const std::wstring id = NewWallpaperId();
-        const int code = commit::RunElevated(hwnd_, L"--commit-wallpaper " + id + L" " + commit::Quote(importDir_));
-        if (code == commit::kOk) {
-            library_.Reload();
-            pictures_.Forget();
-            // Brought in from a theme's page, for that theme.
-            edited = !library_.open().empty() && library_.SetWallpaper(id);
-            Toast(L"已导入壁纸「" + r.name + L"」");
-        } else if (code == commit::kDeclined) {
-            Toast(L"已取消，没有导入");
+    if (cancel_.load()) {
+        // Stopped from the busy bar: nothing staged so far is installed.
+        Toast(L"已取消，没有导入");
+    } else if (importWallpaper_) {
+        const staging::Result &r = results[0];
+        if (r.ok) {
+            const std::wstring id = NewWallpaperId();
+            const int code = commit::RunElevated(hwnd_, L"--commit-wallpaper " + id + L" " + commit::Quote(importJobs_[0].dir));
+            if (code == commit::kOk) {
+                library_.Reload();
+                pictures_.Forget();
+                // Brought in from a theme's page, for that theme.
+                edited = !library_.open().empty() && library_.SetWallpaper(id);
+                Toast(L"已导入壁纸「" + r.name + L"」");
+            } else if (code == commit::kDeclined) {
+                Toast(L"已取消，没有导入");
+            } else {
+                Problem(L"导入失败：无法把壁纸写入受保护的目录。详细原因记录在 " + paths::LogPath(L"config.log") + L"。");
+            }
         } else {
-            Problem(L"导入失败：无法把壁纸写入受保护的目录。详细原因记录在 " + paths::LogPath(L"config.log") + L"。");
+            Problem(r.error.empty() ? std::wstring(L"导入失败。") : r.error);
         }
-    } else if (r.ok) {
-        const std::set<std::wstring> before = InstalledThemeIds();
-        const int code = commit::RunElevated(hwnd_, L"--commit-package " + commit::Quote(importDir_));
-        if (code == commit::kOk) {
-            // The new theme is the one entry that was not there before.
-            std::wstring added;
+    } else {
+        std::vector<size_t> staged;
+        std::wstring problems;  // what could not be staged, a line each
+        for (size_t i = 0; i < results.size(); ++i) {
+            if (results[i].ok) {
+                staged.push_back(i);
+                continue;
+            }
+            const std::wstring why = results[i].error.empty() ? std::wstring(L"导入失败。") : results[i].error;
+            if (results.size() == 1) problems = why;
+            else {
+                const ImportJob &j = importJobs_[i];
+                problems += L"\n「" + (j.name.empty() ? FileStem(j.source) : j.name) + L"」：" + why;
+            }
+        }
+        if (!staged.empty()) {
+            const std::set<std::wstring> before = InstalledThemeIds();
+            // All of them on one prompt, unless they are more than one command line holds.
+            int code = commit::kOk;
+            std::wstring args;
+            for (size_t k = 0; k < staged.size() && code == commit::kOk; ++k) {
+                args += (args.empty() ? L"" : L" ") + std::wstring(L"--commit-package ") + commit::Quote(importJobs_[staged[k]].dir);
+                const bool last = k + 1 == staged.size();
+                if (last || args.size() + 100 > kMaxElevatedArgs) {
+                    code = commit::RunElevated(hwnd_, args);
+                    args.clear();
+                }
+            }
+            // The new themes are the entries that were not there before.
+            std::vector<std::wstring> added;
             for (const std::wstring &id : InstalledThemeIds())
-                if (!before.count(id)) added = id;
+                if (!before.count(id)) added.push_back(id);
             library_.Reload();
             pictures_.Forget();
-            // What was just imported is what the person wants to see next.
-            if (!added.empty() && library_.Apply(added, L"all")) Save();
-            Toast(L"已导入「" + r.name + (added.empty() ? L"」" : L"」并设为当前主题"));
-        } else if (code == commit::kDeclined) {
-            Toast(L"已取消，没有导入");
-        } else {
-            Problem(L"导入失败：无法把主题写入受保护的目录。详细原因记录在 " + paths::LogPath(L"config.log") + L"。");
+            if (importJobs_.size() == 1) {
+                // What was just imported is what the person wants to see next.
+                if (code == commit::kOk) {
+                    const bool applied = added.size() == 1 && library_.Apply(added[0], L"all");
+                    if (applied) Save();
+                    Toast(L"已导入「" + results[staged[0]].name + (applied ? L"」并设为当前主题" : L"」"));
+                }
+            } else if (!added.empty()) {
+                Toast(Format(L"已导入 %zu 个主题", added.size()));
+            }
+            if (code == commit::kDeclined) {
+                if (added.empty()) Toast(L"已取消，没有导入");
+            } else if (code != commit::kOk) {
+                Problem(L"导入失败：无法把主题写入受保护的目录。详细原因记录在 " + paths::LogPath(L"config.log") + L"。");
+            }
         }
-    } else if (!cancel_.load()) {
-        Problem(r.error.empty() ? std::wstring(L"导入失败。") : r.error);
+        if (!problems.empty())
+            Problem(results.size() == 1 ? problems : Format(L"有 %zu 个没有导入：", results.size() - staged.size()) + problems);
     }
-    secure::RemoveTree(importDir_);  // best effort; it holds only this import's staging
+    for (const ImportJob &j : importJobs_) secure::RemoveTree(j.dir);  // best effort; each holds only its own staging
+    importJobs_.clear();
     if (edited) Edited(true, false, 0);
     else SendState();
+}
+
+void Host::FindWorkshop() {
+    if (scanning_) return;
+    scanning_ = true;
+    scanner_ = std::thread([this, folders = workshopFolders_] {
+        scanned_ = workshop::Scan(folders);
+        PostMessageW(hwnd_, kWorkshopFound, 0, 0);
+    });
+}
+
+void Host::FoundWorkshop() {
+    if (scanner_.joinable()) scanner_.join();
+    scanning_ = false;
+    workshop_ = std::move(scanned_);
+    json::Writer w;
+    w.BeginObject().Member(L"type", L"workshop").Member(L"folders", (int)workshop_.folders.size());
+    w.Member(L"others", workshop_.others).Key(L"items").BeginArray();
+    for (const workshop::Item &v : workshop_.videos) {
+        w.BeginObject().Member(L"id", v.id).Member(L"title", v.title);
+        w.Member(L"base", L"https://" + WorkshopHost(v.folder) + L"/").Member(L"dir", v.dir);
+        w.Member(L"video", v.video).Member(L"preview", v.preview).Member(L"bytes", (double)v.bytes);
+        w.Member(L"source", workshop_.folders[v.folder].source == workshop::Source::Mine ? L"mine" : L"workshop");
+        w.EndObject();
+    }
+    w.EndArray().EndObject();
+    Send(w);
+}
+
+void Host::ImportWorkshop(const json::Value &ids, bool wallpaper) {
+    // Only what the last look found: the page names wallpapers, never paths.
+    std::vector<ImportJob> jobs;
+    for (const json::Value &id : ids.Items()) {
+        for (const workshop::Item &v : workshop_.videos)
+            if (v.id == id.Str()) {
+                jobs.push_back({workshop_.folders[v.folder].path + L"\\" + v.dir + L"\\" + v.video, v.title, L""});
+                break;
+            }
+        if (wallpaper && !jobs.empty()) break;
+    }
+    if (jobs.empty()) {
+        Problem(L"找不到选中的壁纸。它可能已经从 Wallpaper Engine 里删除。");
+        return;
+    }
+    StartImport(std::move(jobs), wallpaper);
 }
 
 void Host::ImportComponent(bool add) {

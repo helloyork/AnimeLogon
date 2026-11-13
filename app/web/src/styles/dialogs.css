@@ -1,6 +1,7 @@
 /* What dialogs hold (the dialog itself is in fluent.css). */
 .dlg-text { display: flex; flex-direction: column; gap: var(--s3); }
 .dlg-text .quiet { color: var(--text-2); }
+.dlg-lines { white-space: pre-line; }  /* a problem with a line for each thing that went wrong */
 .dlg-stack { display: flex; flex-direction: column; gap: var(--s5); }
 .dlg-field { display: flex; flex-direction: column; gap: var(--s2); }
 .dlg-label { display: flex; align-items: baseline; gap: var(--s2); font-size: 13px; line-height: 20px; color: var(--text-2); }

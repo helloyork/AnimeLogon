@@ -27,14 +27,15 @@ bool LooksLikePicture(const std::wstring &path);
 
 // A video or a picture as a new theme, staged for --commit-package: the wallpaper normalised
 // into dir\wallpaper\ (a video transcoded, a picture decoded to image.bmp), and a theme.xml
-// named after the file that places it and the clock. Videos need COM on the calling thread.
+// that places it and the clock, named `name` (cut to a theme name's length) or, without one,
+// after the file. Videos need COM on the calling thread.
 Result Media(const std::wstring &source, const std::wstring &dir, const std::atomic<bool> &cancel,
-             const Progress &progress);
+             const Progress &progress, const std::wstring &name = L"");
 
 // A video or a picture as a wallpaper alone, staged for --commit-wallpaper: normalised as Media
-// does, into dir itself, and named after the file.
+// does, into dir itself, and named as Media names it.
 Result Wallpaper(const std::wstring &source, const std::wstring &dir, const std::atomic<bool> &cancel,
-                 const Progress &progress);
+                 const Progress &progress, const std::wstring &name = L"");
 
 // An .altheme, staged for --commit-package. The archive must pass package::Reader; its
 // theme.xml must parse; the wallpaper file it carries must be the one theme.xml names (or none
