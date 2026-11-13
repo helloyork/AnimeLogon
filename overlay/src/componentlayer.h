@@ -30,6 +30,11 @@ public:
     // Reads the time; returns true when the words of any instance changed.
     bool Tick();
 
+    // How long ago the wallpaper came up, for each panel's way in (SkinView::SetEntrance), and
+    // whether any panel is still coming in.
+    void SetEntrance(float seconds);
+    bool Entering() const;
+
     // Draws the instances `which` names, in that order, onto `surface`, a window's back
     // buffer. `slot` keeps one cache per window.
     bool Draw(IDXGISurface *surface, UINT width, UINT height, size_t slot, const std::vector<size_t> &which,

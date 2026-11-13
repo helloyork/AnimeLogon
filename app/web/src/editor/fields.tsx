@@ -66,6 +66,7 @@ export function viewFor(key: string, step: number): View {
     case 'margin': return plain('% 短边', 1);
     case 'tracking': case 'x': case 'y': case 'blur': return plain('em', 3);
     case 'space': case 'gap': return plain('em', 2);
+    case 'enter-delay': case 'enter-duration': return plain('秒', 2);
     case 'opacity': return { factor: 100, digits: 0, unit: v => (/\.(s\d+|b)\.opacity$/.test(key) && !v ? '不画' : '%') };
   }
   return plain('', decimals(step));

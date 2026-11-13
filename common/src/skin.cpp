@@ -16,7 +16,7 @@ constexpr size_t kMaxShadows = 4, kMaxLabel = 40, kMaxDetail = 80, kMaxTemplate 
 
 const wchar_t *const kAnchors[] = {L"top-left", L"top", L"top-right", L"left", L"center",
                                    L"right", L"bottom-left", L"bottom", L"bottom-right"};
-enum class Type { Label, Anchor, Number, Align, Template, Font, Weight, Style, Color, Case, Bool, Condition, Date, Fraction };
+enum class Type { Label, Anchor, Number, Align, Template, Font, Weight, Style, Color, Case, Bool, Condition, Date, Fraction, Enter };
 
 // `adjustable` attributes can be set by hand in the settings app.
 struct AttributeSpec {
@@ -30,7 +30,8 @@ const AttributeSpec kPanel[] = {{L"label", Type::Label, 0, 0, false}, {L"anchor"
                                 {L"size", Type::Number, 1, 50},       {L"margin", Type::Number, 0, 40},
                                 {L"offset-x", Type::Number, -50, 50}, {L"offset-y", Type::Number, -50, 50},
                                 {L"align", Type::Align},              {L"when", Type::Condition, 0, 0, false},
-                                {L"until", Type::Date, 0, 0, false}};
+                                {L"until", Type::Date, 0, 0, false}, {L"enter", Type::Enter},
+                                {L"enter-delay", Type::Number, 0, 10}, {L"enter-duration", Type::Number, 0, 5}};
 const AttributeSpec kLine[] = {{L"label", Type::Label, 0, 0, false}, {L"gap", Type::Number, -2, 4},
                                {L"when", Type::Condition, 0, 0, false}};
 const AttributeSpec kText[] = {{L"label", Type::Label, 0, 0, false}, {L"value", Type::Template, 0, 0, false},
@@ -172,6 +173,7 @@ bool Check(const AttributeSpec &spec, const std::wstring &value) {
         return data::ParseDate(value, &d);
     }
     case Type::Fraction: return IsFraction(value);
+    case Type::Enter: return value == L"fade" || value == L"rise" || value == L"zoom" || value == L"none";
     }
     return false;
 }
@@ -406,6 +408,9 @@ const Offer kOffers[] = {
     {L"panel", L"margin", L"边距", L"离屏幕边缘的距离，短边的百分比。", Control::Slider, 0, 40, 0.5, L"7"},
     {L"panel", L"size", L"大小", L"屏幕高度的百分比，其余文字按它的比例。", Control::Slider, 1, 50, 0.5, L"10"},
     {L"panel", L"align", L"文字对齐", L"多行文字之间如何对齐。", Control::Choice, 0, 0, 0, L"auto"},
+    {L"panel", L"enter", L"方式", L"锁屏出现后，它怎样出现。", Control::Choice, 0, 0, 0, L"fade"},
+    {L"panel", L"enter-delay", L"延迟", L"壁纸动起来之后，再等多久开始出现。", Control::Slider, 0, 5, 0.05, L"0"},
+    {L"panel", L"enter-duration", L"时长", L"出现的过程用多久。", Control::Slider, 0, 3, 0.05, L"0.4"},
     {L"text", L"font", L"字体", L"仅列出为所有用户安装的字体。", Control::Font, 0, 0, 0, L""},
     {L"text", L"weight", L"字重", L"字体没有的字重会用最接近的代替。", Control::Slider, 100, 900, 50, L"400"},
     {L"text", L"size", L"相对大小", L"相对于整体大小。", Control::Slider, 0.05, 2, 0.01, L"1"},
@@ -445,6 +450,7 @@ std::vector<Option> OptionsOf(const std::wstring &attribute) {
     if (attribute == L"style") return {{L"normal", L"常规"}, {L"italic", L"斜体"}};
     if (attribute == L"case") return {{L"none", L"原样"}, {L"upper", L"大写"}, {L"lower", L"小写"}};
     if (attribute == L"hang") return {{L"true", L"挂在旁边"}, {L"false", L"一起对齐"}};
+    if (attribute == L"enter") return {{L"fade", L"淡入"}, {L"rise", L"上浮"}, {L"zoom", L"放大"}, {L"none", L"直接"}};
     return {};
 }
 
@@ -779,6 +785,10 @@ Resolved Resolve(const Skin &skin, const Values &values) {
                                                                                                            : Align::Auto;
         panel.when = ConditionOf(p);
         data::ParseDate(a.String(L"until"), &panel.until);
+        const std::wstring enter = a.String(L"enter", L"fade");
+        panel.enter = enter == L"rise" ? Enter::Rise : enter == L"zoom" ? Enter::Zoom : enter == L"none" ? Enter::None : Enter::Fade;
+        panel.enterDelay = a.Number(L"enter-delay", panel.enterDelay);
+        panel.enterDuration = a.Number(L"enter-duration", panel.enterDuration);
         size_t lines = 0, shadows = 0;
         for (const xml::Element &e : p.children) {
             const std::wstring key = e.name == L"line"     ? pk + L".l" + std::to_wstring(++lines)
