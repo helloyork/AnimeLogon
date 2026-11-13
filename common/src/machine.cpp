@@ -17,6 +17,8 @@ constexpr const wchar_t *kRestoreKey = L"SOFTWARE\\AnimeLogon\\Restore";
 constexpr const wchar_t *kProtectedKey = L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\SystemProtectedUserData";
 constexpr const wchar_t *kHideValue = L"HideLogonBackgroundImage";
 constexpr const wchar_t *kSignInTag = L"SignIn.";
+// Under paths::kRegistryKey: 1 while an install has left switching on to the person (SetupPending).
+constexpr const wchar_t *kSetupPendingValue = L"SetupPending";
 
 struct Tracked {
     const wchar_t *key;
@@ -446,8 +448,12 @@ DWORD TurnOn(const std::wstring &launcherPath, const std::wstring &image) {
     if (e != ERROR_SUCCESS) {
         ALOG(L"turn on: failed (%lu), undoing", e);
         TurnOff();
+        return e;
     }
-    return e;
+    // On once is set up: the settings app no longer opens on its setup wizard.
+    const DWORD cleared = DeleteValue(paths::kRegistryKey, kSetupPendingValue);
+    if (cleared != ERROR_SUCCESS) ALOG(L"turn on: setup still marked pending (%lu)", cleared);
+    return ERROR_SUCCESS;
 }
 
 DWORD TurnOff() {
@@ -461,6 +467,13 @@ DWORD TurnOff() {
 }
 
 bool IsOn() { return ServiceAutoStart() && WindowsLockScreenApplied(); }
+
+bool SetupPending() {
+    DWORD v = 0;
+    return AsDword(ReadValue(paths::kRegistryKey, kSetupPendingValue), &v) && v != 0;
+}
+
+DWORD MarkSetupPending() { return WriteDword(paths::kRegistryKey, kSetupPendingValue, 1); }
 
 bool Paused() { return GetFileAttributesW(paths::PausedMarkerPath().c_str()) != INVALID_FILE_ATTRIBUTES; }
 

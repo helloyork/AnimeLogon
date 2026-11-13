@@ -7,6 +7,7 @@ import { LibraryPage } from './library/LibraryPage';
 import { LockPreview } from './lock/LockPreview';
 import { SettingsPage } from './settings/SettingsPage';
 import { DiscoverPage } from './steam/DiscoverPage';
+import { SetupPage } from './setup/SetupPage';
 import { send } from './native';
 import { t } from './i18n';
 import { goBack, onToast, setTab, useStore, type Tab } from './store';
@@ -40,7 +41,7 @@ export function App() {
     <FluentProvider theme={dark ? darkTheme : lightTheme}>
       <div className="app">
         <AppBar />
-        <Fallback>{!s.lib ? null : <Page />}</Fallback>
+        <Fallback>{s.setup ? <SetupPage /> : !s.lib ? null : <Page />}</Fallback>
       </div>
       <Toasts />
       <Dialogs />
@@ -49,23 +50,26 @@ export function App() {
   );
 }
 
-// 发现, the Steam Workshop, only in the Steam edition (D63, D68).
+// 发现, the Steam Workshop, only in the Steam edition.
 const pagesFor = (steam: boolean): [Tab, Parameters<typeof t>[0]][] =>
   [['mine', 'nav.library'], ...(steam ? [['discover', 'nav.discover']] as [Tab, Parameters<typeof t>[0]][] : []), ['settings', 'nav.settings']];
 
-// The app bar stays over every page (D59): the library, a theme's own page under it, and the
-// settings. It is also the window's title bar, so it is there from the start and stays when a page
-// fails to draw: what is being done in the background, then the window's buttons, end it.
+// The app bar stays over every page: the library, a theme's own page under it, and the settings.
+// It is also the window's title bar, so it is there from the start and stays when a page fails to
+// draw: what is being done in the background, then the window's buttons, end it. The setup wizard
+// has no pages to go to.
 function AppBar() {
   const s = useStore();
   return (
     <header className="topbar">
       <WindowTitle />
-      <nav className="nav" aria-label={t('nav.label')}>
-        {pagesFor(s.env.steam).map(([tab, name]) => (
-          <button key={tab} type="button" className={cx(s.tab === tab && 'on')} aria-current={s.tab === tab ? 'page' : undefined} onClick={() => setTab(tab)}>{t(name)}</button>
-        ))}
-      </nav>
+      {!s.setup && (
+        <nav className="nav" aria-label={t('nav.label')}>
+          {pagesFor(s.env.steam).map(([tab, name]) => (
+            <button key={tab} type="button" className={cx(s.tab === tab && 'on')} aria-current={s.tab === tab ? 'page' : undefined} onClick={() => setTab(tab)}>{t(name)}</button>
+          ))}
+        </nav>
+      )}
       <BusyBar />
       <WindowButtons overLock={!!s.lock} />
     </header>

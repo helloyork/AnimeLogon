@@ -667,6 +667,9 @@ void Host::SendEnvironment() {
     // A sandbox (paths.h) stands for an installed AnimeLogon that is on, whatever this machine has.
     const bool sandbox = !paths::Sandbox().empty();
     w.Member(L"on", sandbox || machine::IsOn()).Member(L"installed", sandbox || !machine::InstallDir().empty());
+    // Installed without being switched on (Steam's install script): the page shows only its setup
+    // wizard until the person has switched AnimeLogon on there.
+    w.Member(L"setupPending", !sandbox && machine::SetupPending());
     // Other programs that draw the logon screen, which switching AnimeLogon on switches off.
     w.Key(L"others").BeginArray();
     if (!sandbox)

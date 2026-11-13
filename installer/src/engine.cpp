@@ -505,6 +505,10 @@ Report Install(const std::wstring &targetDir, const InstallOptions &options) {
         return r;
     }
 
+    // What there was before, for an install that leaves switching on to the person.
+    const bool fresh = machine::InstallDir().empty();
+    const bool wasOn = !fresh && machine::IsOn();
+
     // Stop any previous install before touching its files.
     if (options.progress) options.progress(0.02, Tr("install.step.stop"));
     const DWORD stopped = machine::StopLauncherService();
@@ -591,25 +595,45 @@ Report Install(const std::wstring &targetDir, const InstallOptions &options) {
         return fail(WithError(Tr("install.error.service"), e));
     }
 
-    // Another program drawing the logon screen goes off before TurnOn records what Windows had.
     std::wstring switchedOff;
-    for (const others::Program &p : others::Installed())
-        if (p.on) switchedOff = p.name;
-    if (!switchedOff.empty()) at(0.85, "install.step.others");
-    e = others::TurnOff(paths::BackgroundPath());
-    if (e != ERROR_SUCCESS) {
-        machine::TurnOff();
-        machine::RemoveService();
-        return fail(WithError(Tr("install.error.others", {{L"name", switchedOff.empty() ? std::wstring(L"Shittim Logon") : switchedOff}}), e));
-    }
-    r.switchedOff = switchedOff;
+    if (options.setupInApp) {
+        // Windows and other programs stay as they are: the settings app switches AnimeLogon on
+        // with the person, saying first what that changes. InstallService made the service start
+        // with Windows, which only an AnimeLogon that is on does.
+        if (wasOn) {
+            e = machine::StartLauncherService();
+            if (e != ERROR_SUCCESS) ALOG(L"install: the service did not start again (%lu)", e);
+        } else {
+            e = machine::SetServiceAutoStart(false);
+            if (e != ERROR_SUCCESS) {
+                machine::RemoveService();
+                return fail(WithError(Tr("install.error.service"), e));
+            }
+            if (fresh) {
+                e = machine::MarkSetupPending();
+                if (e != ERROR_SUCCESS) ALOG(L"install: setup not marked pending (%lu)", e);
+            }
+        }
+    } else {
+        // Another program drawing the logon screen goes off before TurnOn records what Windows had.
+        for (const others::Program &p : others::Installed())
+            if (p.on) switchedOff = p.name;
+        if (!switchedOff.empty()) at(0.85, "install.step.others");
+        e = others::TurnOff(paths::BackgroundPath());
+        if (e != ERROR_SUCCESS) {
+            machine::TurnOff();
+            machine::RemoveService();
+            return fail(WithError(Tr("install.error.others", {{L"name", switchedOff.empty() ? std::wstring(L"Shittim Logon") : switchedOff}}), e));
+        }
+        r.switchedOff = switchedOff;
 
-    at(0.88, "install.step.turn_on");
-    e = machine::TurnOn(LauncherPath(targetDir), paths::BackgroundPath());
-    if (e != ERROR_SUCCESS) {
-        // TurnOn has already put Windows' lock screen back; the service goes with it.
-        machine::RemoveService();
-        return fail(WithError(Tr("install.error.turn_on"), e));
+        at(0.88, "install.step.turn_on");
+        e = machine::TurnOn(LauncherPath(targetDir), paths::BackgroundPath());
+        if (e != ERROR_SUCCESS) {
+            // TurnOn has already put Windows' lock screen back; the service goes with it.
+            machine::RemoveService();
+            return fail(WithError(Tr("install.error.turn_on"), e));
+        }
     }
 
     at(0.95, "install.step.shortcuts");
@@ -632,7 +656,7 @@ Report Install(const std::wstring &targetDir, const InstallOptions &options) {
     else if (FAILED(tray)) ALOG(L"install: the icon was not started (0x%08lx)", (unsigned long)tray);
 
     r.ok = true;
-    r.message = Tr("install.done");
+    r.message = Tr(options.setupInApp && machine::SetupPending() ? "install.done_setup_in_app" : "install.done");
     if (!switchedOff.empty()) r.message += L"\n\n" + Tr("install.others_off", {{L"name", switchedOff}});
     if (options.progress) options.progress(1.0, Tr("install.step.done"));
     // The logon screen works without it; only the settings app needs it.

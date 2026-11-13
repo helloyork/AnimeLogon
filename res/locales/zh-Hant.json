@@ -205,6 +205,11 @@
   "filter.themes": "主題套件 (*.altheme)",
   "filter.videos": "影片",
 
+  "firstrun.changes": "啟用後",
+  "firstrun.done.start": "開始使用",
+  "firstrun.done.title": "AnimeLogon 已啟用",
+  "firstrun.title": "歡迎使用 AnimeLogon",
+  "firstrun.until": "啟用之前，AnimeLogon 不會變更鎖定畫面和登入畫面。關閉視窗後，下次開啟會回到這一步。",
   "font.default": "預設（Segoe UI Variable）",
   "font.detail": "僅列出為所有使用者安裝的字型。",
   "font.search": "搜尋字型",
@@ -257,6 +262,7 @@
   "inspector.y.detail": "元件中心到螢幕上邊緣的距離。",
 
   "install.done": "AnimeLogon 已安裝。按 Win + L 鎖定電腦即可查看，或從「開始」功能表開啟 AnimeLogon 匯入影片或圖片。",
+  "install.done_setup_in_app": "AnimeLogon 已安裝，尚未啟用。開啟 AnimeLogon，依照提示啟用。",
   "install.error.background": "無法寫入登入背景",
   "install.error.copy": "無法寫入 {name}",
   "install.error.data": "無法設定資料資料夾的權限",

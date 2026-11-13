@@ -205,6 +205,11 @@
   "filter.themes": "Theme packages (*.altheme)",
   "filter.videos": "Videos",
 
+  "firstrun.changes": "When it is on",
+  "firstrun.done.start": "Get started",
+  "firstrun.done.title": "AnimeLogon is on",
+  "firstrun.title": "Welcome to AnimeLogon",
+  "firstrun.until": "Until you turn it on, AnimeLogon leaves the lock screen and the sign-in screen as they are. If you close this window, you'll come back to this step next time.",
   "font.default": "Default (Segoe UI Variable)",
   "font.detail": "Only fonts installed for all users are listed.",
   "font.search": "Search fonts",
@@ -257,6 +262,7 @@
   "inspector.y.detail": "From the screen's top edge to the component's center.",
 
   "install.done": "AnimeLogon is installed. Press Win + L to see it, or open AnimeLogon from the Start menu to import videos or pictures.",
+  "install.done_setup_in_app": "AnimeLogon is installed but not turned on yet. Open AnimeLogon and follow the steps to turn it on.",
   "install.error.background": "Couldn't write the sign-in background",
   "install.error.copy": "Couldn't write {name}",
   "install.error.data": "Couldn't set the permissions of the data folder",
