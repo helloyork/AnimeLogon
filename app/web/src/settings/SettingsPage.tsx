@@ -123,7 +123,7 @@ export function SettingsPage() {
             </Row>
           )}
           {several && (
-            <Row title="唤醒后其他屏幕">
+            <Row title="唤醒后其他屏幕" description="输入密码时 Windows 只用一块屏幕，其他屏幕显示这里选的内容，直到登录。">
               {() => (
                 <Select label="唤醒后其他屏幕" value={set.otherDisplays} onChange={v => global('otherDisplays', v)}
                   options={choices([['blur', '模糊的壁纸'], ['picture', '壁纸'], ['black', '黑屏']])} />
