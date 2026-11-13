@@ -42,6 +42,7 @@ add_subdirectory(scene)
 add_subdirectory(render)
 add_subdirectory(overlay)
 add_subdirectory(app)
+add_subdirectory(steam)
 add_subdirectory(installer)
 
 include(CTest)

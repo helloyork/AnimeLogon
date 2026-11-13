@@ -73,8 +73,26 @@ std::wstring Filters(std::initializer_list<std::pair<std::wstring, const wchar_t
     return out;
 }
 
-constexpr const wchar_t *kPicturePatterns = L"*.png;*.jpg;*.jpeg;*.webp;*.bmp;*.gif;*.tif;*.tiff;*.heic;*.heif;*.avif";
-constexpr const wchar_t *kVideoPatterns = L"*.mp4;*.mkv;*.mov;*.webm;*.avi;*.m4v;*.wmv";
+// The same, for the types of what is imported (importable.h), named in the page's language.
+std::wstring FiltersOf(const std::vector<importable::Filter> &entries) {
+    std::wstring out;
+    for (const importable::Filter &f : entries) {
+        out += i18n::Tr(f.name);
+        out += L'\0';
+        out += f.patterns;
+        out += L'\0';
+    }
+    out += L'\0';
+    return out;
+}
+
+// What each kind takes, as the page lists it: extensions without the dot.
+template <size_t N>
+void Extensions(json::Writer &w, const wchar_t *key, const wchar_t *const (&extensions)[N]) {
+    w.Key(key).BeginArray();
+    for (const wchar_t *e : extensions) w.String(e);
+    w.EndArray();
+}
 
 std::wstring PickFile(HWND owner, const wchar_t *filter, const wchar_t *extension, bool save,
                       const std::wstring &suggested) {
@@ -659,6 +677,12 @@ void Host::SendEnvironment() {
     w.Member(L"user", AccountName()).Member(L"accountPicture", !AccountPicture().empty());
     // Whether there are Wallpaper Engine wallpapers to offer; the page asks for them when it shows them.
     w.Member(L"wallpaperEngine", !workshopFolders_.empty());
+    // The file types each kind of import takes, which the page lists where it asks for the kind.
+    w.Key(L"importable").BeginObject();
+    Extensions(w, L"video", importable::kVideos);
+    Extensions(w, L"picture", importable::kPictures);
+    Extensions(w, L"package", importable::kPackages);
+    w.EndObject();
     w.Key(L"monitors").BeginArray();
     int n = 0;
     for (const MonitorInfo &m : monitors_) {
@@ -1159,7 +1183,8 @@ void Host::OnMessage(const json::Value &m) {
         SendState();
         if (!library_.open().empty()) SendPreview(seq);
     } else if (op == L"import") {
-        Import(false);
+        // The kind chosen on the page; a message without one gets every kind, as before.
+        Import(false, importable::KindNamed(m[L"kind"].Str()));
     } else if (op == L"importWallpaper") {
         Import(true);
     } else if (op == L"cancelImport") {
@@ -1225,25 +1250,11 @@ void Host::OnMessage(const json::Value &m) {
 
 // --- what needs the elevated helper ----------------------------------------------------------
 
-void Host::Import(bool wallpaper) {
+void Host::Import(bool wallpaper, importable::Kind kind) {
     if (importing_) return;
-    const std::wstring source =
-        wallpaper ? PickFile(hwnd_,
-                             Filters({{i18n::Tr("filter.media"), (std::wstring(kPicturePatterns) + L";" + kVideoPatterns).c_str()},
-                                      {i18n::Tr("filter.pictures"), kPicturePatterns},
-                                      {i18n::Tr("filter.videos"), kVideoPatterns},
-                                      {i18n::Tr("filter.all"), L"*.*"}})
-                                 .c_str(),
-                             nullptr, false, L"")
-                  : PickFile(hwnd_,
-                             Filters({{i18n::Tr("filter.importable"),
-                                       (std::wstring(L"*.altheme;") + kPicturePatterns + L";" + kVideoPatterns).c_str()},
-                                      {i18n::Tr("filter.themes"), L"*.altheme"},
-                                      {i18n::Tr("filter.pictures"), kPicturePatterns},
-                                      {i18n::Tr("filter.videos"), kVideoPatterns},
-                                      {i18n::Tr("filter.all"), L"*.*"}})
-                                 .c_str(),
-                             nullptr, false, L"");
+    const std::vector<importable::Filter> filters = wallpaper ? importable::WallpaperFilters() : importable::ThemeFilters(kind);
+    ALOG(L"import: %s, file dialog opens on %s", wallpaper ? L"wallpaper" : importable::NameOf(kind), filters[0].patterns.c_str());
+    const std::wstring source = PickFile(hwnd_, FiltersOf(filters).c_str(), nullptr, false, L"");
     if (source.empty()) return;
     StartImport({{source, L"", L""}}, wallpaper);
 }

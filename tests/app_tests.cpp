@@ -11,8 +11,10 @@
 #include "animelogon/wallpaper.h"
 #include "animelogon/text.h"
 
+#include "importable.h"
 #include "json.h"
 #include "library.h"
+#include "staging.h"
 #include "traymenu.h"
 
 using namespace animelogon;
@@ -176,6 +178,40 @@ TEST(AppJsonWritesWhatItReads) {
     CHECK(v[L"n"].Num() == 0.1 && v[L"i"].Num() == 7 && !v[L"b"].Bool(true));
     CHECK(v[L"list"].size() == 3 && v[L"list"][1].IsNull() && v[L"list"][2].Num() == 1e21);
     CHECK(w.text().find(L"0.1,") != std::wstring::npos);  // the shortest spelling
+}
+
+TEST(AppImportOpensTheFileDialogOnTheKindChosen) {
+    using namespace app::importable;
+    CHECK(KindNamed(L"video") == Kind::Video && KindNamed(L"picture") == Kind::Picture && KindNamed(L"package") == Kind::Package);
+    // A message without a kind, or with one this version does not know, gets every kind.
+    CHECK(KindNamed(L"") == Kind::Any && KindNamed(L"scene") == Kind::Any && KindNamed(L"Video") == Kind::Any);
+    CHECK(Patterns(kPackages) == L"*.altheme");
+    CHECK(Patterns(kVideos) == L"*.mp4;*.mkv;*.mov;*.webm;*.avi;*.m4v;*.wmv");
+
+    const std::vector<Filter> video = ThemeFilters(Kind::Video);
+    CHECK(video.size() == 2 && std::string(video[0].name) == "filter.videos" && video[0].patterns == Patterns(kVideos));
+    CHECK(std::string(video[1].name) == "filter.all" && video[1].patterns == L"*.*");
+    const std::vector<Filter> picture = ThemeFilters(Kind::Picture);
+    CHECK(picture.size() == 2 && std::string(picture[0].name) == "filter.pictures" && picture[0].patterns == Patterns(kPictures));
+    const std::vector<Filter> package = ThemeFilters(Kind::Package);
+    CHECK(package.size() == 2 && std::string(package[0].name) == "filter.themes" && package[0].patterns == L"*.altheme");
+
+    // Every kind at once, as before kinds were asked for: all of them first, then each alone.
+    const std::vector<Filter> any = ThemeFilters(Kind::Any);
+    CHECK(any.size() == 5 && std::string(any[0].name) == "filter.importable");
+    CHECK(any[0].patterns == Patterns(kPackages) + L";" + Patterns(kPictures) + L";" + Patterns(kVideos));
+    CHECK(any[0].patterns.find(L"alscene") == std::wstring::npos);  // scenes are not taken (staging::kTakesScenes)
+    CHECK(std::string(any.back().name) == "filter.all");
+    const std::vector<Filter> wallpaper = WallpaperFilters();
+    CHECK(wallpaper.size() == 4 && wallpaper[0].patterns == Patterns(kPictures) + L";" + Patterns(kVideos));
+    CHECK(wallpaper[0].patterns.find(L"altheme") == std::wstring::npos);
+}
+
+// The types listed under each kind are the ones the importer takes as that kind.
+TEST(AppImportableTypesAreTheImportersOwn) {
+    using namespace app::importable;
+    for (const wchar_t *e : kPictures) CHECK(staging::LooksLikePicture(std::wstring(L"C:\\a.") + e));
+    for (const wchar_t *e : kVideos) CHECK(!staging::LooksLikePicture(std::wstring(L"C:\\a.") + e));
 }
 
 TEST(AppLibraryKeepsOnlyRealChanges) {

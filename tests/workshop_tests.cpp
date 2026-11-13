@@ -1,5 +1,6 @@
-// Finding Wallpaper Engine's video wallpapers (app/src/workshop.h): Steam's list of libraries,
-// project.json, and a scan of folders laid out as Steam and Wallpaper Engine lay them out.
+// Finding Wallpaper Engine's video wallpapers (app/src/workshop.h): Steam's list of libraries
+// (app/src/steam_library.h), project.json, and a scan of folders laid out as Steam and Wallpaper
+// Engine lay them out.
 #include "check.h"
 
 #include <windows.h>
@@ -9,9 +10,11 @@
 #include "animelogon/paths.h"
 #include "animelogon/secure.h"
 
+#include "steam_library.h"
 #include "workshop.h"
 
 using namespace app::workshop;
+using app::steam_library::LibraryFolders;
 
 namespace {
 

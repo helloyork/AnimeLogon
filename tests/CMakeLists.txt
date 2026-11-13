@@ -58,3 +58,23 @@ target_include_directories(animelogon_tests PRIVATE ${PROJECT_SOURCE_DIR}/app/sr
 # alone as a layer, drawn by the logon screen's renderer.
 target_sources(animelogon_tests PRIVATE app_picture_tests.cpp ${PROJECT_SOURCE_DIR}/app/src/pictures.cpp)
 target_link_libraries(animelogon_tests PRIVATE animelogon_render animelogon_scene_host)
+
+# Finding an app's files and Workshop downloads in Steam's libraries (workshop.cpp uses it too).
+target_sources(animelogon_tests PRIVATE steam_library_tests.cpp ${PROJECT_SOURCE_DIR}/app/src/steam_library.cpp)
+
+# The Steam helper (steam/) run as a child process against a stand-in for Steam's library: a DLL
+# named steam_api64.dll that exports the entry points the helper looks up and answers from a JSON
+# fixture (steam/PROTOCOL.md). Built only where the helper is (x64), into a folder of its own, so
+# that it is never mistaken for Valve's library or copied beside the programs in bin/.
+if(TARGET animelogon_steam)
+    add_library(fake_steam_api SHARED fake_steam/fake_steam_api.cpp ${PROJECT_SOURCE_DIR}/app/src/json.cpp)
+    set_target_properties(fake_steam_api PROPERTIES OUTPUT_NAME steam_api64
+                          RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/fake-steam)
+    target_include_directories(fake_steam_api PRIVATE ${PROJECT_SOURCE_DIR}/steam/src ${PROJECT_SOURCE_DIR}/app/src)
+    target_link_libraries(fake_steam_api PRIVATE animelogon_common)
+    target_sources(animelogon_tests PRIVATE steam_tests.cpp)
+    add_dependencies(animelogon_tests animelogon_steam fake_steam_api)
+    target_compile_definitions(animelogon_tests PRIVATE
+        "ANIMELOGON_STEAM_HELPER=\"$<TARGET_FILE:animelogon_steam>\""
+        "ANIMELOGON_FAKE_STEAM_DLL=\"$<TARGET_FILE:fake_steam_api>\"")
+endif()
