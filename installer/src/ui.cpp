@@ -892,7 +892,9 @@ LRESULT Window::Handle(UINT msg, WPARAM wp, LPARAM lp) {
 
 bool OpenAsDesktopUser(const std::wstring &target, const std::wstring &args) {
     // The desktop's folder view belongs to Explorer, which runs as the signed-in person; its
-    // Application object starts programs as Explorer would.
+    // Application object starts programs as Explorer would. A desktop without a shell (an install
+    // run as SYSTEM, a service's session) has nobody to start them for.
+    if (!GetShellWindow()) return false;
     ComPtr<IShellWindows> windows;
     if (FAILED(CoCreateInstance(CLSID_ShellWindows, nullptr, CLSCTX_LOCAL_SERVER, IID_PPV_ARGS(&windows)))) return false;
     VARIANT empty{};
