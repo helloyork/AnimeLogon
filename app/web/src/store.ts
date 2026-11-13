@@ -47,7 +47,7 @@ export interface State {
 }
 
 let state: State = {
-  env: { on: false, installed: false, version: '', user: '', accountPicture: false, wallpaperEngine: false, monitors: [], fonts: [], devices: [] },
+  env: { on: false, installed: false, others: [], version: '', user: '', accountPicture: false, wallpaperEngine: false, monitors: [], fonts: [], devices: [] },
   lib: null,
   open: null,
   clock: '',
@@ -212,6 +212,21 @@ export const global = (key: string, value: string | number | boolean) => send('g
 export function workshopFlow(wallpaper: boolean) {
   send('workshop');
   openDialog({ kind: 'workshop', wallpaper });
+}
+
+/* --- the switch --- */
+// The other programs drawing the logon screen that are on now, by name.
+export const othersOn = () => state.env.others.filter(o => o.on).map(o => o.name);
+// Switching on switches the others off, so that is asked first.
+export function switchOn() {
+  const names = othersOn().join('、');
+  if (!names) return send('switch', { on: true });
+  openDialog({
+    kind: 'confirm', title: '启用 AnimeLogon', action: '启用', elevated: true,
+    body: [`${names} 正在使用。它和 AnimeLogon 都会替换登录界面，同一时间只能启用其中一个。`,
+      `启用 AnimeLogon 将停用 ${names}。它不会被卸载，设置也会保留，以后可以在它的设置程序中重新启用。`],
+    run: () => send('switch', { on: true }),
+  });
 }
 
 /* --- what the native side says --- */

@@ -1,8 +1,8 @@
 // install.exe: installs AnimeLogon. Requires administrator rights (res/admin.manifest).
 // Before changing anything it asks whether to go on, since installing turns the Windows lock
-// screen off; a "No" exits with ERROR_CANCELLED and the machine untouched. With --quiet it asks
-// nothing and prints to the parent console instead of showing message boxes: scripted installs
-// tell the person themselves.
+// screen off, or another program that draws the logon screen; a "No" exits with ERROR_CANCELLED
+// and the machine untouched. With --quiet it asks nothing and prints to the parent console
+// instead of showing message boxes: scripted installs tell the person themselves.
 
 #include <windows.h>
 #include <objbase.h>
@@ -12,16 +12,29 @@
 
 #include "animelogon/log.h"
 #include "animelogon/machine.h"
+#include "animelogon/others.h"
 
 #include "engine.h"
 
 namespace {
 
-// What installing takes away from Windows, as the README's "Changes to your system" puts it.
-// Not asked when the Windows lock screen is off already (an update, or a machine where it was
-// turned off before AnimeLogon): then nothing goes that was there.
+// What installing takes away. Another program drawing the logon screen is switched off by it, so
+// that is asked first. Otherwise it is what Windows loses, as the README's "Changes to your
+// system" puts it, and not asked when the Windows lock screen is off already (an update, or a
+// machine where it was turned off before AnimeLogon): then nothing goes that was there.
 bool Agreed(bool quiet) {
-    if (quiet || animelogon::machine::WindowsLockScreenApplied()) return true;
+    if (quiet) return true;
+    for (const animelogon::others::Program &p : animelogon::others::Installed()) {
+        if (!p.on) continue;
+        const std::wstring text =
+            p.name + L" 已在这台电脑上启用。它和 AnimeLogon 都会替换登录界面，同一时间只能启用其中一个。\n\n"
+            L"继续安装将停用 " + p.name + L"。它不会被卸载，设置也会保留。\n\n"
+            L"如需换回，请先在「AnimeLogon 设置 > 设置」中关闭「启用 AnimeLogon」，再在 " + p.name +
+            L" 的设置程序中重新启用。\n\n"
+            L"是否继续安装？";
+        return MessageBoxW(nullptr, text.c_str(), L"安装 AnimeLogon", MB_YESNO | MB_ICONINFORMATION | MB_DEFBUTTON1) == IDYES;
+    }
+    if (animelogon::machine::WindowsLockScreenApplied()) return true;
     const wchar_t *text =
         L"AnimeLogon 会关闭 Windows 锁屏，换成自己绘制的锁屏。\n\n"
         L"在此期间，Windows 聚焦和锁屏小组件不可用，也无法在 Windows 设置中更改锁屏图片。\n\n"

@@ -18,6 +18,7 @@
 #include "animelogon/components.h"
 #include "animelogon/log.h"
 #include "animelogon/machine.h"
+#include "animelogon/others.h"
 #include "animelogon/paths.h"
 #include "animelogon/secure.h"
 #include "animelogon/text.h"
@@ -564,6 +565,12 @@ void Host::SendEnvironment() {
     // A sandbox (paths.h) stands for an installed AnimeLogon that is on, whatever this machine has.
     const bool sandbox = !paths::Sandbox().empty();
     w.Member(L"on", sandbox || machine::IsOn()).Member(L"installed", sandbox || !machine::InstallDir().empty());
+    // Other programs that draw the logon screen, which switching AnimeLogon on switches off.
+    w.Key(L"others").BeginArray();
+    if (!sandbox)
+        for (const others::Program &p : others::Installed())
+            w.BeginObject().Member(L"name", p.name).Member(L"on", p.on).EndObject();
+    w.EndArray();
     w.Member(L"version", L"" ANIMELOGON_VERSION);
     // Who the sign-in screen would greet, for the lock-screen preview.
     w.Member(L"user", AccountName()).Member(L"accountPicture", !AccountPicture().empty());
@@ -1446,8 +1453,13 @@ void Host::Switch(bool on) {
         SendEnvironment();
         return;
     }
+    // Switching on switches these off (others.h).
+    std::wstring stopping;
+    for (const others::Program &p : others::Installed())
+        if (on && p.on) stopping += (stopping.empty() ? L"" : L"、") + p.name;
     const int code = commit::RunElevated(hwnd_, on ? L"--switch-on" : L"--switch-off");
-    if (code == commit::kOk) Toast(on ? L"已启用，下次锁屏生效" : L"已关闭，锁屏已恢复为 Windows 默认界面");
+    if (code == commit::kOk && !on) Toast(L"已关闭，锁屏已恢复为 Windows 默认界面");
+    else if (code == commit::kOk) Toast(stopping.empty() ? L"已启用，下次锁屏生效" : L"已启用，并停用了 " + stopping);
     else if (code == commit::kDeclined) Toast(L"已取消");
     else Problem(L"操作失败。请确认已安装 AnimeLogon 并具有管理员权限。");
     SendEnvironment();

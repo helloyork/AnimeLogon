@@ -5,7 +5,7 @@ import { useEffect, useId, useState, type ReactNode } from 'react';
 import { UacShield } from '../icons';
 import { calm } from '../motion';
 import { send } from '../native';
-import { global, perMonitor, setState, themeOf, useStore } from '../store';
+import { global, perMonitor, setState, switchOn, themeOf, useStore } from '../store';
 import { Button, cx, Select, Slider, Switch, type Choice } from '../ui/controls';
 
 // The control in a row is named by the row's title. `anchor` is what the icon in the system tray
@@ -72,6 +72,7 @@ export function SettingsPage() {
   const s = useStore();
   const set = s.lib!.settings, c = set.clock;
   const several = s.env.monitors.length > 1;
+  const others = s.env.others.filter(o => o.on).map(o => o.name).join('、');
   // Pointed out once: coming back to the page later does not do it again.
   const reveal = s.reveal;
   useEffect(() => {
@@ -88,14 +89,20 @@ export function SettingsPage() {
 
         {/* The switch for the whole program comes first. */}
         <Group>
-          <Row title="启用 AnimeLogon" description="关闭后锁屏恢复为 Windows 默认界面，主题和设置将保留。" anchor="switch">
+          <Row title="启用 AnimeLogon" description={!s.env.on && others ? `${others} 正在使用，启用 AnimeLogon 将停用它。` : '关闭后锁屏恢复为 Windows 默认界面，主题和设置将保留。'} anchor="switch">
             {() => (
               <>
                 <UacShield />
-                <Switch label="启用 AnimeLogon" checked={s.env.on} onChange={v => send('switch', { on: v })} />
+                <Switch label="启用 AnimeLogon" checked={s.env.on} onChange={v => (v ? switchOn() : send('switch', { on: false }))} />
               </>
             )}
           </Row>
+          {/* Both on: one of them has to go. */}
+          {s.env.on && others && (
+            <Row sub title={`${others} 也已启用`} description="两者同时启用时会争用登录界面。">
+              {() => <Button size="sm" shield onClick={() => send('switch', { on: true })}>{`停用 ${others}`}</Button>}
+            </Row>
+          )}
         </Group>
 
         <Group title="时钟">
