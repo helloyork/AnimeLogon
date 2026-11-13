@@ -42,6 +42,9 @@ export interface State {
   dialogs: Dialog[];
   lock: { theme: string; ratio?: number } | null;
   workshop: Workshop | null;        // Wallpaper Engine's wallpapers, as last looked for
+  // A setting to point out, because the icon in the system tray opened the app at it. A new object
+  // each time it is asked for; the settings page clears it once it has.
+  reveal: { what: 'switch' } | null;
 }
 
 let state: State = {
@@ -60,6 +63,7 @@ let state: State = {
   dialogs: [],
   lock: null,
   workshop: null,
+  reveal: null,
 };
 const listeners = new Set<() => void>();
 
@@ -273,11 +277,24 @@ function receive(m: FromNative) {
     case 'busy': setState({ busy: m.label ? { label: m.label, percent: m.percent ?? 0 } : null }); break;
     case 'added': setState({ sel: { inst: m.instance, part: null } }); break;
     case 'navigate': resetPreview(); setState({ view: 'theme', tab: 'mine', sel: { inst: null, part: null } }); break;
+    case 'show': show(m.what); break;
     case 'workshop': {
       const { type: _type, ...found } = m;
       setState({ workshop: found });
       break;
     }
+  }
+}
+
+// The icon in the system tray asked for something that needs this window (app/src/tray.h): the
+// switch that turns AnimeLogon on and off, which needs an administrator, pointed out on the
+// settings page; or the lock-screen preview of what the main display shows.
+function show(what: 'switch' | 'lock') {
+  if (what === 'switch') {
+    setState({ tab: 'settings', lock: null, hover: null, reveal: { what } });
+  } else if (what === 'lock' && state.lib) {
+    const theme = state.lib.settings.monitorMode === 'per-monitor' ? screenTheme(mainMonitor().key) : state.lib.current;
+    if (theme) setState({ lock: { theme } });
   }
 }
 listen(receive);

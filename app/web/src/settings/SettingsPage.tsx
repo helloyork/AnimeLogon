@@ -1,18 +1,20 @@
 // Settings: what every theme shares. Settings come in groups, each group one card whose rows are its
 // settings: the name and a line about it on the left, the control on the right. A setting's
 // sub-settings follow it in the same card, indented.
-import { useId, useState, type ReactNode } from 'react';
+import { useEffect, useId, useState, type ReactNode } from 'react';
 import { UacShield } from '../icons';
 import { LANGUAGES, list, t, tn, type Key } from '../i18n';
+import { calm } from '../motion';
 import { send } from '../native';
-import { global, openLink, perMonitor, setLanguage, switchOn, themeOf, useStore } from '../store';
+import { global, openLink, perMonitor, setLanguage, setState, switchOn, themeOf, useStore } from '../store';
 import { Button, cx, Select, Slider, Switch, type Choice } from '../ui/controls';
 
-// The control in a row is named by the row's title.
-function Row({ title, description, children, sub, dim }: { title: string; description?: string; children?: (labelId: string) => ReactNode; sub?: boolean; dim?: boolean }) {
+// The control in a row is named by the row's title. `anchor` is what the icon in the system tray
+// may ask to have pointed out (store.ts `reveal`).
+function Row({ title, description, children, sub, dim, anchor }: { title: string; description?: string; children?: (labelId: string) => ReactNode; sub?: boolean; dim?: boolean; anchor?: string }) {
   const id = useId();
   return (
-    <div className={cx('row', sub && 'sub', dim && 'dim')}>
+    <div className={cx('row', sub && 'sub', dim && 'dim')} data-anchor={anchor}>
       <div className="lbl">
         <div id={id}>{title}</div>
         {description && <div className="t-cap">{description}</div>}
@@ -32,6 +34,26 @@ function Group({ title, children }: { title?: string; children: ReactNode }) {
 }
 
 const choices = (pairs: [string, Key][]): Choice[] => pairs.map(([value, key]) => ({ value, label: t(key) }));
+// 1 to 10 themes in the icon's menu, in the language shown.
+const trayCounts = (): Choice[] => Array.from({ length: 10 }, (_, i) => ({ value: String(i + 1), label: tn('settings.tray.count_n', i + 1) }));
+
+// Scrolls to the row, puts the focus on its control and marks the row for a moment: an outline
+// in the accent colour that fades, or that stays and goes at once when animations are off.
+// Element.animate leaves the row's classes to React and takes no CSS variables.
+function pointOut(what: string) {
+  const row = document.querySelector<HTMLElement>(`[data-anchor="${what}"]`);
+  if (!row) return;
+  row.scrollIntoView({ block: 'center', behavior: calm() ? 'auto' : 'smooth' });
+  row.querySelector<HTMLElement>('input, button, select')?.focus({ preventScroll: true });
+  const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#2f6fe4';
+  row.animate(
+    [
+      { boxShadow: `inset 0 0 0 2px ${accent}`, backgroundColor: `color-mix(in srgb, ${accent} 12%, transparent)` },
+      { boxShadow: 'inset 0 0 0 2px transparent', backgroundColor: 'transparent' },
+    ],
+    { duration: 2000, easing: calm() ? 'step-end' : 'cubic-bezier(.33, 0, .67, 1)' },
+  );
+}
 
 // A volume: moves freely, saved when let go.
 function Volume({ value, onDone, labelledBy }: { value: number; onDone: (v: number) => void; labelledBy: string }) {
@@ -53,6 +75,13 @@ export function SettingsPage() {
   const set = s.lib!.settings, c = set.clock;
   const several = s.env.monitors.length > 1;
   const others = list(s.env.others.filter(o => o.on).map(o => o.name));
+  // Pointed out once: coming back to the page later does not do it again.
+  const reveal = s.reveal;
+  useEffect(() => {
+    if (!reveal) return;
+    pointOut(reveal.what);
+    setState({ reveal: null });
+  }, [reveal]);
   return (
     <main className="scroll">
       <div className="page narrow">
@@ -62,7 +91,7 @@ export function SettingsPage() {
 
         {/* The switch for the whole program comes first. */}
         <Group>
-          <Row title={t('settings.enable')} description={!s.env.on && others ? t('settings.enable.others', { names: others }) : t('settings.enable.detail')}>
+          <Row title={t('settings.enable')} description={!s.env.on && others ? t('settings.enable.others', { names: others }) : t('settings.enable.detail')} anchor="switch">
             {() => (
               <>
                 <UacShield />
@@ -178,6 +207,17 @@ export function SettingsPage() {
                 <Row sub title={t('settings.sound.video_volume')}>{id => <Volume labelledBy={id} value={set.audio.videoVolume} onDone={v => global('audio.videoVolume', v)} />}</Row>
               )}
             </>
+          )}
+        </Group>
+
+        <Group title={t('settings.tray')}>
+          <Row title={t('settings.tray.show')} description={t('settings.tray.show.detail')}>
+            {() => <Switch label={t('settings.tray.show')} checked={set.tray} onChange={v => global('tray', v)} />}
+          </Row>
+          {set.tray && (
+            <Row sub title={t('settings.tray.count')}>
+              {() => <Select label={t('settings.tray.count')} value={String(set.trayRecent)} onChange={v => global('trayRecent', v)} options={trayCounts()} />}
+            </Row>
           )}
         </Group>
 

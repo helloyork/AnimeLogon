@@ -5,10 +5,14 @@
 #include <mfidl.h>
 #include <shlobj.h>
 #include <shobjidl.h>
+#include <exdisp.h>
+#include <shldisp.h>
+#include <shlguid.h>
 #include <wrl/client.h>
 #include <aclapi.h>
 
 #include <algorithm>
+#include <functional>
 #include <iterator>
 #include <vector>
 
@@ -77,6 +81,12 @@ constexpr const wchar_t *kUninstallKey =
 constexpr const wchar_t *kShortcut = L"AnimeLogon.lnk";
 constexpr const wchar_t *kOldShortcut = L"AnimeLogon \u8bbe\u7f6e.lnk";
 constexpr const wchar_t *kProjectUrl = L"https://github.com/helloyork/AnimeLogon";
+// Windows starts the icon in the notification area at every sign-in, for every account, from here;
+// it ends at once where settings.ini's `tray` is off.
+constexpr const wchar_t *kRunKey = L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run";
+constexpr const wchar_t *kRunValue = L"AnimeLogon";
+// How long the settings app and the icon are given to close before their file is replaced.
+constexpr DWORD kCloseWaitMs = 5000;
 
 std::wstring KnownFolder(REFKNOWNFOLDERID id) {
     wchar_t *base = nullptr;
@@ -117,6 +127,107 @@ HRESULT CreateShortcut(const std::wstring &linkPath, const std::wstring &target,
     ComPtr<IPersistFile> file;
     hr = link.As(&file);
     return SUCCEEDED(hr) ? file->Save(linkPath.c_str(), TRUE) : hr;
+}
+
+DWORD WriteRunEntry(const std::wstring &targetDir) {
+    HKEY key = nullptr;
+    DWORD e = RegCreateKeyExW(HKEY_LOCAL_MACHINE, kRunKey, 0, nullptr, 0, KEY_SET_VALUE | KEY_WOW64_64KEY, nullptr, &key,
+                              nullptr);
+    if (e != ERROR_SUCCESS) return e;
+    e = WriteRegString(key, kRunValue, L"\"" + AppPath(targetDir) + L"\" --tray");
+    RegCloseKey(key);
+    return e;
+}
+
+DWORD RemoveRunEntry() {
+    HKEY key = nullptr;
+    DWORD e = RegOpenKeyExW(HKEY_LOCAL_MACHINE, kRunKey, 0, KEY_SET_VALUE | KEY_WOW64_64KEY, &key);
+    if (e == ERROR_SUCCESS) {
+        e = RegDeleteValueW(key, kRunValue);
+        RegCloseKey(key);
+    }
+    return e == ERROR_FILE_NOT_FOUND ? ERROR_SUCCESS : e;
+}
+
+// The settings app and the icon in the notification area run animelogon.exe, which cannot be
+// replaced or deleted while they do. Those on this desktop are asked to close, as at sign-out,
+// and waited for; a sandbox's are not AnimeLogon's own (their title names the sandbox, and they
+// run another copy). Another account's, signed in at the same time, are out of reach
+// (WriteOver moves their file aside). Returns whether the icon was among them.
+bool CloseRunningApp() {
+    std::vector<HWND> windows;
+    EnumWindows(
+        [](HWND hwnd, LPARAM lp) -> BOOL {
+            wchar_t name[32] = {}, title[32] = {};
+            GetClassNameW(hwnd, name, ARRAYSIZE(name));
+            GetWindowTextW(hwnd, title, ARRAYSIZE(title));
+            if ((wcscmp(name, L"AnimeLogonApp") == 0 || wcscmp(name, L"AnimeLogonTray") == 0) && wcscmp(title, kDisplayName) == 0)
+                reinterpret_cast<std::vector<HWND> *>(lp)->push_back(hwnd);
+            return TRUE;
+        },
+        reinterpret_cast<LPARAM>(&windows));
+    bool tray = false;
+    std::vector<HANDLE> processes;
+    for (HWND w : windows) {
+        wchar_t name[32] = {};
+        GetClassNameW(w, name, ARRAYSIZE(name));
+        tray = tray || wcscmp(name, L"AnimeLogonTray") == 0;
+        DWORD pid = 0;
+        GetWindowThreadProcessId(w, &pid);
+        if (HANDLE p = OpenProcess(SYNCHRONIZE, FALSE, pid)) processes.push_back(p);
+        PostMessageW(w, WM_CLOSE, 0, 0);
+    }
+    if (!processes.empty() &&
+        WaitForMultipleObjects((DWORD)processes.size(), processes.data(), TRUE, kCloseWaitMs) == WAIT_TIMEOUT)
+        ALOG(L"AnimeLogon's windows did not all close");
+    else if (!windows.empty())
+        ALOG(L"closed %zu of AnimeLogon's windows", windows.size());
+    for (HANDLE p : processes) CloseHandle(p);
+    return tray;
+}
+
+// Starts the icon in the notification area as the person whose desktop this is, not elevated as
+// the installer is: through Explorer's own ShellExecute, the way the shell starts what is
+// double-clicked.
+// Nothing is started where this desktop has no shell (a scripted install as SYSTEM, a service's
+// session): asking COM for the shell's windows there would start a server just to find none.
+HRESULT StartTrayOnDesktop(const std::wstring &targetDir) {
+    if (!GetShellWindow()) return S_FALSE;
+    ComPtr<IShellWindows> windows;
+    HRESULT hr = CoCreateInstance(CLSID_ShellWindows, nullptr, CLSCTX_LOCAL_SERVER, IID_PPV_ARGS(&windows));
+    if (FAILED(hr)) return hr;
+    VARIANT desktop{}, empty{};
+    desktop.vt = VT_I4;
+    desktop.lVal = CSIDL_DESKTOP;
+    long hwnd = 0;
+    ComPtr<IDispatch> found;
+    hr = windows->FindWindowSW(&desktop, &empty, SWC_DESKTOP, &hwnd, SWFO_NEEDDISPATCH, &found);
+    if (hr != S_OK || !found) return FAILED(hr) ? hr : E_FAIL;  // S_FALSE: no desktop window
+    ComPtr<IServiceProvider> provider;
+    ComPtr<IShellBrowser> browser;
+    ComPtr<IShellView> view;
+    ComPtr<IDispatch> background, application;
+    ComPtr<IShellFolderViewDual> folder;
+    ComPtr<IShellDispatch2> shell;
+    if (FAILED(hr = found.As(&provider)) || FAILED(hr = provider->QueryService(SID_STopLevelBrowser, IID_PPV_ARGS(&browser))) ||
+        FAILED(hr = browser->QueryActiveShellView(&view)) ||
+        FAILED(hr = view->GetItemObject(SVGIO_BACKGROUND, IID_PPV_ARGS(&background))) || FAILED(hr = background.As(&folder)) ||
+        FAILED(hr = folder->get_Application(&application)) || FAILED(hr = application.As(&shell)))
+        return hr;
+    BSTR file = SysAllocString(AppPath(targetDir).c_str());
+    VARIANT args{}, dir{}, verb{}, show{};
+    args.vt = dir.vt = verb.vt = VT_BSTR;
+    args.bstrVal = SysAllocString(L"--tray");
+    dir.bstrVal = SysAllocString(targetDir.c_str());
+    verb.bstrVal = SysAllocString(L"open");
+    show.vt = VT_I4;
+    show.lVal = SW_SHOWNORMAL;
+    hr = shell->ShellExecute(file, args, dir, verb, show);
+    SysFreeString(file);
+    VariantClear(&args);
+    VariantClear(&dir);
+    VariantClear(&verb);
+    return hr;
 }
 
 // A quick directory size, for the uninstall entry's EstimatedSize.
@@ -220,32 +331,6 @@ bool WebView2RuntimePresent(const std::wstring &targetDir) {
     return present;
 }
 
-// A settings window still open from the install directory holds animelogon.exe, which then could
-// not be replaced or deleted. It is asked to close, as its close box would, and given a few seconds.
-// Windows of a sandbox (another animelogon.exe somewhere else) are left alone.
-void CloseRunningApp(const std::wstring &dir) {
-    if (dir.empty()) return;
-    std::vector<HANDLE> waiting;
-    HWND w = nullptr;
-    while ((w = FindWindowExW(nullptr, w, L"AnimeLogonApp", nullptr)) != nullptr) {
-        DWORD pid = 0;
-        GetWindowThreadProcessId(w, &pid);
-        HANDLE p = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, pid);
-        if (!p) continue;
-        wchar_t image[MAX_PATH * 2] = {};
-        DWORD size = ARRAYSIZE(image);
-        if (QueryFullProcessImageNameW(p, 0, image, &size) && paths::IsWithin(image, dir)) {
-            ALOG(L"closing the settings window of process %lu", pid);
-            PostMessageW(w, WM_CLOSE, 0, 0);
-            waiting.push_back(p);
-        } else {
-            CloseHandle(p);
-        }
-    }
-    if (!waiting.empty()) WaitForMultipleObjects((DWORD)waiting.size(), waiting.data(), TRUE, 5000);
-    for (HANDLE p : waiting) CloseHandle(p);
-}
-
 // The nearest directory of `path` that exists, for asking about its volume.
 std::wstring ExistingAncestor(std::wstring path) {
     while (!path.empty() && GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES) {
@@ -257,13 +342,35 @@ std::wstring ExistingAncestor(std::wstring path) {
     return path;
 }
 
+// Writes an installed file with `write`. One still running -- the settings app or the tray icon in
+// another account's session, which CloseRunningApp cannot reach -- is moved aside first (a running
+// program's file can be renamed, not replaced) and deleted at the next restart; it goes on running
+// until it ends, and the next start is the new one.
+DWORD WriteOver(const std::wstring &to, const std::function<DWORD()> &write) {
+    const DWORD e = write();
+    if (e != ERROR_SHARING_VIOLATION && e != ERROR_ACCESS_DENIED) return e;
+    const std::wstring aside = to + L"." + std::to_wstring(GetTickCount64()) + L".old";
+    if (!MoveFileExW(to.c_str(), aside.c_str(), 0)) return e;
+    const DWORD again = write();
+    if (again != ERROR_SUCCESS) {
+        MoveFileExW(aside.c_str(), to.c_str(), 0);
+        return again;
+    }
+    MoveFileExW(aside.c_str(), nullptr, MOVEFILE_DELAY_UNTIL_REBOOT);
+    ALOG(L"%s was in use: the old copy goes at the next restart", to.c_str());
+    return ERROR_SUCCESS;
+}
+
 // Writes one program or document into the install directory: from inside install.exe, or from
 // beside it when this build carries none.
 DWORD Place(const wchar_t *name, const std::wstring &to, bool required) {
-    if (payload::Has(name)) return payload::Write(name, to);
+    const bool carried = payload::Has(name);
     const std::wstring from = SourceDir() + L"\\" + name;
-    if (GetFileAttributesW(from.c_str()) == INVALID_FILE_ATTRIBUTES) return required ? ERROR_FILE_NOT_FOUND : ERROR_SUCCESS;
-    return CopyFileW(from.c_str(), to.c_str(), FALSE) ? ERROR_SUCCESS : GetLastError();
+    if (!carried && GetFileAttributesW(from.c_str()) == INVALID_FILE_ATTRIBUTES) return required ? ERROR_FILE_NOT_FOUND : ERROR_SUCCESS;
+    return WriteOver(to, [&]() -> DWORD {
+        if (carried) return payload::Write(name, to);
+        return CopyFileW(from.c_str(), to.c_str(), FALSE) ? ERROR_SUCCESS : GetLastError();
+    });
 }
 
 }  // namespace
@@ -413,7 +520,7 @@ Report Install(const std::wstring &targetDir, const InstallOptions &options) {
     RemoveOldStores();
 
     at(0.15, "install.step.close_app");
-    CloseRunningApp(targetDir);
+    CloseRunningApp();
 
     at(0.20, "install.step.copy");
     if (!paths::CreateDirectories(targetDir)) return fail(Tr("install.error.mkdir", {{L"dir", targetDir}}));
@@ -512,6 +619,13 @@ Report Install(const std::wstring &targetDir, const InstallOptions &options) {
         if (FAILED(hr)) ALOG(L"install: no desktop shortcut (0x%08lx)", (unsigned long)hr);
     }
 
+    e = WriteRunEntry(targetDir);
+    if (e != ERROR_SUCCESS) ALOG(L"install: no Run entry for the icon (%lu)", e);
+    // Now too, for whoever is signed in here.
+    const HRESULT tray = StartTrayOnDesktop(targetDir);
+    if (tray == S_FALSE) ALOG(L"install: no shell on this desktop to start the icon in");
+    else if (FAILED(tray)) ALOG(L"install: the icon was not started (0x%08lx)", (unsigned long)tray);
+
     r.ok = true;
     r.message = Tr("install.done");
     if (!switchedOff.empty()) r.message += L"\n\n" + Tr("install.others_off", {{L"name", switchedOff}});
@@ -542,7 +656,7 @@ Report Uninstall(bool keepData, const Progress &progress) {
     const std::wstring dir = machine::InstallDir();
 
     at(0.05, "uninstall.step.close_app");
-    CloseRunningApp(dir);
+    CloseRunningApp();
 
     at(0.15, "uninstall.step.entry");
     const std::pair<REFKNOWNFOLDERID, const wchar_t *> links[] = {
@@ -556,6 +670,8 @@ Report Uninstall(bool keepData, const Progress &progress) {
     }
     DWORD e = RegDeleteKeyExW(HKEY_LOCAL_MACHINE, kUninstallKey, KEY_WOW64_64KEY, 0);
     if (e != ERROR_SUCCESS && e != ERROR_FILE_NOT_FOUND) problem("uninstall.problem.entry", e);
+    e = RemoveRunEntry();
+    if (e != ERROR_SUCCESS) problem("uninstall.problem.run", e);
 
     // Only the service can write these back, so before it goes.
     at(0.30, "uninstall.step.service");
@@ -589,6 +705,7 @@ Report Uninstall(bool keepData, const Progress &progress) {
 
     if (!dir.empty()) {
         at(0.85, "uninstall.step.files");
+        CloseRunningApp();
         DWORD first = ERROR_SUCCESS;
         std::vector<const wchar_t *> files(kComponents, kComponents + kComponentCount);
         files.insert(files.end(), std::begin(kRetired), std::end(kRetired));

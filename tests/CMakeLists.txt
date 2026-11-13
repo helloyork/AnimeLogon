@@ -42,9 +42,11 @@ target_sources(animelogon_tests PRIVATE export_sound_tests.cpp ${PROJECT_SOURCE_
 target_sources(animelogon_tests PRIVATE player_tests.cpp ${PROJECT_SOURCE_DIR}/overlay/src/player.cpp)
 target_link_libraries(animelogon_tests PRIVATE d3d11)
 
-# The new settings app's library and its messages, against stores in memory.
+# The new settings app's library and its messages, and what the icon in the notification area
+# offers, against stores in memory.
 target_sources(animelogon_tests PRIVATE app_tests.cpp ${PROJECT_SOURCE_DIR}/app/src/json.cpp
-                                        ${PROJECT_SOURCE_DIR}/app/src/library.cpp)
+                                        ${PROJECT_SOURCE_DIR}/app/src/library.cpp
+                                        ${PROJECT_SOURCE_DIR}/app/src/traymenu.cpp)
 # Finding Wallpaper Engine's video wallpapers, in folders the test lays out as Steam does.
 target_sources(animelogon_tests PRIVATE workshop_tests.cpp ${PROJECT_SOURCE_DIR}/app/src/workshop.cpp)
 target_include_directories(animelogon_tests PRIVATE ${PROJECT_SOURCE_DIR}/app/src)

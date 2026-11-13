@@ -37,6 +37,8 @@ export interface Settings {
   componentDisplays: 'auto' | 'primary' | 'all';
   otherDisplays: 'blur' | 'picture' | 'black';  // what the other displays show from the wake until sign-in
   media: boolean;
+  tray: boolean;       // the icon in the system tray (app/src/tray.h)
+  trayRecent: number;  // how many recently used themes its menu offers
   clock: { hours: 'auto' | '12' | '24'; ampm: boolean; date: 'weekday' | 'long' | 'none'; language: string };
   audio: { enabled: boolean; device: string; volume: number; video: boolean; videoVolume: number };
 }
@@ -210,6 +212,7 @@ export type FromNative =
   | { type: 'busy'; label: string | null; percent?: number }
   | { type: 'added'; instance: string }
   | { type: 'navigate'; theme: string }
+  | { type: 'show'; what: 'switch' | 'lock' }
   | ({ type: 'workshop' } & Workshop)
   | ({ type: 'frame' } & WindowFrame);
 

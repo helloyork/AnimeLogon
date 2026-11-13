@@ -52,6 +52,12 @@ enum class OtherDisplays {
     Black,    // nothing: black, as Windows leaves them
 };
 
+// The icon in the notification area (animelogon.exe --tray) offers the themes most recently put on
+// the logon screen: `tray_recent` of them, between kTrayRecentMin and Max. settings.ini remembers
+// up to kRecentMax.
+constexpr int kTrayRecent = 5, kTrayRecentMin = 1, kTrayRecentMax = 10;
+constexpr size_t kRecentMax = kTrayRecentMax;
+
 struct AudioSource {
     bool enabled = true;
     int volume = 100;  // 0..100
@@ -101,6 +107,12 @@ struct Settings {
     // whichever theme and component show it.
     ClockStyle clock;
     AudioSettings audio;
+    // `tray`: whether AnimeLogon shows its icon in the notification area while someone is signed in.
+    bool tray = true;
+    int trayRecent = kTrayRecent;  // `tray_recent`: how many recent themes the icon's menu offers
+    // `recent`: the themes most recently put on the logon screen, newest first and comma-separated,
+    // at most kRecentMax. Nothing on the logon screen reads it.
+    std::vector<std::wstring> recent;
 
     // --- Themes --------------------------------------------------------------------------
     std::map<std::wstring, ThemeOverrides> themeOverrides;  // by theme id

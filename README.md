@@ -50,6 +50,10 @@ files to share.
 Choose the display language in **Settings > General > Display language**: 简体中文, 繁體中文, English or
 日本語. It follows Windows unless you choose one.
 
+AnimeLogon shows an icon in the system tray. Click it to open the settings; right-click it to
+switch between recently used themes. Under **System tray** in the settings, the icon can be hidden
+and the number of themes in its menu changed.
+
 ## Changes to your system
 
 - **The Windows lock screen is turned off.** This is required for the video to be
@@ -58,6 +62,8 @@ Choose the display language in **Settings > General > Display language**: 简体
 - **The sign-in screen background is set by AnimeLogon.** The lock screen picture can no
   longer be changed in Windows Settings.
 - **Imported videos, pictures and themes are stored on drive C:.** The location cannot be changed.
+- **The system tray icon runs at sign-in.** The installer adds a startup entry for every account
+  and uninstalling removes it. It can also be disabled under **Startup apps** in Task Manager.
 
 The installer describes the first two changes and asks before it makes them. Turning off
 **Enable AnimeLogon** in the settings, or uninstalling AnimeLogon, restores these settings.
