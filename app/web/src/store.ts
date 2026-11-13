@@ -250,9 +250,12 @@ function receive(m: FromNative) {
   switch (m.type) {
     case 'environment': {
       const { type: _type, ...env } = m;
-      // The language first, so that everything drawn for this environment is in it.
+      // The language first, so that everything drawn for this environment is in it. The pictures
+      // are drawn again too: what a component shows when nothing is there (a sample song) is in it.
+      const relanguaged = !!state.env.lang && env.lang !== state.env.lang;
       setLang(env.lang);
-      setState({ env });
+      setState(relanguaged ? { env, tick: state.tick + 1 } : { env });
+      if (relanguaged && state.view === 'theme' && state.open) requestPreviewAgain();
       break;
     }
     case 'state': {
