@@ -57,8 +57,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, wchar_t *, int show) {
 
     if (FAILED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED))) return 1;
     instance::Guard only;
-    if (only.Acquire(sandbox ? L"Local\\AnimeLogon.App.Sandbox" : L"Local\\AnimeLogon.App") == instance::Result::AlreadyRunning) {
-        if (HWND existing = FindWindowW(L"AnimeLogonApp", sandbox ? L"AnimeLogon（沙盒）" : nullptr)) {
+    if (only.Acquire(sandbox ? paths::SandboxMutex() : L"Local\\AnimeLogon.App") == instance::Result::AlreadyRunning) {
+        if (HWND existing = FindWindowW(L"AnimeLogonApp", sandbox ? paths::SandboxTitle().c_str() : nullptr)) {
             if (IsIconic(existing)) ShowWindow(existing, SW_RESTORE);
             SetForegroundWindow(existing);
         }

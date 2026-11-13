@@ -12,6 +12,10 @@ namespace animelogon::paths {
 // the system ever does. Empty outside a sandbox.
 void UseSandbox(const std::wstring &root);
 const std::wstring &Sandbox();
+// What the window of a sandbox is called, naming its folder, and the name of the mutex that keeps
+// one window per sandbox folder: windows on different folders run side by side.
+std::wstring SandboxTitle();
+std::wstring SandboxMutex();
 
 // %ProgramData%\AnimeLogon. Created by the installer with an administrators-only DACL.
 std::wstring DataDir();

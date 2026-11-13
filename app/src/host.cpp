@@ -171,7 +171,7 @@ bool Host::Create(int show) {
     // shell asks for.
     const UINT dpi = GetDpiForSystem();
     const int w = MulDiv(1240, dpi, 96), h = MulDiv(800, dpi, 96);
-    hwnd_ = CreateWindowExW(0, kClass, paths::Sandbox().empty() ? L"AnimeLogon" : L"AnimeLogon（沙盒）", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, w, h, nullptr,
+    hwnd_ = CreateWindowExW(0, kClass, paths::Sandbox().empty() ? std::wstring(L"AnimeLogon").c_str() : paths::SandboxTitle().c_str(), WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, w, h, nullptr,
                             nullptr, wc.hInstance, this);
     if (!hwnd_) return false;
     SetIcons();
