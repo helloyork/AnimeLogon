@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "build": "node build.mjs",
-    "check": "tsc --noEmit -p ."
+    "check": "tsc --noEmit -p . && node ../../tools/i18n/check.mjs"
   },
   "dependencies": {
     "@fluentui/react-components": "9.74.9",

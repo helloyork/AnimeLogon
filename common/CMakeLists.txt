@@ -5,6 +5,7 @@ add_library(animelogon_common STATIC
     src/clock.cpp
     src/components.cpp
     src/data.cpp
+    src/i18n.cpp
     src/image.cpp
     src/instance.cpp
     src/live.cpp
