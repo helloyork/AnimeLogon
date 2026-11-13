@@ -3,6 +3,7 @@
 //
 //   <theme format="1" name="Seaside" author="Nomen">
 //     <wallpaper ref="3f2a9c0d11e4b7a8" fit="fill"/>
+//     <wake style="slide" duration="0.8"/>
 //     <component id="clock" ref="clock">
 //       <set key="p1.anchor" value="bottom-left"/>
 //       <set key="p1.l1.t1.weight" value="600"/>
@@ -10,6 +11,9 @@
 //   </theme>
 //
 // - <wallpaper ref fit>, exactly once. `fit` is fill, fit or stretch.
+// - <wake style? duration?>, at most once: how the logon screen gives way to the sign-in screen
+//   when woken (settings.h WakeStyle: fade, zoom, slide or cut) and over how many seconds
+//   (0.1 to 2). Without it, a fade over 0.5 s.
 // - <component id ref visible?>, at most 8. `id` names the instance, [a-z][a-z0-9-]{0,15},
 //   unique and neither "wallpaper" nor "fit"; one component may be placed twice.
 // - <set key value>, at most 128 per instance. `key` is a setting id or an adjustment key of
@@ -58,6 +62,8 @@ struct Theme {
     std::wstring name, author;
     std::wstring wallpaper = L"default";  // the wallpaper's ref
     Scaling fit = Scaling::Fill;
+    WakeStyle wake = WakeStyle::Fade;
+    float wakeSeconds = kWakeSeconds;
     std::vector<Instance> components;
 
     const Instance *Find(const std::wstring &instanceId) const;

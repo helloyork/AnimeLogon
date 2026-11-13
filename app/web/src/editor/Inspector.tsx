@@ -126,7 +126,7 @@ const brief = (i: Instance) =>
 
 function Overview() {
   const s = useStore();
-  const sections = useSections('overview', ['wallpaper', 'components']);
+  const sections = useSections('overview', ['wallpaper', 'components', 'wake']);
   const t = s.open!, wp = t.wallpaper, scene = wp.scene;
   const full = t.room <= 0;
   const hoverOn = (id: string, on: boolean) => setState({ hover: on ? { inst: id, pk: null } : getState().hover?.inst === id ? null : getState().hover });
@@ -194,6 +194,21 @@ function Overview() {
         <Button size="sm" variant="ghost" className="add" icon={<Add16Regular />} disabled={full} onClick={() => openDialog({ kind: 'addComponent' })}>添加组件</Button>
         {full && <p className="inote">已有 8 个组件，隐藏的也算在内。</p>}
       </Section>
+      {/* How the lock screen gives way to the sign-in screen when a key or a click wakes it. The
+          lock-screen preview plays it. */}
+      <Section value="wake" title="唤醒" sections={sections}>
+        <div className="props">
+          <ChoiceField id="wake-style" label="过渡" detail="按键或单击后，锁屏怎样让出登录界面。" value={t.wake} modified={t.wakeModified}
+            options={[{ value: 'fade', label: '淡出' }, { value: 'zoom', label: '放大' }, { value: 'slide', label: '上滑' }, { value: 'cut', label: '直接' }]}
+            write={v => edit('wake', { value: v })} onReset={() => edit('wake', { value: t.ownWake })} />
+          {t.wake !== 'cut' && (
+            <NumberField id="wake-seconds" label="时长" min={0.1} max={2} step={0.05} value={String(t.wakeSeconds)} modified={t.wakeSecondsModified}
+              view={{ factor: 1, digits: 2, unit: () => '秒' }}
+              write={(v, gesture) => edit('wakeSeconds', { value: v, ...(gesture ? { gesture } : {}) })}
+              onReset={() => edit('wakeSeconds', { value: t.ownWakeSeconds })} />
+          )}
+        </div>
+      </Section>
     </>
   );
 }
@@ -257,6 +272,11 @@ function InstanceView({ inst }: { inst: Instance }) {
               <PlaceFields instId={inst.id} pk="p1" />
             </Section>
           )}
+          {single && (
+            <Section value="enter" title="出现" sections={sections}>
+              <EnterFields instId={inst.id} pk="p1" />
+            </Section>
+          )}
           {parts.length > 0 && (
             <Section value="parts" title="逐项调整" sections={sections}>
               <div className="list">
@@ -309,6 +329,9 @@ function PartView({ inst, partKey }: { inst: Instance | SceneControls; partKey: 
           </Section>
         )}
         <Section value="place" title="位置" sections={sections}><PlaceFields instId={inst.id} pk={pt.key} /></Section>
+        {inst.id !== 'wallpaper' && (
+          <Section value="enter" title="出现" sections={sections}><EnterFields instId={inst.id} pk={pt.key} /></Section>
+        )}
       </>
     );
   } else {
@@ -363,6 +386,22 @@ function LayoutFields({ inst, pk }: { inst: Instance; pk: string }) {
       {rows.map(({ label, a }) => (
         <AdjustmentField key={a.key} instId={inst.id} a={{ ...a, label }} onReset={() => clearValues(inst.id, [a.key])} />
       ))}
+    </div>
+  );
+}
+
+// How a panel comes in on the logon screen once the wallpaper is up: its way in, how long it
+// waits, how long it takes. The lock-screen preview plays it.
+function EnterFields({ instId, pk }: { instId: string; pk: string }) {
+  const how = adjustment(instId, pk + '.enter');
+  const at = (attr: string) => adjustment(instId, pk + '.' + attr);
+  return (
+    <div className="props">
+      {['enter', 'enter-delay', 'enter-duration'].map(attr => {
+        const a = at(attr);
+        if (!a || (attr === 'enter-duration' && how?.value === 'none')) return null;
+        return <AdjustmentField key={a.key} instId={instId} a={a} onReset={() => clearValues(instId, [a.key])} />;
+      })}
     </div>
   );
 }

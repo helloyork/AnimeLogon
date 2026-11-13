@@ -60,6 +60,14 @@ public:
     // Draws the components on the target covering `monitor` alone. False if none covers it.
     bool MoveComponentsTo(const RECT &monitor);
 
+    // How far the windows' content has gone on its way out when woken: grown by `scale` about each
+    // display's centre, and moved up by `rise` of its height (-1 is a whole display up). Applied
+    // with the next Render.
+    void SetLeave(float scale, float rise) {
+        leaveScale_ = scale;
+        leaveRise_ = rise;
+    }
+
     void Show();
     void Hide();
     bool visible() const { return visible_; }
@@ -161,4 +169,5 @@ private:
     std::vector<std::vector<size_t>> componentsPerTarget_;
     bool componentsFailed_ = false;
     float componentOpacity_ = 1.0f;
+    float leaveScale_ = 1.0f, leaveRise_ = 0.0f, leaveScaleSaid_ = 1.0f, leaveRiseSaid_ = 0.0f;
 };

@@ -1,7 +1,10 @@
 #include "presenter.h"
 
+#include <d2d1_1helper.h>
 #include <d3d10.h>
 #include <wincodec.h>
+
+#include <cmath>
 
 #include <cstring>
 #include <mutex>
@@ -405,6 +408,8 @@ void Presenter::DestroyWindows() {
     componentsPerTarget_.clear();
     componentsFailed_ = false;
     componentOpacity_ = 1.0f;
+    leaveScale_ = leaveScaleSaid_ = 1.0f;
+    leaveRise_ = leaveRiseSaid_ = 0.0f;
     if (dcomp_) dcomp_->Commit();
     if (context_) {
         context_->ClearState();
@@ -583,7 +588,17 @@ bool Presenter::Render(const std::vector<Picture> &pictures, float dim, float op
             return false;
         }
     }
-    if (opacity != opacity_) {
+    const bool moved = leaveScale_ != leaveScaleSaid_ || leaveRise_ != leaveRiseSaid_;
+    if (moved) {
+        leaveScaleSaid_ = leaveScale_;
+        leaveRiseSaid_ = leaveRise_;
+        for (Window &w : windows_) {
+            const float cx = w.width / 2.0f, cy = w.height / 2.0f;
+            w.visual->SetTransform(D2D1::Matrix3x2F::Scale(leaveScale_, leaveScale_, D2D1::Point2F(cx, cy)) *
+                                   D2D1::Matrix3x2F::Translation(0.0f, std::round(leaveRise_ * w.height)));
+        }
+    }
+    if (opacity != opacity_ || moved) {
         opacity_ = opacity;
         for (Window &w : windows_) w.effect->SetOpacity(opacity);
         if (FAILED(dcomp_->Commit())) return false;

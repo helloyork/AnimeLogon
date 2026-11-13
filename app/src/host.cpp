@@ -667,6 +667,7 @@ void Host::OnResource(ICoreWebView2WebResourceRequestedEventArgs *args) {
     std::vector<uint8_t> body;
     std::wstring type;
     std::wstring sceneBounds;
+    std::wstring partBox;  // X-Part-Box: where a lone panel is, in fractions of the picture
     Picture p;
     if (WebFile(path, &body, &type)) {
         // one of the page's own files
@@ -732,6 +733,61 @@ void Host::OnResource(ICoreWebView2WebResourceRequestedEventArgs *args) {
         const std::wstring ref = path.substr(10, path.size() - 14);
         if (IsWallpaperRef(ref) && pictures_.Wallpaper(ref, Scaling::Fill, 256, 144, &p)) body = Bmp(p);
         type = L"image/bmp";
+    } else if (path.rfind(L"lock/", 0) == 0 && EndsWith(path, L"/entrance.json")) {
+        // How each panel of a theme's visible components comes in, for the lock-screen preview
+        // to play with one picture per panel (below): the same values the logon screen reads.
+        const std::wstring id = path.substr(5, path.size() - 5 - 14);
+        json::Writer w;
+        w.BeginArray();
+        if (library_.Entry(id) && library_.settings().components) {
+            const theme::Theme t = library_.Edited(id);
+            for (const theme::Instance &i : t.components) {
+                skin::Skin skin;
+                if (!i.visible || !library_.LoadSkin(i.ref, &skin)) continue;
+                skin::Values values;
+                for (const auto &[key, value] : i.sets)
+                    if (skin::Accepts(skin, key, value)) values[key] = value;
+                const skin::Resolved r = skin::Resolve(skin, values);
+                for (size_t k = 0; k < r.panels.size(); ++k) {
+                    const skin::Panel &p = r.panels[k];
+                    const wchar_t *how = p.enter == skin::Enter::Rise   ? L"rise"
+                                         : p.enter == skin::Enter::Zoom ? L"zoom"
+                                         : p.enter == skin::Enter::None ? L"none"
+                                                                        : L"fade";
+                    w.BeginObject().Member(L"part", i.id + L".p" + std::to_wstring(k + 1)).Member(L"enter", how);
+                    w.Member(L"delay", (double)p.enterDelay).Member(L"duration", (double)p.enterDuration);
+                    w.Member(L"size", (double)p.size).EndObject();
+                }
+            }
+        }
+        w.EndArray();
+        const std::string text = ToUtf8(w.text());
+        body.assign(text.begin(), text.end());
+        type = L"application/json";
+    } else if (path.rfind(L"lock/", 0) == 0 && path.find(L"/part/") != std::wstring::npos && EndsWith(path, L".png")) {
+        // One panel of one component, alone over nothing: lock/<theme>/part/<instance>.<panel>.png.
+        const size_t at = path.find(L"/part/");
+        const std::wstring id = path.substr(5, at - 5), part = path.substr(at + 6, path.size() - at - 6 - 4);
+        if (library_.Entry(id) && library_.settings().components) {
+            const UINT w = ParamSize(query, L"w", 960, 3840);
+            UINT h = ParamSize(query, L"h", 0, 3840);
+            const bool shaped = h == 0;
+            if (shaped) Shape(id, w, &h);
+            const std::vector<Screen> wall = shaped ? Wall(w, h) : std::vector<Screen>();
+            std::vector<Bound> placed;
+            if (pictures_.Theme(library_.Edited(id), w, h, Draw::ComponentsOnly, &p, &placed, &wall, part)) {
+                body = Png(p);
+                for (const Bound &b : placed)
+                    if (b.holds) {
+                        wchar_t box[96];
+                        swprintf_s(box, L"%.5f,%.5f,%.5f,%.5f", b.rect.left / w, b.rect.top / h, b.rect.right / w,
+                                   b.rect.bottom / h);
+                        partBox = box;
+                        break;
+                    }
+            }
+        }
+        type = L"image/png";
     } else if (path == L"account") {
         // The person's account picture, for the lock-screen preview's sketch of the sign-in screen.
         const std::wstring file = AccountPicture();
@@ -762,7 +818,8 @@ void Host::OnResource(ICoreWebView2WebResourceRequestedEventArgs *args) {
     ComPtr<IStream> stream;
     ComPtr<ICoreWebView2WebResourceResponse> response;
     const std::wstring headers = L"Content-Type: " + type + L"\r\nCache-Control: no-store"+
-        (sceneBounds.empty() ? L"" : L"\r\nX-Scene-Bounds: "+sceneBounds);
+        (sceneBounds.empty() ? L"" : L"\r\nX-Scene-Bounds: "+sceneBounds) +
+        (partBox.empty() ? L"" : L"\r\nX-Part-Box: " + partBox);
     if (!body.empty()) stream.Attach(SHCreateMemStream(body.data(), (UINT)body.size()));
     if (stream) env_->CreateWebResourceResponse(stream.Get(), 200, L"OK", headers.c_str(), &response);
     else env_->CreateWebResourceResponse(nullptr, 404, L"Not Found", L"", &response);
@@ -837,6 +894,11 @@ void Host::OnMessage(const json::Value &m) {
         Edited(library_.RemoveInstance(instance), false, seq);
     } else if (op == L"wallpaper") {
         Edited(library_.SetWallpaper(m[L"ref"].Str()), false, seq);
+    } else if (op == L"wake") {
+        WakeStyle style = WakeStyle::Fade;
+        Edited(Parse(m[L"value"].Str(), &style) && library_.SetWake(style), false, seq);
+    } else if (op == L"wakeSeconds") {
+        Edited(library_.SetWakeSeconds((float)m[L"value"].Num(), gesture), false, seq);
     } else if (op == L"fit") {
         Scaling fit;
         Edited(Parse(m[L"value"].Str(), &fit) && library_.SetFit(fit), false, seq);
