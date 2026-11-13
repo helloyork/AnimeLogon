@@ -5,10 +5,44 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { SceneFrames, WallpaperVideo } from '../media';
 import { calm } from '../motion';
-import { layerUrl, lockUrl } from '../native';
+import { layerUrl, lockUrl, ORIGIN } from '../native';
 import { motion } from '../preview';
 import { setState, shapeOf, themeOf, useStore } from '../store';
 import { Button } from '../ui/controls';
+
+// What Windows 11 shows once the lock screen has gone, drawn after its own layout at 1920 x 1080
+// and scaled with the display (sizes are in cqh of the frame): the wallpaper blurred and darkened
+// as Windows does behind the password box, the account picture, the name, the PIN box and its two
+// links, and the network, accessibility and power buttons in the corner. It is a sketch: nothing
+// in it can be typed into.
+function SignIn({ still }: { still: string }) {
+  const { env } = useStore();
+  return (
+    <div className="lock-signin" aria-hidden="true">
+      <img className="lock-blur" src={still} alt="" />
+      <div className="lock-box">
+        {env.accountPicture ? (
+          <img className="lock-avatar" src={ORIGIN + 'account'} alt="" />
+        ) : (
+          <svg className="lock-avatar" viewBox="0 0 100 100">
+            <circle cx="50" cy="50" r="50" fill="rgba(255,255,255,.22)" />
+            <circle cx="50" cy="39" r="17" fill="#fff" />
+            <path d="M18 84c4-17 17-26 32-26s28 9 32 26a50 50 0 0 1-64 0z" fill="#fff" />
+          </svg>
+        )}
+        <div className="lock-name">{env.user || '用户'}</div>
+        <div className="lock-pin"><span>PIN</span></div>
+        <div className="lock-link">我忘记了我的 PIN</div>
+        <div className="lock-link">登录选项</div>
+      </div>
+      <div className="lock-tray">
+        <span>{''}</span>
+        <span>{''}</span>
+        <span>{''}</span>
+      </div>
+    </div>
+  );
+}
 
 export function LockPreview({ theme: id, ratio }: { theme: string; ratio?: number }) {
   const s = useStore();
@@ -51,15 +85,8 @@ export function LockPreview({ theme: id, ratio }: { theme: string; ratio?: numbe
   return (
     <div ref={root} className="lock" role="dialog" aria-label="锁屏预览" tabIndex={-1} onPointerDown={() => setWoke(true)}>
       <div className="lock-frame" style={{ width: `min(100vw, ${(100 * aspect).toFixed(2)}vh)`, height: `min(100vh, ${(100 / aspect).toFixed(2)}vw)` }}>
-        <div className="lock-signin">
-          <img className="lock-blur" src={lockUrl(id, 'still', query)} alt="" />
-          <div className="lock-box">
-            <div className="lock-avatar">A</div>
-            <div className="lock-name">用户</div>
-            <div className="lock-pin">PIN</div>
-            <div className="lock-note">Windows 登录界面（示意）</div>
-          </div>
-        </div>
+        <SignIn still={lockUrl(id, 'still', query)} />
+
         <img className="lock-fill" style={fade(!woke, 0.5)} src={lockUrl(id, 'still', query)} alt="" />
         {video && (
           <WallpaperVideo wallpaper={t.wallpaperRef} fit={t.fit} fade={false} onPlaying={() => setStarted(true)}
@@ -72,7 +99,7 @@ export function LockPreview({ theme: id, ratio }: { theme: string; ratio?: numbe
         <img className="lock-fill" style={fade(componentsIn && !woke, woke ? 0.5 : 0.4)} onLoad={() => setLoaded(true)}
           src={video || scene ? layerUrl(id, t.revision, w, s.tick, ratio ? h : 0) : lockUrl(id, 'full', query)} alt="" />
       </div>
-      <div className="lock-hint">{woke ? '之后是 Windows 的登录界面' : '按任意键或单击，模拟唤醒'}</div>
+      <div className="lock-hint">{woke ? '这里是 Windows 的登录界面（示意）' : '按任意键或单击，模拟唤醒'}</div>
       <Button size="sm" className="lock-exit" onPointerDown={e => e.stopPropagation()} onClick={close}>退出预览 (Esc)</Button>
     </div>
   );
