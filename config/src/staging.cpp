@@ -225,7 +225,7 @@ Result Package(const std::wstring &source, const std::wstring &dir, const std::a
         if (reader.Compressed())
             return Error(L"这个主题包经过了压缩，无法导入。.altheme 必须是不压缩（存储）的 zip 文件。"
                          L"可以在 7-Zip 中选择 zip 格式、压缩等级“仅存储”重新打包，"
-                         L"或者在命令提示符中运行 tar -a -c --options zip:compression=store -f 主题.altheme 加上包内的文件。");
+                         L"或者在命令提示符中运行 tar -c --format zip --options zip:compression=store -f 主题.altheme 加上包内的文件。");
         return Error(L"这个文件不是有效的主题包（.altheme）。");
     }
 
@@ -237,6 +237,8 @@ Result Package(const std::wstring &source, const std::wstring &dir, const std::a
         ALOG(L"import: %s theme.xml %s", source.c_str(), why.c_str());
         return Error(newer ? L"这个主题需要新版 AnimeLogon。" : L"主题包里的 theme.xml 有误：" + why);
     }
+    if (!kTakesScenes && t.wallpaper == L"wallpaper.alscene")
+        return Error(L"这个主题的壁纸是场景，这个版本的 AnimeLogon 暂不支持导入场景壁纸。");
 
     // The files the archive carries must be the ones theme.xml names.
     const package::Entry *wallpaper = reader.Wallpaper();
