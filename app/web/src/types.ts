@@ -193,4 +193,14 @@ export type FromNative =
   | { type: 'problem'; text: string }
   | { type: 'busy'; label: string | null; percent?: number }
   | { type: 'added'; instance: string }
-  | { type: 'navigate'; theme: string };
+  | { type: 'navigate'; theme: string }
+  | ({ type: 'frame' } & WindowFrame);
+
+// The window the page is the title bar of (app/src/frame.cpp): its title, whether it is maximised
+// and active, and how its maximise button is, which the native side takes the pointer over.
+export interface WindowFrame {
+  title: string;
+  maximised: boolean;
+  active: boolean;
+  max: '' | 'hover' | 'press';
+}

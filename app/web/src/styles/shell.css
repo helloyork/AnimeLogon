@@ -1,17 +1,30 @@
 /* The window: the app bar over the page that is shown. */
 .app { height: 100%; display: flex; flex-direction: column; background: var(--bg); color: var(--text-1); }
 
+/* The app bar is also the window's title bar (src/frame.tsx): it drags the window wherever nothing
+   in it can be pressed, and the window's buttons sit flush with its right end. */
 .topbar {
   flex: none;
   display: flex;
   align-items: center;
   gap: var(--s6);
   height: 48px;
-  padding: 0 var(--s4) 0 var(--s5);
+  padding: 0 0 0 var(--s5);
   border-bottom: 1px solid var(--border);
   background: var(--surface-1);
+  app-region: drag;
 }
+/* WebView2 drags the window from the bar's area even where something else is drawn over it, so
+   what can be pressed in it, and what opens over it, keeps the pointer for the page. */
+.topbar button,
+.winctl,
+.lock,
+.fui-MenuPopover,
+.fui-PopoverSurface,
+.fui-Listbox,
+.fui-DialogSurface { app-region: no-drag; }
 .brand { font-weight: 600; font-size: 14px; }
+.brand-rest { font-weight: 400; color: var(--text-2); }
 .nav { display: flex; gap: 2px; }
 .nav button {
   height: 32px;
@@ -26,8 +39,40 @@
 .nav button:hover { color: var(--text-1); background: var(--surface-3); }
 .nav button.on { color: var(--text-1); background: var(--surface-3); }
 
-/* An import or export under way, at the bar's end. */
+/* An import or export under way, at the bar's end, before the window's buttons. */
 .busy { margin-left: auto; display: flex; align-items: center; gap: var(--s3); min-width: 0; max-width: 50%; }
+
+/* The window's buttons, as Windows 11 draws its own: 46 px wide, the bar's full height, 10 px
+   glyphs. They stay above everything the page opens, the lock screen preview included, because
+   they belong to the window. Over the maximise button the native side takes the pointer (for Snap
+   Layouts) and says how to draw it with .hover and .press. */
+.winctl { display: flex; align-self: stretch; margin-left: auto; position: relative; z-index: 1001; }
+.busy + .winctl { margin-left: 0; }
+.winctl button {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-1);
+  font: 400 10px/1 "Segoe Fluent Icons", "Segoe MDL2 Assets";
+}
+.winctl button:hover, .winctl button.hover { background: var(--surface-hover); }
+.winctl button:active, .winctl button.press { background: color-mix(in srgb, var(--surface-hover), var(--text-1) 7%); }
+.winctl .close:hover { background: #c42b1c; color: #fff; }
+.winctl .close:active { background: rgba(196, 43, 28, .9); color: rgba(255, 255, 255, .7); }
+.winctl.inactive button:not(:hover, .hover, .press) { color: var(--text-3); }
+/* Over the lock screen preview, white on the picture whatever the Windows theme, as its own words are.
+   Its exit button moves out from under them. */
+.winctl.over-lock button { color: #fff; }
+.winctl.over-lock button:hover, .winctl.over-lock button.hover { background: rgba(255, 255, 255, .1); }
+.winctl.over-lock button:active, .winctl.over-lock button.press { background: rgba(255, 255, 255, .16); }
+.winctl.over-lock .close:hover { background: #c42b1c; }
+.winctl.over-lock.inactive button:not(:hover, .hover, .press) { color: rgba(255, 255, 255, .6); }
+.lock .lock-exit.btn { right: calc(3 * 46px + var(--s4)); }
 
 /* A page that scrolls, its content in a column of a set width in the middle of the window. */
 .scroll { flex: 1; min-height: 0; overflow-y: auto; }

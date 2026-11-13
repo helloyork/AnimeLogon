@@ -34,6 +34,7 @@ animelogon_add_executable(app WIN32
     SOURCES
         src/main.cpp
         src/agent.cpp
+        src/frame.cpp
         src/host.cpp
         src/library.cpp
         src/pictures.cpp

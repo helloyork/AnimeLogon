@@ -2,6 +2,7 @@ import { Component, useEffect, type ReactNode } from 'react';
 import { FluentProvider, Toast, Toaster, ToastTitle, useId, useToastController } from '@fluentui/react-components';
 import { Dialogs } from './dialogs/Dialogs';
 import { EditorPage } from './editor/EditorPage';
+import { WindowButtons, WindowTitle } from './frame';
 import { LibraryPage } from './library/LibraryPage';
 import { LockPreview } from './lock/LockPreview';
 import { SettingsPage } from './settings/SettingsPage';
@@ -34,7 +35,8 @@ export function App() {
   return (
     <FluentProvider theme={dark ? darkTheme : lightTheme}>
       <div className="app">
-        <Fallback>{!s.lib ? null : <Shell />}</Fallback>
+        <AppBar />
+        <Fallback>{!s.lib ? null : <Page />}</Fallback>
       </div>
       <Toasts />
       <Dialogs />
@@ -46,24 +48,28 @@ export function App() {
 const PAGES: [Tab, string][] = [['mine', '主题库'], ['settings', '设置']];
 
 // The app bar stays over every page (D59): the library, a theme's own page under it, and the
-// settings. What is being done in the background shows at its end.
-function Shell() {
+// settings. It is also the window's title bar, so it is there from the start and stays when a page
+// fails to draw: what is being done in the background, then the window's buttons, end it.
+function AppBar() {
+  const s = useStore();
+  return (
+    <header className="topbar">
+      <WindowTitle />
+      <nav className="nav" aria-label="页面">
+        {PAGES.map(([tab, name]) => (
+          <button key={tab} type="button" className={cx(s.tab === tab && 'on')} aria-current={s.tab === tab ? 'page' : undefined} onClick={() => setTab(tab)}>{name}</button>
+        ))}
+      </nav>
+      <BusyBar />
+      <WindowButtons overLock={!!s.lock} />
+    </header>
+  );
+}
+
+function Page() {
   const s = useStore();
   const themePage = s.tab === 'mine' && s.view === 'theme' && !!s.open;
-  return (
-    <>
-      <header className="topbar">
-        <span className="brand">AnimeLogon</span>
-        <nav className="nav" aria-label="页面">
-          {PAGES.map(([tab, name]) => (
-            <button key={tab} type="button" className={cx(s.tab === tab && 'on')} aria-current={s.tab === tab ? 'page' : undefined} onClick={() => setTab(tab)}>{name}</button>
-          ))}
-        </nav>
-        <BusyBar />
-      </header>
-      {s.tab === 'settings' ? <SettingsPage /> : themePage ? <EditorPage /> : <LibraryPage />}
-    </>
-  );
+  return s.tab === 'settings' ? <SettingsPage /> : themePage ? <EditorPage /> : <LibraryPage />;
 }
 
 function BusyBar() {
