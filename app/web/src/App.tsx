@@ -7,7 +7,8 @@ import { LibraryPage } from './library/LibraryPage';
 import { LockPreview } from './lock/LockPreview';
 import { SettingsPage } from './settings/SettingsPage';
 import { send } from './native';
-import { onToast, setTab, useStore, type Tab } from './store';
+import { t } from './i18n';
+import { goBack, onToast, setTab, useStore, type Tab } from './store';
 import { darkTheme, lightTheme, useDark } from './theme';
 import { Button, cx, Progress } from './ui/controls';
 
@@ -22,9 +23,9 @@ class Fallback extends Component<{ children: ReactNode }, { failed: string | nul
     if (!this.state.failed) return this.props.children;
     return (
       <div className="fallback">
-        <h1 className="t-h">页面发生错误</h1>
+        <h1 className="t-h">{t('app.error.title')}</h1>
         <p className="t-cap selectable">{this.state.failed}</p>
-        <Button variant="primary" onClick={() => location.reload()}>重新载入</Button>
+        <Button variant="primary" onClick={() => location.reload()}>{t('app.error.reload')}</Button>
       </div>
     );
   }
@@ -33,6 +34,7 @@ class Fallback extends Component<{ children: ReactNode }, { failed: string | nul
 export function App() {
   const dark = useDark();
   const s = useStore();
+  useBack();
   return (
     <FluentProvider theme={dark ? darkTheme : lightTheme}>
       <div className="app">
@@ -46,7 +48,7 @@ export function App() {
   );
 }
 
-const PAGES: [Tab, string][] = [['mine', '主题库'], ['settings', '设置']];
+const PAGES: [Tab, Parameters<typeof t>[0]][] = [['mine', 'nav.library'], ['settings', 'nav.settings']];
 
 // The app bar stays over every page (D59): the library, a theme's own page under it, and the
 // settings. It is also the window's title bar, so it is there from the start and stays when a page
@@ -56,15 +58,42 @@ function AppBar() {
   return (
     <header className="topbar">
       <WindowTitle />
-      <nav className="nav" aria-label="页面">
+      <nav className="nav" aria-label={t('nav.label')}>
         {PAGES.map(([tab, name]) => (
-          <button key={tab} type="button" className={cx(s.tab === tab && 'on')} aria-current={s.tab === tab ? 'page' : undefined} onClick={() => setTab(tab)}>{name}</button>
+          <button key={tab} type="button" className={cx(s.tab === tab && 'on')} aria-current={s.tab === tab ? 'page' : undefined} onClick={() => setTab(tab)}>{t(name)}</button>
         ))}
       </nav>
       <BusyBar />
       <WindowButtons overLock={!!s.lock} />
     </header>
   );
+}
+
+// Alt+Left and the mouse's back button go back (store.ts goBack), as in Windows' own apps.
+function useBack() {
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      if ((e.altKey && e.key === 'ArrowLeft') || e.key === 'BrowserBack') {
+        e.preventDefault();
+        goBack();
+      }
+    };
+    // The back button is button 3; taken on its press too, so that nothing else acts on it.
+    const press = (e: MouseEvent) => { if (e.button === 3) e.preventDefault(); };
+    const release = (e: MouseEvent) => {
+      if (e.button !== 3) return;
+      e.preventDefault();
+      goBack();
+    };
+    document.addEventListener('keydown', key);
+    document.addEventListener('mousedown', press);
+    document.addEventListener('mouseup', release);
+    return () => {
+      document.removeEventListener('keydown', key);
+      document.removeEventListener('mousedown', press);
+      document.removeEventListener('mouseup', release);
+    };
+  }, []);
 }
 
 function Page() {
@@ -81,7 +110,7 @@ function BusyBar() {
       <span className="t-cap ellipsis">{busy.label}</span>
       <Progress value={busy.percent} label={busy.label} />
       <span className="t-cap num">{busy.percent}%</span>
-      <Button size="sm" onClick={() => send('cancelImport')}>取消</Button>
+      <Button size="sm" onClick={() => send('cancelImport')}>{t('button.cancel')}</Button>
     </div>
   );
 }

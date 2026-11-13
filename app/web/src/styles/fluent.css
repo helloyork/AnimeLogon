@@ -64,8 +64,11 @@
   background: var(--surface-2);
   box-shadow: var(--shadow-pop);
 }
-.menu .fui-MenuItem { min-height: 32px; padding: 0 8px; border-radius: var(--r-xs); font-size: 14px; line-height: 20px; }
-.menu .fui-MenuItem__icon { width: 16px; height: 16px; font-size: 16px; }
+/* Fluent lays an item's parts out from the top (for items of several lines), with padding that
+   centres one line; with that padding taken away, a single line sits high. Centred instead. */
+.menu .fui-MenuItem { min-height: 32px; padding: 6px 8px; align-items: center; border-radius: var(--r-xs); font-size: 14px; line-height: 20px; }
+.menu .fui-MenuItem__content { padding: 0 2px; line-height: 20px; }
+.menu .fui-MenuItem__icon { width: 16px; height: 16px; font-size: 16px; align-self: center; }
 .menu .fui-MenuDivider { margin: 4px -4px; border-color: var(--border); }
 
 /* --- tooltips --- */

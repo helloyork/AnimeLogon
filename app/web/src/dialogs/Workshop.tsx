@@ -3,6 +3,7 @@
 // wallpaper plays while it is pointed at, and the one chosen last plays large beside the list, in
 // the shape of the main display, filling it as the logon screen fills it by default.
 import { useState, type CSSProperties } from 'react';
+import { t as tr, tn } from '../i18n';
 import { Dialog, DialogActions, DialogBody, DialogContent, DialogSurface, DialogTitle } from '@fluentui/react-components';
 import { Checkmark12Filled, Search16Regular } from '@fluentui/react-icons';
 import { calm } from '../motion';
@@ -19,7 +20,7 @@ function sizeText(bytes: number) {
   return `${mb < 10 ? mb.toFixed(1) : Math.round(mb)} MB`;
 }
 
-const sourceText = (w: WorkshopItem) => (w.source === 'mine' ? '我的壁纸' : '创意工坊');
+const sourceText = (w: WorkshopItem) => tr(w.source === 'mine' ? 'we.source.mine' : 'we.source.workshop');
 
 function duration(seconds: number) {
   const s = Math.max(0, Math.round(seconds));
@@ -63,52 +64,52 @@ export function WorkshopDialog({ d }: { d: Extract<DialogState, { kind: 'worksho
   };
 
   let summary: string;
-  if (d.wallpaper) summary = picked.length ? `将「${byId.get(picked[0])!.title}」用作这个主题的壁纸。` : '选择一个视频用作这个主题的壁纸。';
-  else summary = picked.length ? `已选择 ${picked.length} 个，共 ${sizeText(bytes)}。每个成为一个带时钟的新主题。` : '选择要导入的视频，每个成为一个带时钟的新主题。';
+  if (d.wallpaper) summary = picked.length ? tr('we.summary.wallpaper', { name: byId.get(picked[0])!.title }) : tr('we.summary.wallpaper.none');
+  else summary = picked.length ? tn('we.summary.picked', picked.length, { size: sizeText(bytes) }) : tr('we.summary.none');
 
   return (
     <Dialog open onOpenChange={(_, data) => !data.open && close()}>
       <DialogSurface className="dialog we-dialog">
         <DialogBody>
-          <DialogTitle>{d.wallpaper ? '从 Wallpaper Engine 选择壁纸' : '从 Wallpaper Engine 导入'}</DialogTitle>
+          <DialogTitle>{tr(d.wallpaper ? 'we.title.wallpaper' : 'we.title')}</DialogTitle>
           <DialogContent>
             {!found ? (
-              <div className="we-empty" role="status"><p className="t-cap">正在查找 Wallpaper Engine 的壁纸…</p></div>
+              <div className="we-empty" role="status"><p className="t-cap">{tr('we.searching')}</p></div>
             ) : found.folders === 0 ? (
               <div className="we-empty">
-                <p>这台电脑上没有找到 Wallpaper Engine 的壁纸。</p>
-                <p className="t-cap">AnimeLogon 在 Steam 的库文件夹里查找 Wallpaper Engine 从创意工坊下载的壁纸，以及在 Wallpaper Engine 里创建的壁纸。</p>
+                <p>{tr('we.none')}</p>
+                <p className="t-cap">{tr('we.none.detail')}</p>
               </div>
             ) : items.length === 0 ? (
               <div className="we-empty">
-                <p>Wallpaper Engine 里没有视频壁纸。</p>
-                {found.others > 0 && <p className="t-cap">{`另有 ${found.others} 个场景、网页或应用程序壁纸，这些类型不能导入。`}</p>}
+                <p>{tr('we.no_videos')}</p>
+                {found.others > 0 && <p className="t-cap">{tn('we.others', found.others)}</p>}
               </div>
             ) : (
               <div className="we">
                 <div className="we-bar">
                   <label className="field sm we-search">
                     <Search16Regular />
-                    <input type="search" aria-label="按名称搜索" placeholder="按名称搜索" value={query} spellCheck={false}
+                    <input type="search" aria-label={tr('we.search')} placeholder={tr('we.search')} value={query} spellCheck={false}
                       onChange={e => setQuery(e.currentTarget.value)} />
                   </label>
                   <span className="t-cap num">
-                    {(words ? `${visible.length} / ${items.length}` : `${items.length}`) + ' 个视频壁纸' +
-                      (found.others ? `，另有 ${found.others} 个其他类型的壁纸不能导入` : '')}
+                    {tn('we.count', items.length, { count: words ? `${visible.length} / ${items.length}` : `${items.length}` }) +
+                      (found.others ? tn('we.count.others', found.others) : '')}
                   </span>
                   {!d.wallpaper && visible.length > 0 && (
-                    <Button size="sm" className="we-all" onClick={chooseAll}>{allPicked ? '全部取消' : '全选'}</Button>
+                    <Button size="sm" className="we-all" onClick={chooseAll}>{tr(allPicked ? 'we.pick_none' : 'we.pick_all')}</Button>
                   )}
                 </div>
                 <div className="we-main">
-                  <div className="we-list" role="listbox" aria-label="视频壁纸" aria-multiselectable={!d.wallpaper}>
+                  <div className="we-list" role="listbox" aria-label={tr('we.list')} aria-multiselectable={!d.wallpaper}>
                     {visible.map(w => (
                       <Card key={w.id} w={w} chosen={picked.includes(w.id)} multi={!d.wallpaper}
                         onChoose={() => choose(w)} onBring={d.wallpaper ? () => bring([w.id]) : undefined} />
                     ))}
-                    {visible.length === 0 && <p className="t-cap3">{`没有名称包含「${query.trim()}」的视频壁纸。`}</p>}
+                    {visible.length === 0 && <p className="t-cap3">{tr('we.no_match', { query: query.trim() })}</p>}
                   </div>
-                  <aside className="we-detail" aria-label="预览">
+                  <aside className="we-detail" aria-label={tr('we.preview')}>
                     {current && <Detail key={current.id} w={current} />}
                   </aside>
                 </div>
@@ -119,9 +120,9 @@ export function WorkshopDialog({ d }: { d: Extract<DialogState, { kind: 'worksho
             {found && items.length > 0 && <span className="t-cap we-sum">{summary}</span>}
           </DialogActions>
           <DialogActions>
-            <Button onClick={close}>取消</Button>
+            <Button onClick={close}>{tr('button.cancel')}</Button>
             <Button variant="primary" shield disabled={!picked.length} onClick={() => bring(picked)}>
-              {d.wallpaper ? '导入并使用' : picked.length > 1 ? `导入 ${picked.length} 个` : '导入'}
+              {d.wallpaper ? tr('we.import_use') : picked.length > 1 ? tr('we.import_n', { n: picked.length }) : tr('we.import')}
             </Button>
           </DialogActions>
         </DialogBody>
@@ -174,20 +175,20 @@ function Detail({ w }: { w: WorkshopItem }) {
       </div>
       <h3 className="we-title selectable">{w.title}</h3>
       <dl className="facts">
-        <dt>来源</dt>
-        <dd>{w.source === 'mine' ? '在 Wallpaper Engine 里创建' : 'Steam 创意工坊'}</dd>
+        <dt>{tr('we.fact.source')}</dt>
+        <dd>{tr(w.source === 'mine' ? 'we.fact.mine' : 'we.fact.workshop')}</dd>
         {shape && shape.width > 0 && (
           <>
-            <dt>画面</dt>
+            <dt>{tr('we.fact.picture')}</dt>
             <dd className="num">{`${shape.width}×${shape.height}` + (isFinite(shape.seconds) ? ` · ${duration(shape.seconds)}` : '')}</dd>
           </>
         )}
-        <dt>文件</dt>
+        <dt>{tr('we.fact.file')}</dt>
         <dd className="ellipsis selectable" title={w.video}>{w.video}</dd>
-        <dt>大小</dt>
+        <dt>{tr('we.fact.size')}</dt>
         <dd className="num">{sizeText(w.bytes)}</dd>
       </dl>
-      {failed && <p className="t-cap3">这个视频不能在这里播放。导入时会重新编码，能否导入以那时的结果为准。</p>}
+      {failed && <p className="t-cap3">{tr('we.cannot_play')}</p>}
     </>
   );
 }

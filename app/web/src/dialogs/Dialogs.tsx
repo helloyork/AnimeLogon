@@ -1,6 +1,7 @@
 // Every dialog the page opens, from the store's list: the newest is on top. Fluent's Dialog keeps
 // the focus inside, closes on Esc and animates itself in and out; what is in it is the page's own.
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { t as tr, tn } from '../i18n';
 import { Dialog, DialogActions, DialogBody, DialogContent, DialogSurface, DialogTitle } from '@fluentui/react-components';
 import { FolderOpen16Regular, Video16Regular } from '@fluentui/react-icons';
 import { UacShield } from '../icons';
@@ -38,14 +39,14 @@ function One({ d }: { d: DialogState }) {
   switch (d.kind) {
     case 'problem':
       return (
-        <Frame d={d} title="发生错误" actions={<Button variant="primary" onClick={close}>确定</Button>}>
+        <Frame d={d} title={tr('dialog.problem.title')} actions={<Button variant="primary" onClick={close}>{tr('button.ok')}</Button>}>
           <p className="selectable dlg-lines">{d.text}</p>
         </Frame>
       );
     case 'confirm':
       return (
         <Frame d={d} title={d.title} actions={<>
-          <Button onClick={close}>取消</Button>
+          <Button onClick={close}>{tr('button.cancel')}</Button>
           <Button variant="primary" shield={d.elevated} onClick={() => { close(); d.run(); }}>{d.action}</Button>
         </>}>
           <div className="dlg-text">
@@ -91,10 +92,10 @@ function NameDialog({ d }: { d: Extract<DialogState, { kind: 'name' }> }) {
   };
   return (
     <Frame d={d} title={d.title} actions={<>
-      <Button onClick={() => closeDialog(d.id)}>取消</Button>
+      <Button onClick={() => closeDialog(d.id)}>{tr('button.cancel')}</Button>
       <Button variant="primary" shield disabled={!value.trim()} onClick={done}>{d.action}</Button>
     </>}>
-      <Labelled label="名称" htmlFor="dlg-name">
+      <Labelled label={tr('dialog.name')} htmlFor="dlg-name">
         <TextInput id="dlg-name" value={d.value} maxLength={40} autoFocus live={setValue} onEnter={done} />
       </Labelled>
     </Frame>
@@ -109,17 +110,17 @@ function MonitorDialog({ d }: { d: Extract<DialogState, { kind: 'monitor' }> }) 
     apply(d.theme, monitor);
   };
   return (
-    <Frame d={d} title={`套用「${t?.name ?? ''}」`} wide actions={<Button onClick={() => closeDialog(d.id)}>取消</Button>}>
+    <Frame d={d} title={tr('dialog.apply.title', { name: t?.name ?? '' })} wide actions={<Button onClick={() => closeDialog(d.id)}>{tr('button.cancel')}</Button>}>
       <div className="choices">
         {s.env.monitors.map(m => (
           <button key={m.key} type="button" className="choice" onClick={() => pick(m.key)}>
-            <span className="ellipsis">{m.name + (m.primary ? '（主）' : '')}</span>
-            <span className="t-cap3 ellipsis">{`${m.width}×${m.height} · 当前为「${themeOf(screenTheme(m.key))?.name ?? ''}」`}</span>
+            <span className="ellipsis">{m.primary ? tr('monitor.primary', { name: m.name }) : m.name}</span>
+            <span className="t-cap3 ellipsis">{`${m.width}×${m.height} · ` + tr('dialog.apply.now', { name: themeOf(screenTheme(m.key))?.name ?? '' })}</span>
           </button>
         ))}
         <button type="button" className="choice" onClick={() => pick('all')}>
-          <span>所有屏幕</span>
-          <span className="t-cap3">所有屏幕使用此主题</span>
+          <span>{tr('monitor.all')}</span>
+          <span className="t-cap3">{tr('dialog.apply.all.detail')}</span>
         </button>
       </div>
     </Frame>
@@ -139,7 +140,7 @@ function WallpaperGrid({ current, onPick, onImport, importLabel, onWorkshop, foc
     return () => clearTimeout(timer);
   }, [focusCurrent]);
   return (
-    <div className="pictures" role="listbox" aria-label="壁纸">
+    <div className="pictures" role="listbox" aria-label={tr('inspector.wallpaper')}>
       {s.lib!.wallpapers.map(w => (
         <button key={w.id} ref={current === w.id ? chosen : undefined} type="button" className={cx('pick', current === w.id && 'on')} role="option" aria-selected={current === w.id} onClick={() => onPick(w.id)}>
           <img className="pic" src={wallpaperUrl(w.id)} alt="" draggable={false} />
@@ -150,13 +151,13 @@ function WallpaperGrid({ current, onPick, onImport, importLabel, onWorkshop, foc
       <button type="button" className="pick" onClick={onImport}>
         <span className="pic browse"><FolderOpen16Regular /></span>
         <span className="ellipsis shielded"><UacShield />{importLabel}</span>
-        <span className="t-cap3 ellipsis">图片或视频</span>
+        <span className="t-cap3 ellipsis">{tr('dialog.wallpaper.file.detail')}</span>
       </button>
       {s.env.wallpaperEngine && (
         <button type="button" className="pick" onClick={onWorkshop}>
           <span className="pic browse"><Video16Regular /></span>
           <span className="ellipsis">Wallpaper Engine…</span>
-          <span className="t-cap3 ellipsis">视频壁纸</span>
+          <span className="t-cap3 ellipsis">{tr('dialog.wallpaper.we.detail')}</span>
         </button>
       )}
     </div>
@@ -164,23 +165,23 @@ function WallpaperGrid({ current, onPick, onImport, importLabel, onWorkshop, foc
 }
 
 function NewThemeDialog({ d }: { d: Extract<DialogState, { kind: 'newTheme' }> }) {
-  const [name, setName] = useState('新主题');
+  const [name, setName] = useState(() => tr('dialog.new.default_name'));
   const [wallpaper, setWallpaper] = useState('default');
   const create = () => {
     closeDialog(d.id);
-    send('newTheme', { name: name.trim() || '新主题', wallpaper });
+    send('newTheme', { name: name.trim() || tr('dialog.new.default_name'), wallpaper });
   };
   return (
-    <Frame d={d} title="新建主题" wide actions={<>
-      <Button onClick={() => closeDialog(d.id)}>取消</Button>
-      <Button variant="primary" shield onClick={create}>创建</Button>
+    <Frame d={d} title={tr('dialog.new.title')} wide actions={<>
+      <Button onClick={() => closeDialog(d.id)}>{tr('button.cancel')}</Button>
+      <Button variant="primary" shield onClick={create}>{tr('dialog.new.action')}</Button>
     </>}>
       <div className="dlg-stack">
-        <Labelled label="名称" htmlFor="dlg-new-name">
-          <TextInput id="dlg-new-name" value="新主题" maxLength={40} autoFocus live={setName} />
+        <Labelled label={tr('dialog.name')} htmlFor="dlg-new-name">
+          <TextInput id="dlg-new-name" value={tr('dialog.new.default_name')} maxLength={40} autoFocus live={setName} />
         </Labelled>
-        <Labelled label="壁纸" hint="新主题默认包含一个时钟组件。">
-          <WallpaperGrid current={wallpaper} onPick={setWallpaper} importLabel="导入为新主题…" onImport={() => { closeDialog(d.id); send('import'); }}
+        <Labelled label={tr('inspector.wallpaper')} hint={tr('dialog.new.hint')}>
+          <WallpaperGrid current={wallpaper} onPick={setWallpaper} importLabel={tr('dialog.new.import')} onImport={() => { closeDialog(d.id); send('import'); }}
             onWorkshop={() => { closeDialog(d.id); workshopFlow(false); }} />
         </Labelled>
       </div>
@@ -191,8 +192,8 @@ function NewThemeDialog({ d }: { d: Extract<DialogState, { kind: 'newTheme' }> }
 function WallpaperDialog({ d }: { d: Extract<DialogState, { kind: 'wallpaper' }> }) {
   const s = useStore();
   return (
-    <Frame d={d} title="更换壁纸" wide actions={<Button onClick={() => closeDialog(d.id)}>取消</Button>}>
-      <WallpaperGrid current={s.open?.wallpaper.ref ?? ''} focusCurrent onPick={ref => { closeDialog(d.id); edit('wallpaper', { ref }); }} importLabel="从文件导入…"
+    <Frame d={d} title={tr('dialog.wallpaper.title')} wide actions={<Button onClick={() => closeDialog(d.id)}>{tr('button.cancel')}</Button>}>
+      <WallpaperGrid current={s.open?.wallpaper.ref ?? ''} focusCurrent onPick={ref => { closeDialog(d.id); edit('wallpaper', { ref }); }} importLabel={tr('dialog.import_file')}
         onImport={() => { closeDialog(d.id); send('importWallpaper'); }} onWorkshop={() => { closeDialog(d.id); workshopFlow(true); }} />
     </Frame>
   );
@@ -205,21 +206,21 @@ function AddComponentDialog({ d }: { d: Extract<DialogState, { kind: 'addCompone
     edit('add', { component });
   };
   return (
-    <Frame d={d} title="添加组件" wide actions={<Button onClick={() => closeDialog(d.id)}>取消</Button>}>
+    <Frame d={d} title={tr('inspector.add')} wide actions={<Button onClick={() => closeDialog(d.id)}>{tr('button.cancel')}</Button>}>
       <div className="dlg-stack">
         <div className="choices">
           {s.lib!.components.map(c => (
             <button key={c.id} type="button" className="choice" onClick={() => add(c.id)}>
               <span className="ellipsis">{c.name}</span>
-              <span className="t-cap3 ellipsis">{c.builtIn ? '内置组件' : c.author ? `作者 ${c.author}` : '导入的组件'}</span>
+              <span className="t-cap3 ellipsis">{c.builtIn ? tr('dialog.add.builtin') : c.author ? tr('inspector.by', { author: c.author }) : tr('dialog.add.imported')}</span>
             </button>
           ))}
           <button type="button" className="choice" onClick={() => { closeDialog(d.id); send('importComponent', { add: true }); }}>
-            <span>从文件导入…</span>
-            <span className="t-cap3">.xml 组件文件</span>
+            <span>{tr('dialog.import_file')}</span>
+            <span className="t-cap3">{tr('dialog.add.xml')}</span>
           </button>
         </div>
-        <p className="t-cap3">{`此主题还可添加 ${s.open?.room ?? 0} 个组件。`}</p>
+        <p className="t-cap3">{tn('dialog.add.room', s.open?.room ?? 0)}</p>
       </div>
     </Frame>
   );

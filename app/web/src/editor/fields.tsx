@@ -5,6 +5,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AlphaSlider, ColorArea, ColorPicker, ColorSlider, Popover, PopoverSurface, PopoverTrigger, Tooltip } from '@fluentui/react-components';
 import { endGesture, liveSet, newGesture, setValue } from '../preview';
+import { t, type Key } from '../i18n';
 import { useStore } from '../store';
 import type { Adjustment, Setting } from '../types';
 import { cx, NumberInput, ResetButton, SearchSelect, Segmented, Select, Slider, Switch, type Choice } from '../ui/controls';
@@ -48,7 +49,8 @@ export function Prop({ id, label, detail, modified = false, onReset, top, childr
 }
 
 /* --- numbers --- */
-const WEIGHT_NAMES: Record<number, string> = { 100: '极细', 200: '特细', 300: '细', 400: '常规', 500: '中等', 600: '半粗', 700: '粗', 800: '特粗', 900: '黑' };
+// The weights' common names, by the number CSS and DirectWrite give them.
+const weightName = (w: number) => (w % 100 === 0 && w >= 100 && w <= 900 ? t(`weight.${w}` as Key) : '');
 
 // How a value reads beside its slider: in what units, scaled how, with how many digits.
 export interface View {
@@ -60,14 +62,14 @@ export function viewFor(key: string, step: number): View {
   const attr = key.split('.').pop() || '', panel = /^p\d+\.[^.]+$/.test(key);
   const plain = (unit: string, digits: number): View => ({ factor: 1, digits, unit: () => unit });
   switch (attr) {
-    case 'offset-x': return plain('% 屏宽', 1);
-    case 'offset-y': return plain('% 屏高', 1);
-    case 'size': return panel ? plain('% 屏高', 1) : plain('倍', 2);
-    case 'margin': return plain('% 短边', 1);
+    case 'offset-x': return plain(t('unit.screen_width'), 1);
+    case 'offset-y': return plain(t('unit.screen_height'), 1);
+    case 'size': return panel ? plain(t('unit.screen_height'), 1) : plain(t('unit.times'), 2);
+    case 'margin': return plain(t('unit.short_side'), 1);
     case 'tracking': case 'x': case 'y': case 'blur': return plain('em', 3);
     case 'space': case 'gap': return plain('em', 2);
-    case 'enter-delay': case 'enter-duration': return plain('秒', 2);
-    case 'opacity': return { factor: 100, digits: 0, unit: v => (/\.(s\d+|b)\.opacity$/.test(key) && !v ? '无' : '%') };
+    case 'enter-delay': case 'enter-duration': return plain(t('unit.seconds'), 2);
+    case 'opacity': return { factor: 100, digits: 0, unit: v => (/\.(s\d+|b)\.opacity$/.test(key) && !v ? t('unit.none') : '%') };
   }
   return plain('', decimals(step));
 }
@@ -151,22 +153,21 @@ export function DateField({ id, label, detail, value, modified, write, onReset }
 
 /* --- fonts --- */
 const fontStack = (stored: string) => (stored ? `"${stored}", var(--font)` : 'var(--font-display)');
-const DEFAULT_FONT = '默认（Segoe UI Variable）';
 
 // Only fonts installed for every user: the logon screen runs as the system and sees no others.
 export function FontField({ id, label, detail, value, modified, write, onReset }: Common & { value: string; write: (v: string) => void }) {
   const { env } = useStore();
-  const options = useMemo(() => [{ value: '', label: DEFAULT_FONT }, ...env.fonts.map(f => ({ value: f.stored, label: f.name }))], [env.fonts]);
+  const options = useMemo(() => [{ value: '', label: t('font.default') }, ...env.fonts.map(f => ({ value: f.stored, label: f.name }))], [env.fonts, env.lang]);
   return (
-    <Prop id={id} label={label} detail={detail ?? '仅列出为所有用户安装的字体。'} modified={modified} onReset={onReset}>
-      <SearchSelect id={id} label={label} options={options} value={value} onChange={write} placeholder="搜索字体" render={o => ({ fontFamily: fontStack(o.value) })} />
+    <Prop id={id} label={label} detail={detail ?? t('font.detail')} modified={modified} onReset={onReset}>
+      <SearchSelect id={id} label={label} options={options} value={value} onChange={write} placeholder={t('font.search')} render={o => ({ fontFamily: fontStack(o.value) })} />
     </Prop>
   );
 }
 
 /* --- colours --- */
 type HsvColor = { h: number; s: number; v: number; a?: number };  // as ColorPicker takes it
-const SWATCHES: [string, string][] = [['白色', '#FFFFFF'], ['暖白', '#FFF1DC'], ['樱粉', '#FFC6D6'], ['天蓝', '#A8D8FF'], ['金色', '#FFD27A'], ['墨色', '#16181F']];
+const SWATCHES: [Key, string][] = [['color.white', '#FFFFFF'], ['color.warm', '#FFF1DC'], ['color.pink', '#FFC6D6'], ['color.sky', '#A8D8FF'], ['color.gold', '#FFD27A'], ['color.ink', '#16181F']];
 
 function hexToHsv(hex: string): HsvColor {
   const m = /^#?([0-9a-f]{6})([0-9a-f]{2})?$/i.exec(hex) || ['', 'ffffff', ''];
@@ -206,9 +207,9 @@ export function ColorField({ id, label, detail, value, modified, write, onReset 
           <Popover positioning={{ position: 'below', align: 'start', offset: 6 }} trapFocus
             onOpenChange={(_, d) => { if (!d.open && gesture.current) { gesture.current = 0; endGesture(); } }}>
             <PopoverTrigger disableButtonEnhancement>
-              <button type="button" className="chip" style={{ background: v0 }} aria-label="自定义颜色" />
+              <button type="button" className="chip" style={{ background: v0 }} aria-label={t('color.custom')} />
             </PopoverTrigger>
-            <PopoverSurface className="pop picker" aria-label="自定义颜色">
+            <PopoverSurface className="pop picker" aria-label={t('color.custom')}>
               <ColorPicker color={hsv} onColorChange={(_, d) => {
                 setHsv(d.color);
                 const next = hsvToHex(d.color);
@@ -222,12 +223,12 @@ export function ColorField({ id, label, detail, value, modified, write, onReset 
               </ColorPicker>
             </PopoverSurface>
           </Popover>
-          <input id={id} value={hex} maxLength={9} spellCheck={false} aria-label={label + '（十六进制）'} onChange={e => setHex(e.currentTarget.value)}
+          <input id={id} value={hex} maxLength={9} spellCheck={false} aria-label={t('color.hex', { label })} onChange={e => setHex(e.currentTarget.value)}
             onBlur={commitHex} onKeyDown={e => e.key === 'Enter' && commitHex()} />
         </div>
         <div className="swatches" role="radiogroup" aria-label={label}>
           {SWATCHES.map(([name, c]) => (
-            <button key={c} type="button" role="radio" aria-checked={v0.slice(0, 7) === c && v0.length === 7} aria-label={name} title={name} style={{ background: c }}
+            <button key={c} type="button" role="radio" aria-checked={v0.slice(0, 7) === c && v0.length === 7} aria-label={t(name)} title={t(name)} style={{ background: c }}
               onClick={() => write(c)} />
           ))}
         </div>
@@ -250,7 +251,7 @@ export function AdjustmentField({ instId, a, onReset }: { instId: string; a: Adj
       // A font's weight is one of its named weights, as Windows' and Office's font lists say them.
       if (a.key.endsWith('.weight')) {
         const options = [];
-        for (let w = Math.ceil(a.min / 100) * 100; w <= a.max; w += 100) options.push({ value: String(w), label: `${WEIGHT_NAMES[w] ?? ''}（${w}）` });
+        for (let w = Math.ceil(a.min / 100) * 100; w <= a.max; w += 100) options.push({ value: String(w), label: t('weight.label', { name: weightName(w), w }) });
         return <ChoiceField {...common} options={options} value={String(Math.round(+a.value / 100) * 100)} write={write} />;
       }
       return <NumberField {...common} min={a.min} max={a.max} step={a.step} value={a.value} view={viewFor(a.key, a.step)} write={write} />;

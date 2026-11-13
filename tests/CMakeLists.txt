@@ -11,6 +11,9 @@ target_sources(animelogon_tests PRIVATE overlay_tests.cpp ${PROJECT_SOURCE_DIR}/
 target_sources(animelogon_tests PRIVATE stills_tests.cpp ${PROJECT_SOURCE_DIR}/overlay/src/stills.cpp)
 target_include_directories(animelogon_tests PRIVATE ${PROJECT_SOURCE_DIR}/overlay/src)
 target_link_libraries(animelogon_tests PRIVATE animelogon_common)
+# The strings, read in Simplified Chinese (common_tests.cpp's main), which the tests expect.
+animelogon_locales_rc(test_locales)
+target_sources(animelogon_tests PRIVATE ${test_locales})
 add_test(NAME animelogon_tests COMMAND animelogon_tests)
 # The whole run takes seconds. A test stuck in a graphics driver or in Media Foundation is ended
 # after ten minutes and counts as a failure, rather than holding a CI runner for hours.

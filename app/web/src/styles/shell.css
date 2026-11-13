@@ -24,6 +24,8 @@
 .fui-Listbox,
 .fui-DialogSurface { app-region: no-drag; }
 .brand { font-weight: 600; font-size: 14px; }
+/* The program's icon before its name, as Windows starts a title bar. */
+.brand-mark { display: inline-block; width: 16px; height: 16px; margin-right: 10px; vertical-align: -3px; }
 .brand-rest { font-weight: 400; color: var(--text-2); }
 .nav { display: flex; gap: 2px; }
 .nav button {

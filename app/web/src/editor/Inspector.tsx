@@ -1,5 +1,5 @@
 // The panel beside the picture (D40). It shows one level at a time, as the selection says: the
-// wallpaper and the list of components; one component; one part of it (组件 / 时钟 / 时间). The
+// wallpaper and the list of components; one component; one part of it (Components / Clock / Time). The
 // breadcrumbs at its top go back up. Each level is a few sections that fold, their values in a
 // grid of labels and controls.
 import { useEffect, useLayoutEffect, useReducer, useRef, useState, type ReactNode } from 'react';
@@ -20,7 +20,8 @@ import {
 import { ARRIVE, calm } from '../motion';
 import { wallpaperUrl } from '../native';
 import { clearValues, edit, liveSet, pv, setValue, setValues, subscribePreview } from '../preview';
-import { getState, instOf, openDialog, select, setState, setTab, useStore } from '../store';
+import { t as tr } from '../i18n';
+import { getState, instOf, openDialog, select, setState, useStore } from '../store';
 import type { Instance, Part, SceneControls } from '../types';
 import { Button, Crumbs, cx, IconButton, ResetButton, Switch } from '../ui/controls';
 import { useDraft } from './draft';
@@ -109,20 +110,20 @@ export function Inspector() {
   else if (inst && inst.id !== 'wallpaper') view = <InstanceView inst={inst as Instance} />;
   else view = <Overview />;
   return (
-    <aside className="inspector" aria-label="调整">
+    <aside className="inspector" aria-label={tr('inspector.label')}>
       <div ref={content}>{view}</div>
     </aside>
   );
 }
 
 /* --- the wallpaper and the components --- */
+// Under a component's name: only what is worth knowing, that it is missing or who made it; that it
+// is built in, hidden or changed shows elsewhere (its switch, the reset buttons).
 const describe = (i: Instance) =>
-  [i.missing ? '组件缺失' : i.builtIn ? '内置组件' : i.author ? `作者 ${i.author}` : '导入的组件', i.sources.length ? `显示${i.sources.join('、')}` : null,
-    i.modified ? '已修改' : null, i.visible ? null : '已隐藏'].filter(Boolean).join(' · ');
+  i.missing ? tr('inspector.missing') : !i.builtIn && i.author ? tr('inspector.by', { author: i.author }) : '';
 
-// The list says only what sets a component apart; its page says the rest.
-const brief = (i: Instance) =>
-  i.missing ? '组件缺失' : [i.visible ? null : '已隐藏', i.modified ? '已修改' : null].filter(Boolean).join(' · ') || (i.builtIn ? '内置组件' : i.author ? `作者 ${i.author}` : '导入的组件');
+// The list names each component; it says more only of one whose file is missing.
+const brief = (i: Instance) => (i.missing ? tr('inspector.missing') : '');
 
 function Overview() {
   const s = useStore();
@@ -135,30 +136,27 @@ function Overview() {
       <div className="ihead">
         <div className="top"><h2 className="ititle ellipsis">{t.name}</h2></div>
       </div>
-      <Section value="wallpaper" title="壁纸" sections={sections}>
+      <Section value="wallpaper" title={tr('inspector.wallpaper')} sections={sections}>
         <div className="wp">
           <img className="pic" src={wallpaperUrl(wp.ref)} alt="" draggable={false} />
           <div className="tx">
             <span className="nm ellipsis">{wp.name}</span>
             <span className="t-cap3 ellipsis num">{wp.meta}</span>
           </div>
-          {wp.modified && <ResetButton label="恢复主题默认壁纸" onClick={() => edit('wallpaper', { ref: t.ownWallpaper })} />}
-          <Button size="sm" onClick={() => openDialog({ kind: 'wallpaper' })}>更换…</Button>
+          {wp.modified && <ResetButton label={tr('inspector.wallpaper.reset')} onClick={() => edit('wallpaper', { ref: t.ownWallpaper })} />}
+          <Button size="sm" onClick={() => openDialog({ kind: 'wallpaper' })}>{tr('inspector.wallpaper.change')}</Button>
         </div>
         {((wp.kind === 'video' || wp.kind === 'image') || (scene && scene.settings.length > 0)) && (
           <div className="props">
             {(wp.kind === 'video' || wp.kind === 'image') && (
-              <ChoiceField id="wp-fit" label="契合度" detail="图像宽高比与屏幕不一致时的显示方式。" value={t.fit} modified={t.fitModified}
-                options={[{ value: 'fill', label: '填充' }, { value: 'fit', label: '适应' }, { value: 'stretch', label: '拉伸' }]}
+              <ChoiceField id="wp-fit" label={tr('inspector.fit')} detail={tr('inspector.fit.detail')} value={t.fit} modified={t.fitModified}
+                options={[{ value: 'fill', label: tr('inspector.fit.fill') }, { value: 'fit', label: tr('inspector.fit.fit') }, { value: 'stretch', label: tr('inspector.fit.stretch') }]}
                 write={v => edit('fit', { value: v })} onReset={() => edit('fit', { value: t.ownFit })} />
             )}
             {scene && scene.settings.map(st => <SettingField key={st.id} instId="wallpaper" setting={st} onReset={() => clearValues('wallpaper', [st.id])} />)}
           </div>
         )}
-        {wp.audio && (
-          <p className="inote">视频声音可在<button type="button" className="link" onClick={() => setTab('settings')}>设置</button>中开启或关闭。</p>
-        )}
-        {scene && scene.static && <p className="inote">此场景在本设备上以静态画面显示。调整会保留在导出的主题中。</p>}
+        {scene && scene.static && <p className="inote">{tr('inspector.scene_static')}</p>}
         {scene && scene.parts.length > 0 && (
           <div className="list">
             {scene.parts.map(p => (
@@ -167,7 +165,6 @@ function Overview() {
                   <span className="ic"><Image16Regular /></span>
                   <span className="tx">
                     <span className="ellipsis">{p.label}</span>
-                    {p.modified && <small>已修改</small>}
                   </span>
                   <ChevronRight12Regular className="chev" />
                 </button>
@@ -176,7 +173,7 @@ function Overview() {
           </div>
         )}
       </Section>
-      <Section value="components" title="组件" aside={`${t.instances.length}`} sections={sections}>
+      <Section value="components" title={tr('inspector.components')} sections={sections}>
         <div className="list">
           {t.instances.map(i => (
             <div key={i.id} className={cx('item', s.hover?.inst === i.id && 'hover')} onPointerEnter={() => hoverOn(i.id, true)} onPointerLeave={() => hoverOn(i.id, false)}>
@@ -184,26 +181,26 @@ function Overview() {
                 <span className="ic">{(i.builtIn && BUILT_IN_ICONS[i.ref]) || <PuzzlePiece16Regular />}</span>
                 <span className="tx">
                   <span className="ellipsis">{i.label}</span>
-                  <small className="ellipsis">{brief(i)}</small>
+                  {brief(i) && <small className="ellipsis">{brief(i)}</small>}
                 </span>
               </button>
-              <Switch checked={i.visible} label={`在锁屏上显示「${i.label}」`} onChange={on => edit('visible', { instance: i.id, on })} />
+              <Switch checked={i.visible} label={tr('inspector.show_named', { name: i.label })} onChange={on => edit('visible', { instance: i.id, on })} />
             </div>
           ))}
         </div>
-        <Button size="sm" variant="ghost" className="add" icon={<Add16Regular />} disabled={full} onClick={() => openDialog({ kind: 'addComponent' })}>添加组件</Button>
-        {full && <p className="inote">已达到 8 个组件的上限（含已隐藏的组件）。</p>}
+        <Button size="sm" variant="ghost" className="add" icon={<Add16Regular />} disabled={full} onClick={() => openDialog({ kind: 'addComponent' })}>{tr('inspector.add')}</Button>
+        {full && <p className="inote">{tr('inspector.full')}</p>}
       </Section>
       {/* How the lock screen gives way to the sign-in screen when a key or a click wakes it. The
           lock-screen preview plays it. */}
-      <Section value="wake" title="唤醒过渡" sections={sections}>
+      <Section value="wake" title={tr('inspector.wake')} sections={sections}>
         <div className="props">
-          <ChoiceField id="wake-style" label="过渡效果" detail="唤醒后，锁屏切换到登录界面的过渡效果。" value={t.wake} modified={t.wakeModified}
-            options={[{ value: 'fade', label: '淡出' }, { value: 'zoom', label: '缩放淡出' }, { value: 'slide', label: '上滑' }, { value: 'cut', label: '无' }]}
+          <ChoiceField id="wake-style" label={tr('inspector.wake.effect')} detail={tr('inspector.wake.effect.detail')} value={t.wake} modified={t.wakeModified}
+            options={[{ value: 'fade', label: tr('inspector.wake.fade') }, { value: 'zoom', label: tr('inspector.wake.zoom') }, { value: 'slide', label: tr('inspector.wake.slide') }, { value: 'cut', label: tr('inspector.wake.cut') }]}
             write={v => edit('wake', { value: v })} onReset={() => edit('wake', { value: t.ownWake })} />
           {t.wake !== 'cut' && (
-            <NumberField id="wake-seconds" label="时长" min={0.1} max={2} step={0.05} value={String(t.wakeSeconds)} modified={t.wakeSecondsModified}
-              view={{ factor: 1, digits: 2, unit: () => '秒' }}
+            <NumberField id="wake-seconds" label={tr('inspector.duration')} min={0.1} max={2} step={0.05} value={String(t.wakeSeconds)} modified={t.wakeSecondsModified}
+              view={{ factor: 1, digits: 2, unit: () => tr('unit.seconds') }}
               write={(v, gesture) => edit('wakeSeconds', { value: v, ...(gesture ? { gesture } : {}) })}
               onReset={() => edit('wakeSeconds', { value: t.ownWakeSeconds })} />
           )}
@@ -224,15 +221,15 @@ function InstanceView({ inst }: { inst: Instance }) {
     <>
       <div className="ihead">
         <div className="top">
-          <Crumbs label="位置" items={[{ label: '组件', go: () => select(null) }, { label: inst.label }]} />
+          <Crumbs label={tr('inspector.crumbs')} items={[{ label: tr('inspector.components'), go: () => select(null) }, { label: inst.label }]} />
           <Menu positioning={{ position: 'below', align: 'end', offset: 4 }}>
             <MenuTrigger disableButtonEnhancement>
-              <IconButton size="sm" label={`「${inst.label}」的更多操作`} tip="更多" icon={<MoreHorizontal16Regular />} />
+              <IconButton size="sm" label={tr('theme.more_named', { name: inst.label })} tip={tr('common.more')} icon={<MoreHorizontal16Regular />} />
             </MenuTrigger>
             <MenuPopover className="menu">
               <MenuList>
-                <MenuItem disabled={!inst.modified} onClick={() => clearValues(inst.id, keys)}>恢复此组件</MenuItem>
-                {!inst.base && <MenuItem onClick={() => { select(null); edit('removeInstance', { instance: inst.id }); }}>删除</MenuItem>}
+                <MenuItem disabled={!inst.modified} onClick={() => clearValues(inst.id, keys)}>{tr('inspector.reset_component')}</MenuItem>
+                {!inst.base && <MenuItem onClick={() => { select(null); edit('removeInstance', { instance: inst.id }); }}>{tr('inspector.remove')}</MenuItem>}
               </MenuList>
             </MenuPopover>
           </Menu>
@@ -240,22 +237,21 @@ function InstanceView({ inst }: { inst: Instance }) {
         <div className="sub">
           <span className="t-cap3 ellipsis">{describe(inst)}</span>
           <label className="showsw">
-            显示
+            {tr('inspector.show')}
             <Switch checked={inst.visible} onChange={on => edit('visible', { instance: inst.id, on })} />
           </label>
         </div>
-        {!inst.visible && <p className="inote">{inst.base ? '主题内置的组件只能隐藏，无法删除。' : '锁屏上不显示。'}</p>}
       </div>
       {inst.missing ? (
         <div className="ibody">
-          <div className="notice"><Warning16Regular /><span>找不到此组件的文件。</span></div>
+          <div className="notice"><Warning16Regular /><span>{tr('inspector.missing_file')}</span></div>
         </div>
       ) : (
         // What a component looks like comes first; where it is, mostly set by dragging it on the
         // stage, is folded until opened; the parts that can be set one by one follow.
         <>
           {(single || own.length > 0) && (
-            <Section value="look" title="外观" sections={sections}>
+            <Section value="look" title={tr('inspector.look')} sections={sections}>
               <div className="props">
                 {single && <PanelField instId={inst.id} pk="p1" attr="size" />}
                 {own.map(st => <SettingField key={st.id} instId={inst.id} setting={st} onReset={() => clearValues(inst.id, [st.id])} />)}
@@ -263,24 +259,24 @@ function InstanceView({ inst }: { inst: Instance }) {
             </Section>
           )}
           {single && (
-            <Section value="layout" title="排版" sections={sections}>
+            <Section value="layout" title={tr('inspector.layout')} sections={sections}>
               <LayoutFields inst={inst} pk="p1" />
             </Section>
           )}
           {single && (
-            <Section value="place" title="位置" sections={sections}>
+            <Section value="place" title={tr('inspector.place')} sections={sections}>
               <PlaceFields instId={inst.id} pk="p1" />
             </Section>
           )}
           {single && (
-            <Section value="enter" title="入场动画" sections={sections}>
+            <Section value="enter" title={tr('inspector.enter')} sections={sections}>
               <EnterFields instId={inst.id} pk="p1" />
             </Section>
           )}
           {parts.length > 0 && (
-            <Section value="parts" title="逐项调整" sections={sections}>
+            <Section value="parts" title={tr('inspector.parts')} sections={sections}>
               <div className="list">
-                {parts.map(p => <OpenRow key={p.key} title={p.label} detail={p.modified ? '已自定义' : undefined} onOpen={() => select(inst.id, p.key)} />)}
+                {parts.map(p => <OpenRow key={p.key} title={p.label} onOpen={() => select(inst.id, p.key)} />)}
               </div>
             </Section>
           )}
@@ -300,23 +296,23 @@ function PartView({ inst, partKey }: { inst: Instance | SceneControls; partKey: 
   const attr = (key: string) => key.split('.').pop() || '';
   const field = (a: Part['adjustments'][number]) => <AdjustmentField key={a.key} instId={inst.id} a={a} onReset={() => clearValues(inst.id, [a.key])} />;
   const crumbs = inst.id === 'wallpaper'
-    ? [{ label: '壁纸', go: () => select(null) }, { label: pt.label }]
-    : [{ label: '组件', go: () => select(null) }, { label: inst.label, go: () => select(inst.id) }, { label: pt.label }];
+    ? [{ label: tr('inspector.wallpaper'), go: () => select(null) }, { label: pt.label }]
+    : [{ label: tr('inspector.components'), go: () => select(null) }, { label: inst.label, go: () => select(inst.id) }, { label: pt.label }];
   let body: ReactNode;
   if (kind === 'text') {
     const common = pt.adjustments.filter(a => COMMON_TEXT.includes(attr(a.key)) && a.key.startsWith(pt.key + '.'));
     const more = pt.adjustments.filter(a => !common.includes(a));
     body = (
       <>
-        <Section value="common" title="常用" sections={sections}><div className="props">{common.map(field)}</div></Section>
-        {more.length > 0 && <Section value="more" title="更多" sections={sections}><div className="props">{more.map(field)}</div></Section>}
+        <Section value="common" title={tr('inspector.common')} sections={sections}><div className="props">{common.map(field)}</div></Section>
+        {more.length > 0 && <Section value="more" title={tr('common.more')} sections={sections}><div className="props">{more.map(field)}</div></Section>}
       </>
     );
   } else if (kind === 'panel') {
     const look = inst.id === 'wallpaper' ? pt.adjustments.filter(a => ['opacity', 'visible'].includes(attr(a.key))) : [];
     body = (
       <>
-        <Section value="look" title="外观" sections={sections}>
+        <Section value="look" title={tr('inspector.look')} sections={sections}>
           <div className="props">
             <PanelField instId={inst.id} pk={pt.key} attr="size" />
             {look.map(field)}
@@ -324,32 +320,27 @@ function PartView({ inst, partKey }: { inst: Instance | SceneControls; partKey: 
           </div>
         </Section>
         {inst.id !== 'wallpaper' && (
-          <Section value="layout" title="排版" sections={sections}>
+          <Section value="layout" title={tr('inspector.layout')} sections={sections}>
             <LayoutFields inst={inst as Instance} pk={pt.key} />
           </Section>
         )}
-        <Section value="place" title="位置" sections={sections}><PlaceFields instId={inst.id} pk={pt.key} /></Section>
+        <Section value="place" title={tr('inspector.place')} sections={sections}><PlaceFields instId={inst.id} pk={pt.key} /></Section>
         {inst.id !== 'wallpaper' && (
-          <Section value="enter" title="入场动画" sections={sections}><EnterFields instId={inst.id} pk={pt.key} /></Section>
+          <Section value="enter" title={tr('inspector.enter')} sections={sections}><EnterFields instId={inst.id} pk={pt.key} /></Section>
         )}
       </>
     );
   } else {
-    body = <Section value="look" title="外观" sections={sections}><div className="props">{pt.adjustments.map(field)}</div></Section>;
+    body = <Section value="look" title={tr('inspector.look')} sections={sections}><div className="props">{pt.adjustments.map(field)}</div></Section>;
   }
   return (
     <>
       <div className="ihead">
-        <div className="top"><Crumbs label="位置" items={crumbs} /></div>
-        {/^(时间|上午\/下午|日期)$/.test(pt.label) && inst.id !== 'wallpaper' && (
-          <p className="inote">
-            时间制式、日期和语言在<button type="button" className="link" onClick={() => setTab('settings')}>设置</button>里改，对所有主题生效。
-          </p>
-        )}
+        <div className="top"><Crumbs label={tr('inspector.crumbs')} items={crumbs} /></div>
       </div>
       {body}
       <div className="ifoot">
-        <Button size="sm" disabled={!pt.modified} onClick={() => clearValues(inst.id, pt.adjustments.map(a => a.key))}>{`恢复「${pt.label}」`}</Button>
+        <Button size="sm" disabled={!pt.modified} onClick={() => clearValues(inst.id, pt.adjustments.map(a => a.key))}>{tr('inspector.reset_part', { name: pt.label })}</Button>
       </div>
     </>
   );
@@ -376,7 +367,7 @@ function LayoutFields({ inst, pk }: { inst: Instance; pk: string }) {
     if (!p.key.startsWith(pk + '.')) continue;
     for (const a of p.adjustments) {
       if (a.key.endsWith('.hang')) rows.push({ label: p.label, a });
-      else if (/\.l\d+\.gap$/.test(a.key)) rows.push({ label: `${p.label}行距`, a });
+      else if (/\.l\d+\.gap$/.test(a.key)) rows.push({ label: tr('inspector.line_gap_of', { name: p.label }), a });
     }
   }
   const align = adjustment(inst.id, pk + '.align');
@@ -411,7 +402,7 @@ const POSITION_VIEW = (unit: string): View => ({ factor: 1, digits: 1, unit: () 
 // Where a panel is (D60): where the middle of its box is, in percent of its display. The anchor
 // follows the position, as it does for a drag, and is never shown; lining a panel up with the
 // display or with other panels is what the stage's snap lines are for. The margin from the
-// display's edges is under 更多. While the panel is dragged or resized on the stage, the fields
+// display's edges is folded under a link. While the panel is dragged or resized on the stage, the fields
 // show where it is going. Every position keeps it on its display.
 function PlaceFields({ instId, pk }: { instId: string; pk: string }) {
   const draft = useDraft(instId);
@@ -435,16 +426,16 @@ function PlaceFields({ instId, pk }: { instId: string; pk: string }) {
   return (
     <div className="props">
       {instId === 'wallpaper' && (
-        <ToggleField id={`fill-${pk}`} label="铺满画面" value={full}
+        <ToggleField id={`fill-${pk}`} label={tr('inspector.fill_picture')} value={full}
           write={on => (on ? setValue(instId, pk + '.anchor', 'full') : setValues(instId, { [pk + '.anchor']: 'center', [pk + '.offset-x']: '0', [pk + '.offset-y']: '0' }))} />
       )}
       {c && (
         <>
-          <NumberField id={`pos-${instId}-${pk}-x`} label="水平位置" detail="组件中心到屏幕左边缘的距离。" min={c.x0} max={c.x1} step={0.1}
-            value={draft?.['#x'] ?? String(clamp(c.x, c.x0, c.x1))} modified={false} view={POSITION_VIEW('% 屏宽')}
+          <NumberField id={`pos-${instId}-${pk}-x`} label={tr('inspector.x')} detail={tr('inspector.x.detail')} min={c.x0} max={c.x1} step={0.1}
+            value={draft?.['#x'] ?? String(clamp(c.x, c.x0, c.x1))} modified={false} view={POSITION_VIEW(tr('unit.screen_width'))}
             write={(v, gesture) => put(v, null, gesture)} onReset={reset} />
-          <NumberField id={`pos-${instId}-${pk}-y`} label="垂直位置" detail="组件中心到屏幕上边缘的距离。" min={c.y0} max={c.y1} step={0.1}
-            value={draft?.['#y'] ?? String(clamp(c.y, c.y0, c.y1))} modified={false} view={POSITION_VIEW('% 屏高')}
+          <NumberField id={`pos-${instId}-${pk}-y`} label={tr('inspector.y')} detail={tr('inspector.y.detail')} min={c.y0} max={c.y1} step={0.1}
+            value={draft?.['#y'] ?? String(clamp(c.y, c.y0, c.y1))} modified={false} view={POSITION_VIEW(tr('unit.screen_height'))}
             write={(v, gesture) => put(null, v, gesture)} onReset={reset} />
         </>
       )}
@@ -452,10 +443,10 @@ function PlaceFields({ instId, pk }: { instId: string; pk: string }) {
         <div className="pmore">
           {margin && (
             <button type="button" className="link quietlink" aria-expanded={more} onClick={() => setMore(!more)}>
-              {more ? '收起' : '边距…'}
+              {more ? tr('inspector.fewer') : tr('inspector.margin_more')}
             </button>
           )}
-          {modified && <button type="button" className="link" onClick={reset}>恢复位置</button>}
+          {modified && <button type="button" className="link" onClick={reset}>{tr('inspector.reset_place')}</button>}
         </div>
       )}
       {margin && !full && more && <AdjustmentField instId={instId} a={margin} onReset={() => clearValues(instId, [margin.key])} />}

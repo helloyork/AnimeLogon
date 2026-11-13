@@ -1,5 +1,7 @@
 #include "animelogon/paths.h"
 
+#include "animelogon/i18n.h"
+
 #include <windows.h>
 #include <shlobj.h>
 #include <knownfolders.h>
@@ -33,7 +35,7 @@ const std::wstring &Sandbox() { return g_sandbox; }
 std::wstring SandboxTitle() {
     const size_t slash = g_sandbox.find_last_of(L'\\');
     const std::wstring leaf = slash == std::wstring::npos ? g_sandbox : g_sandbox.substr(slash + 1);
-    return L"AnimeLogon（沙盒 · " + leaf + L"）";
+    return i18n::Tr("app.sandbox_title", {{L"folder", leaf}});
 }
 
 std::wstring SandboxMutex() {

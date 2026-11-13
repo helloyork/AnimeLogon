@@ -1,4 +1,4 @@
-// 主题库: the theme in use, large, then every theme. A click on a theme puts it in use (D41).
+// The theme library: the theme in use, large, then every theme. A click on a theme puts it in use (D41).
 import { useState, type CSSProperties } from 'react';
 import { Menu, MenuDivider, MenuItem, MenuList, MenuPopover, MenuTrigger } from '@fluentui/react-components';
 import { Add16Regular, Edit16Regular, MoreHorizontal16Regular, Play16Regular, Warning16Regular } from '@fluentui/react-icons';
@@ -24,6 +24,7 @@ import {
   useStore,
   workshopFlow,
 } from '../store';
+import { t as tr } from '../i18n';
 import type { ThemeEntry } from '../types';
 import { Button, cx, IconButton } from '../ui/controls';
 
@@ -41,30 +42,29 @@ export function LibraryPage() {
     <main className="scroll">
       <div className="page">
         <div className="pagehead">
-          <h1 className="t-title">主题库</h1>
-          <span className="t-cap num">{`${lib.themes.length} 个主题`}</span>
+          <h1 className="t-title">{tr('library.title')}</h1>
           <div className="actions">
-            <Button shield onClick={() => send('import')}>导入…</Button>
-            {s.env.wallpaperEngine && <Button onClick={() => workshopFlow(false)}>从 Wallpaper Engine 导入…</Button>}
-            <Button icon={<Add16Regular />} onClick={() => openDialog({ kind: 'newTheme' })}>新建主题</Button>
+            <Button shield onClick={() => send('import')}>{tr('library.import')}</Button>
+            {s.env.wallpaperEngine && <Button onClick={() => workshopFlow(false)}>{tr('library.import_we')}</Button>}
+            <Button icon={<Add16Regular />} onClick={() => openDialog({ kind: 'newTheme' })}>{tr('library.new')}</Button>
           </div>
         </div>
         {!s.env.installed && (
           <div className="notice" role="status">
             <Warning16Regular />
-            <span>此电脑未安装 AnimeLogon，更改无法保存。</span>
+            <span>{tr('library.not_installed')}</span>
           </div>
         )}
         {s.env.installed && !s.env.on && (
           <div className="notice" role="status">
             <Warning16Regular />
-            <span>AnimeLogon 已关闭，锁屏显示的是 Windows 默认画面。</span>
-            <Button size="sm" shield onClick={() => send('switch', { on: true })}>启用</Button>
+            <span>{tr('library.off')}</span>
+            <Button size="sm" shield onClick={() => send('switch', { on: true })}>{tr('library.turn_on')}</Button>
           </div>
         )}
         {perMonitor() ? <Screens /> : <Current />}
         <div className="sechead">
-          <h2 className="t-h">我的主题</h2>
+          <h2 className="t-h">{tr('library.mine')}</h2>
         </div>
         <div className="grid">
           {lib.themes.map(t => <ThemeCard key={t.id} theme={t} />)}
@@ -96,37 +96,31 @@ function Current() {
   const meta = s.lib!.wallpapers.find(w => w.id === t.wallpaperRef)?.meta;
   const showComponents = s.lib!.settings.components;
   return (
-    <section className="hero" aria-label="当前主题">
+    <section className="hero" aria-label={tr('library.current')}>
       <div className="shot" style={shapeVars(t.id)}>
         <Picture t={t} width={1280} playing />
       </div>
       <div className="info">
-        <span className="t-cap3">当前主题</span>
+        <span className="t-cap3">{tr('library.current')}</span>
         <h2 className="name ellipsis">{t.name}</h2>
         <dl className="facts">
-          <dt>壁纸</dt>
+          <dt>{tr('library.fact.wallpaper')}</dt>
           <dd>
             <div className="ellipsis">{t.wallpaper}</div>
             {meta && <div className="t-cap ellipsis num">{meta}</div>}
           </dd>
-          <dt>组件</dt>
-          <dd className="ellipsis">{showComponents ? t.summary || '无' : '已在设置中关闭'}</dd>
-          {t.modifications > 0 && (
-            <>
-              <dt>修改</dt>
-              <dd className="num">{`已修改 ${t.modifications} 项`}</dd>
-            </>
-          )}
+          <dt>{tr('library.fact.components')}</dt>
+          <dd className="ellipsis">{showComponents ? t.summary : tr('library.fact.components_off')}</dd>
           {t.author && !t.builtIn && (
             <>
-              <dt>作者</dt>
+              <dt>{tr('library.fact.author')}</dt>
               <dd className="ellipsis">{t.author}</dd>
             </>
           )}
         </dl>
         <div className="acts">
-          <Button variant="primary" icon={<Edit16Regular />} onClick={() => openTheme(t.id)}>自定义</Button>
-          <Button icon={<Play16Regular />} onClick={() => setState({ lock: { theme: t.id } })}>锁屏预览</Button>
+          <Button variant="primary" icon={<Edit16Regular />} onClick={() => openTheme(t.id)}>{tr('theme.customize')}</Button>
+          <Button icon={<Play16Regular />} onClick={() => setState({ lock: { theme: t.id } })}>{tr('theme.lock_preview')}</Button>
         </div>
       </div>
     </section>
@@ -138,10 +132,9 @@ function Screens() {
   const s = useStore();
   const showOn = (primary: boolean) => s.lib!.settings.componentDisplays === 'all' || primary;
   return (
-    <section aria-label="当前主题">
+    <section aria-label={tr('library.current')}>
       <div className="sechead first">
-        <h2 className="t-h">当前主题</h2>
-        <span className="t-cap">每个屏幕单独设置主题</span>
+        <h2 className="t-h">{tr('library.current')}</h2>
       </div>
       <div className="screens">
         {s.env.monitors.map(m => {
@@ -150,12 +143,12 @@ function Screens() {
           return (
             <figure key={m.key} className="screen">
               <button type="button" className="shot" style={{ '--arw': String(m.width), '--arh': String(m.height) } as CSSProperties}
-                aria-label={`自定义「${t.name}」`} onClick={() => openTheme(t.id)}>
+                aria-label={tr('theme.customize_named', { name: t.name })} onClick={() => openTheme(t.id)}>
                 <img src={thumbUrl(t.id, t.revision, 640, s.tick)} alt="" draggable={false} />
               </button>
               <figcaption>
                 <span className="ellipsis">{t.name}</span>
-                <span className="t-cap3 ellipsis">{m.name + (m.primary ? '（主）' : '') + (showOn(m.primary) ? '' : ' · 不显示组件')}</span>
+                <span className="t-cap3 ellipsis">{(m.primary ? tr('monitor.primary', { name: m.name }) : m.name) + (showOn(m.primary) ? '' : ' · ' + tr('library.no_components'))}</span>
               </figcaption>
             </figure>
           );
@@ -168,26 +161,27 @@ function Screens() {
 export function ThemeMenuItems({ theme, onPage }: { theme: ThemeEntry; onPage?: boolean }) {
   return (
     <MenuList>
-      {!onPage && <MenuItem onClick={() => openTheme(theme.id)}>自定义</MenuItem>}
-      {!onPage && <MenuItem onClick={() => setState({ lock: { theme: theme.id } })}>锁屏预览</MenuItem>}
+      {!onPage && <MenuItem onClick={() => openTheme(theme.id)}>{tr('theme.customize')}</MenuItem>}
+      {!onPage && <MenuItem onClick={() => setState({ lock: { theme: theme.id } })}>{tr('theme.lock_preview')}</MenuItem>}
       {!onPage && <MenuDivider />}
-      <MenuItem icon={<UacShield />} onClick={() => copyFlow(theme.id)}>复制…</MenuItem>
-      {!theme.builtIn && <MenuItem icon={<UacShield />} onClick={() => renameFlow(theme.id)}>重命名…</MenuItem>}
-      <MenuItem onClick={() => send('export', { theme: theme.id })}>导出主题包…</MenuItem>
-      {theme.modifications > 0 && <MenuItem onClick={() => resetFlow(theme.id)}>{`恢复默认（${theme.modifications} 项修改）`}</MenuItem>}
+      <MenuItem icon={<UacShield />} onClick={() => copyFlow(theme.id)}>{tr('theme.copy')}</MenuItem>
+      {!theme.builtIn && <MenuItem icon={<UacShield />} onClick={() => renameFlow(theme.id)}>{tr('theme.rename')}</MenuItem>}
+      <MenuItem onClick={() => send('export', { theme: theme.id })}>{tr('theme.export')}</MenuItem>
+      {theme.modifications > 0 && <MenuItem onClick={() => resetFlow(theme.id)}>{tr('theme.reset')}</MenuItem>}
       {!theme.builtIn && <MenuDivider />}
-      {!theme.builtIn && <MenuItem icon={<UacShield />} onClick={() => deleteFlow(theme.id)}>删除…</MenuItem>}
+      {!theme.builtIn && <MenuItem icon={<UacShield />} onClick={() => deleteFlow(theme.id)}>{tr('theme.delete')}</MenuItem>}
     </MenuList>
   );
 }
 
-// A theme: its picture and name are one button that puts it in use; 自定义 and its menu sit over
+// A theme: its picture and name are one button that puts it in use; Customize and its menu sit over
 // the picture's corner, beside that button rather than inside it.
 function ThemeCard({ theme: t }: { theme: ThemeEntry }) {
   const [hover, setHover] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const used = usedOn(t.id);
-  const facts = [...used, kindName(t.wallpaperKind), t.summary, t.modifications ? '已修改' : null, t.author && !t.builtIn ? t.author : null].filter(Boolean).join(' · ');
+  // What it is, in a few words; that it is in use shows in its outline.
+  const facts = [kindName(t.wallpaperKind), t.summary, t.author && !t.builtIn ? t.author : null].filter(Boolean).join(' · ');
   return (
     <article className={cx('tcard', used.length > 0 && 'use')} data-theme={t.id} style={shapeVars(t.id)}
       onPointerEnter={() => setHover(true)} onPointerLeave={() => setHover(false)}>
@@ -208,10 +202,10 @@ function ThemeCard({ theme: t }: { theme: ThemeEntry }) {
       </button>
       <div className="over">
         <div className={cx('hov', menuOpen && 'shown')}>
-          <Button size="sm" onClick={() => openTheme(t.id)}>自定义</Button>
+          <Button size="sm" onClick={() => openTheme(t.id)}>{tr('theme.customize')}</Button>
           <Menu open={menuOpen} onOpenChange={(_, d) => setMenuOpen(d.open)} positioning={{ position: 'below', align: 'end', offset: 4 }}>
             <MenuTrigger disableButtonEnhancement>
-              <IconButton size="sm" variant="secondary" label={`「${t.name}」的更多操作`} tip="更多" icon={<MoreHorizontal16Regular />} />
+              <IconButton size="sm" variant="secondary" label={tr('theme.more_named', { name: t.name })} tip={tr('common.more')} icon={<MoreHorizontal16Regular />} />
             </MenuTrigger>
             <MenuPopover className="menu">
               <ThemeMenuItems theme={t} />

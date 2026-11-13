@@ -8,6 +8,7 @@
 // ends. Without a lift (scene layers; a component drawn on several displays of a wall) the
 // picture is redrawn live as before.
 import { useEffect, useLayoutEffect, useReducer, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
+import { t as tr } from '../i18n';
 import { Desktop16Regular } from '@fluentui/react-icons';
 import { SceneFrames, WallpaperVideo } from '../media';
 import { calm } from '../motion';
@@ -83,8 +84,8 @@ interface Drag {
   settling?: number;  // the request whose picture ends it
 }
 
-// Where the middle of the moving box is, as the panel's 水平位置 and 垂直位置 say it (D60).
-const centreText = (x: number, y: number) => `水平 ${x.toFixed(1)}% · 垂直 ${y.toFixed(1)}%`;
+// Where the middle of the moving box is, as the panel's horizontal and vertical position say it (D60).
+const centreText = (x: number, y: number) => tr('canvas.position', { x: x.toFixed(1), y: y.toFixed(1) });
 const pad = (r: Rect, p: number): CSSProperties => ({ left: r.left - p, top: r.top - p, width: r.width + p * 2, height: r.height + p * 2 });
 
 export function Canvas() {
@@ -295,7 +296,7 @@ export function Canvas() {
         last[pk + '.offset-y'] = String(o.oy);
       }
       if (lift) hold(lift);
-      setDrag({ inst, pk, g, lift, left: g.r.left, top: g.r.top, scale, origin, readout: `大小 ${size.toFixed(1)}% 屏高` });
+      setDrag({ inst, pk, g, lift, left: g.r.left, top: g.r.top, scale, origin, readout: tr('canvas.size', { size: size.toFixed(1) }) });
       const at = middleMoved(g, 0, 0, scale, origin);
       setDraft({ inst, values: { ...last, '#x': at.x.toFixed(1), '#y': at.y.toFixed(1) } });
       if (!lift) liveSet(inst, last, gesture);
@@ -420,8 +421,8 @@ export function Canvas() {
       {/* Which display's shape the stage has; other shapes are in the toolbar's lock screen preview. */}
       <div className="stage-foot">
         <Desktop16Regular />
-        <span>{spanning() ? '跨屏显示' : `${m.name} · ${ratioLabel(m.width, m.height)}`}</span>
-        {!s.lib!.settings.components && <span>· 组件已在设置中关闭，锁屏仅显示壁纸。</span>}
+        <span>{spanning() ? tr('settings.monitors.span') : `${m.name} · ${ratioLabel(m.width, m.height)}`}</span>
+        {!s.lib!.settings.components && <span>· {tr('canvas.components_off')}</span>}
       </div>
     </div>
   );

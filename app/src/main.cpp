@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "animelogon/i18n.h"
 #include "animelogon/instance.h"
 #include "animelogon/log.h"
 #include "animelogon/paths.h"
@@ -31,7 +32,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, wchar_t *, int show) {
     const bool sandbox = argv && argc == 3 && std::wstring(argv[1]) == L"--sandbox";
     if (sandbox) {
         if (!paths::IsPlainAbsolute(argv[2]) || !paths::CreateDirectories(argv[2])) {
-            MessageBoxW(nullptr, L"--sandbox 参数需要指定本地目录的完整路径。", L"AnimeLogon", MB_OK | MB_ICONWARNING);
+            i18n::Use(i18n::Preferred());
+            MessageBoxW(nullptr, i18n::Tr("app.error.sandbox_arg").c_str(), L"AnimeLogon", MB_OK | MB_ICONWARNING);
             LocalFree(argv);
             return 2;
         }
@@ -54,6 +56,10 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, wchar_t *, int show) {
         return commit::Run(args);
     }
     if (argv) LocalFree(argv);
+
+    // The language of the window and of everything it says: the person's choice, the machine's, or
+    // Windows'. After the sandbox is known, which keeps a choice of its own.
+    i18n::Use(i18n::Preferred());
 
     if (FAILED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED))) return 1;
     instance::Guard only;

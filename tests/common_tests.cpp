@@ -4,6 +4,7 @@
 
 #include <cstring>
 
+#include "animelogon/i18n.h"
 #include "animelogon/background.h"
 #include "animelogon/paths.h"
 #include "animelogon/secure.h"
@@ -223,6 +224,39 @@ TEST(RemoveTreeRemovesNested) {
     CHECK(secure::RemoveTree(dir) == ERROR_SUCCESS);  // already gone
 }
 
+TEST(LanguagesComeFromWindowsLocaleNames) {
+    using i18n::Lang;
+    Lang l = Lang::En;
+    CHECK(i18n::FromLocaleName(L"zh-CN", &l) && l == Lang::ZhHans);
+    CHECK(i18n::FromLocaleName(L"zh-SG", &l) && l == Lang::ZhHans);
+    CHECK(i18n::FromLocaleName(L"zh-TW", &l) && l == Lang::ZhHant);
+    CHECK(i18n::FromLocaleName(L"zh-HK", &l) && l == Lang::ZhHant);
+    CHECK(i18n::FromLocaleName(L"zh-Hant-MO", &l) && l == Lang::ZhHant);
+    CHECK(i18n::FromLocaleName(L"zh-Hans-HK", &l) && l == Lang::ZhHans);
+    CHECK(i18n::FromLocaleName(L"ja-JP", &l) && l == Lang::Ja);
+    CHECK(i18n::FromLocaleName(L"en-GB", &l) && l == Lang::En);
+    CHECK(!i18n::FromLocaleName(L"ko-KR", &l));
+    CHECK(!i18n::FromLocaleName(L"jam", &l));  // a language whose code merely starts the same
+    CHECK(i18n::FromTag(L"zh-hant", &l) && l == Lang::ZhHant && !i18n::FromTag(L"zh", &l));
+}
+
+TEST(StringsFallBackToSimplifiedChineseAndFillTheirPlaces) {
+    i18n::UseText(i18n::Lang::En, R"({"a": "One {n} of {total}", "esc": "q\"é\n"})",
+                  u8R"({"a": "第 {n} 个", "only.zh": "仅中文", "label.面板 {n}": "面板 {n}", "label.颜色": "颜色"})");
+    CHECK(i18n::Tr("a", {{L"n", L"2"}, {L"total", L"5"}}) == L"One 2 of 5");
+    CHECK(i18n::Tr("esc") == L"q\"é\n");
+    CHECK(i18n::Tr("only.zh") == L"仅中文");
+    CHECK(i18n::Tr("not.there") == L"not.there" && !i18n::Has("not.there"));
+    // A label the files carry, numbered or not; one they lack as written.
+    CHECK(i18n::Label(L"面板 3") == L"面板 3" && i18n::Label(L"颜色") == L"颜色");
+    CHECK(i18n::Label(L"Mine") == L"Mine");
+    i18n::UseText(i18n::Lang::En, R"({"label.面板 {n}": "Panel {n}"})", "{}");
+    CHECK(i18n::Label(L"面板 12") == L"Panel 12");
+    CHECK(!i18n::ParseTable("[]", [](void *, std::string_view, const std::wstring &) {}, nullptr));
+    CHECK(!i18n::ParseTable(R"({"a": 1})", [](void *, std::string_view, const std::wstring &) {}, nullptr));
+    i18n::Use(i18n::Lang::ZhHans);
+}
+
 int main(int argc, char **argv) {
     // --dump-background <file>: writes the PNG, for looking at it.
     if (argc == 3 && !std::strcmp(argv[1], "--dump-background")) {
@@ -233,5 +267,7 @@ int main(int argc, char **argv) {
         std::fclose(f);
         return 0;
     }
+    // The strings in the language the expectations are written in, whatever this machine shows.
+    i18n::Use(i18n::Lang::ZhHans);
     return check::RunAll();
 }

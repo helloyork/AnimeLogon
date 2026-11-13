@@ -1,7 +1,8 @@
 // Checks the translations in res/locales against each other and against the code:
 //   - every file is a flat JSON object of strings;
 //   - every language has exactly the keys Simplified Chinese has (the language strings are written
-//     in first), and each string the same {placeholders};
+//     in first), and each string the same {placeholders}; a key ending in .one (the form for exactly
+//     one, tn() in the page) may leave the count out, as "1 display" does;
 //   - every key the C++ asks for (Tr("...")) and the page asks for (t('...')) is in the files.
 // Run by `npm run check` in app/web, which CI runs. Exits 1 with a list when anything is off.
 import fs from 'node:fs';
@@ -37,16 +38,18 @@ for (const [lang, table] of Object.entries(tables)) {
   if (lang === source) continue;
   for (const k of Object.keys(base)) {
     if (!(k in table)) problems.push(`${lang}: missing ${k}`);
-    else if (placeholders(table[k]) !== placeholders(base[k])) problems.push(`${lang}: ${k} has {${placeholders(table[k])}}, ${source} has {${placeholders(base[k])}}`);
+    else if (k.endsWith('.one') ? !placeholders(table[k]).split(',').every(p => !p || placeholders(base[k]).split(',').includes(p))
+                                : placeholders(table[k]) !== placeholders(base[k]))
+      problems.push(`${lang}: ${k} has {${placeholders(table[k])}}, ${source} has {${placeholders(base[k])}}`);
   }
   for (const k of Object.keys(table)) if (!(k in base)) problems.push(`${lang}: ${k} is not in ${source}`);
 }
 
-// The keys the code asks for by name. Keys built at run time (a prefix and a variable part) are
-// written in the code as a prefix ending in a dot and are checked by their own tests.
+// The keys the code asks for by name: Tr("...") in C++, t('...'), tr('...') and tn('...') in the
+// page. Keys built at run time are not seen here.
 const walk = (d, exts, out = []) => {
   for (const e of fs.readdirSync(d, { withFileTypes: true })) {
-    if (e.name === 'node_modules' || e.name === 'build' || e.name.startsWith('.')) continue;
+    if (['node_modules', 'build', 'tests'].includes(e.name) || e.name.startsWith('.')) continue;
     const p = path.join(d, e.name);
     if (e.isDirectory()) walk(p, exts, out);
     else if (exts.some(x => e.name.endsWith(x))) out.push(p);
@@ -58,7 +61,7 @@ for (const f of walk(root, ['.cpp', '.h'])) {
   for (const m of fs.readFileSync(f, 'utf8').matchAll(/\bTr\(\s*"([a-z0-9_.]+)"/g)) used.set(m[1], f);
 }
 for (const f of walk(path.join(root, 'app/web/src'), ['.ts', '.tsx'])) {
-  for (const m of fs.readFileSync(f, 'utf8').matchAll(/\bt\(\s*'([a-z0-9_.]+)'/g)) used.set(m[1], f);
+  for (const m of fs.readFileSync(f, 'utf8').matchAll(/\b(?:t|tr|tn)\(\s*'([a-z0-9_.]+)'/g)) used.set(m[1], f);
 }
 for (const [k, f] of used) if (!k.endsWith('.') && !(k in base)) problems.push(`${path.relative(root, f)}: asks for ${k}, which ${source}.json lacks`);
 

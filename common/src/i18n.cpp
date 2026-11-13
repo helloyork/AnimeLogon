@@ -337,6 +337,24 @@ std::wstring Tr(std::string_view key, Args args) {
 
 bool Has(std::string_view key) { return Find(*Get(), key) != nullptr; }
 
+std::wstring Label(const std::wstring &text) {
+    if (text.empty()) return text;
+    const auto t = Get();
+    if (const std::wstring *s = Find(*t, "label." + ToUtf8(text))) return *s;
+    // "面板 2": the words, a space and a number.
+    const size_t space = text.find_last_of(L' ');
+    if (space != std::wstring::npos && space + 1 < text.size() &&
+        text.find_first_not_of(L"0123456789", space + 1) == std::wstring::npos) {
+        if (const std::wstring *s = Find(*t, "label." + ToUtf8(text.substr(0, space)) + " {n}")) {
+            std::wstring out = *s;
+            const size_t at = out.find(L"{n}");
+            if (at != std::wstring::npos) out.replace(at, 3, text.substr(space + 1));
+            return out;
+        }
+    }
+    return text;
+}
+
 bool ParseTable(std::string_view json, void (*each)(void *, std::string_view, const std::wstring &), void *context) {
     if (json.size() >= 3 && (unsigned char)json[0] == 0xEF && (unsigned char)json[1] == 0xBB && (unsigned char)json[2] == 0xBF)
         json.remove_prefix(3);

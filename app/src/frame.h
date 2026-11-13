@@ -35,14 +35,15 @@ public:
     void Raise();
     // The page's messages about the window (`op` frame or window). Returns false for any other.
     bool OnPage(const json::Value &m);
+    // Tells the page the window's title, whether it is maximised and active, and how its maximise
+    // button is: as these change, and after the title is set again in another language.
+    void Tell();
 
 private:
     static LRESULT CALLBACK EdgeProc(HWND edge, UINT msg, WPARAM wp, LPARAM lp);
     LRESULT Edge(HWND edge, UINT msg, WPARAM wp, LPARAM lp);
     // The edge windows where they belong for the window's size and state.
     void Place();
-    // Tells the page whether the window is maximised and active, and how its maximise button is.
-    void Tell();
     // How far into the window from its top edge it resizes, at the window's DPI.
     int Border() const;
 

@@ -8,6 +8,7 @@
 #include <set>
 
 #include "animelogon/clock.h"
+#include "animelogon/i18n.h"
 #include "animelogon/paths.h"
 #include "animelogon/secure.h"
 #include "animelogon/text.h"
@@ -101,9 +102,12 @@ const wchar_t *ControlName(skin::Control control) {
     }
 }
 
+using i18n::Label;
+using i18n::Tr;
+
 void WriteOptions(json::Writer &w, const std::vector<skin::Option> &options) {
     w.Key(L"options").BeginArray();
-    for (const skin::Option &o : options) w.BeginObject().Member(L"value", o.value).Member(L"label", o.label).EndObject();
+    for (const skin::Option &o : options) w.BeginObject().Member(L"value", o.value).Member(L"label", Label(o.label)).EndObject();
     w.EndArray();
 }
 
@@ -542,25 +546,29 @@ const WallpaperInfo *Library::Wallpaper(const std::wstring &id) const {
 }
 
 std::wstring Library::WallpaperName(const std::wstring &ref) const {
-    if (ref == kDefaultWallpaper) return L"默认背景";
-    if (ref == kNoWallpaper) return L"无壁纸";
+    if (ref == kDefaultWallpaper) return i18n::Tr("wallpaper.default");
+    if (ref == kNoWallpaper) return i18n::Tr("wallpaper.none");
     const WallpaperInfo *w = Wallpaper(ref);
-    if (!w) return L"壁纸缺失";
+    if (!w) return i18n::Tr("wallpaper.missing");
     return !w->name.empty() ? w->name : !w->sourceName.empty() ? w->sourceName : ref;
 }
 
 std::wstring Library::WallpaperMeta(const std::wstring &ref) const {
-    if (ref == kDefaultWallpaper) return L"内置深色背景";
-    if (ref == kNoWallpaper) return L"纯黑";
+    using i18n::Tr;
+    if (ref == kDefaultWallpaper) return Tr("wallpaper.meta.default");
+    if (ref == kNoWallpaper) return Tr("wallpaper.meta.none");
     const WallpaperInfo *w = Wallpaper(ref);
-    if (!w) return L"壁纸文件已丢失";
-    if (w->kind == WallpaperKind::Image) return Format(L"图片 · %d×%d", w->width, w->height);
-    if (w->kind == WallpaperKind::Scene) return Format(L"场景 · %d×%d",w->width,w->height)+
-        (w->sceneFps == 0 ? L" · 静止画面" : L"")+(w->hasAudio ? L" · 含音频" : L"");
+    if (!w) return Tr("wallpaper.meta.missing");
+    const std::wstring size = Format(L"%d×%d", w->width, w->height);
+    if (w->kind == WallpaperKind::Image) return Tr("wallpaper.meta.image", {{L"size", size}});
+    if (w->kind == WallpaperKind::Scene)
+        return Tr("wallpaper.meta.scene", {{L"size", size}}) + (w->sceneFps == 0 ? Tr("wallpaper.meta.still") : L"") +
+               (w->hasAudio ? Tr("wallpaper.meta.audio") : L"");
     const double fps = w->frameRateDen ? (double)w->frameRateNum / w->frameRateDen : 0.0;
     const long long seconds = (w->durationMs + 500) / 1000;
-    std::wstring text = Format(L"视频 · %d×%d · %.0f fps · %lld:%02lld", w->width, w->height, fps, seconds / 60, seconds % 60);
-    if (w->hasAudio) text += L" · 含音频";
+    std::wstring text = Tr("wallpaper.meta.video", {{L"size", size}, {L"fps", Format(L"%.0f", fps)},
+                                                    {L"length", Format(L"%lld:%02lld", seconds / 60, seconds % 60)}});
+    if (w->hasAudio) text += Tr("wallpaper.meta.audio");
     return text;
 }
 
@@ -574,8 +582,8 @@ static const wchar_t *WallpaperKindName(const Library &library, const std::wstri
 
 std::wstring Library::InstanceLabel(const theme::Theme &edited, const theme::Instance &i) const {
     skin::Skin skin;
-    std::wstring name = LoadSkin(i.ref, &skin) ? skin.name : L"缺失的组件";
-    if (name.empty()) name = L"组件";
+    std::wstring name = LoadSkin(i.ref, &skin) ? i18n::Label(skin.name) : i18n::Tr("component.missing");
+    if (name.empty()) name = i18n::Tr("component.unnamed");
     size_t peers = 0, index = 0;
     for (const theme::Instance &other : edited.components) {
         if (other.ref != i.ref) continue;
@@ -612,17 +620,18 @@ void Library::WriteLibrary(json::Writer &w) const {
         std::wstring summary;
         for (const theme::Instance &i : edited.components) {
             if (!i.visible) continue;
-            if (!summary.empty()) summary += L"、";
+            if (!summary.empty()) summary += i18n::Tr("list.join");
             summary += InstanceLabel(edited, i);
         }
         w.BeginObject();
-        w.Member(L"id", e.id).Member(L"name", e.name).Member(L"author", e.author).Member(L"builtIn", e.builtIn);
+        // A built-in theme's name is AnimeLogon's own, so it is shown in the language; a person's is theirs.
+        w.Member(L"id", e.id).Member(L"name", e.builtIn ? i18n::Label(e.name) : e.name).Member(L"author", e.author).Member(L"builtIn", e.builtIn);
         w.Member(L"wallpaper", WallpaperName(edited.wallpaper)).Member(L"wallpaperKind", WallpaperKindName(*this, edited.wallpaper));
         w.Member(L"wallpaperRef", edited.wallpaper).Member(L"fit", ToString(edited.fit));
         w.Member(L"wake", ToString(edited.wake)).Member(L"wakeSeconds", (double)edited.wakeSeconds);
         const auto *wallpaper=Wallpaper(edited.wallpaper);
         w.Member(L"sceneStatic",wallpaper && wallpaper->kind == WallpaperKind::Scene && wallpaper->sceneFps == 0);
-        w.Member(L"summary", summary.empty() ? std::wstring(L"仅壁纸") : summary);
+        w.Member(L"summary", summary.empty() ? i18n::Tr("theme.summary.none") : summary);
         w.Member(L"modifications", Modifications(e.id)).Key(L"revision").Int(Revision(e.id));
         w.EndObject();
     }
@@ -641,7 +650,7 @@ void Library::WriteLibrary(json::Writer &w) const {
 
     w.Key(L"components").BeginArray();
     for (const ComponentEntry &c : components_) {
-        w.BeginObject().Member(L"id", c.id).Member(L"name", c.name).Member(L"author", c.author);
+        w.BeginObject().Member(L"id", c.id).Member(L"name", c.builtIn ? i18n::Label(c.name) : c.name).Member(L"author", c.author);
         w.Member(L"builtIn", c.builtIn).EndObject();
     }
     w.EndArray();
@@ -658,7 +667,7 @@ void Library::WriteOpen(json::Writer &w) const {
     const WallpaperInfo *wp = Wallpaper(edited.wallpaper);
 
     w.BeginObject();
-    w.Member(L"id", open_).Member(L"name", e ? e->name : L"").Member(L"author", e ? e->author : L"");
+    w.Member(L"id", open_).Member(L"name", e ? (e->builtIn ? i18n::Label(e->name) : e->name) : L"").Member(L"author", e ? e->author : L"");
     w.Member(L"builtIn", e && e->builtIn).Member(L"modifications", Modifications(open_));
     w.Member(L"canUndo", CanUndo()).Member(L"canRedo", CanRedo()).Key(L"revision").Int(Revision(open_));
     w.Key(L"wallpaper").BeginObject();
@@ -667,23 +676,23 @@ void Library::WriteOpen(json::Writer &w) const {
     w.Member(L"modified", o.wallpaper.has_value()).Member(L"audio", wp && wp->hasAudio);
     scene::Document doc;
     if (LoadScene(open_,&doc)) {
-        w.Key(L"scene").BeginObject().Member(L"id",L"wallpaper").Member(L"label",L"壁纸");
+        w.Key(L"scene").BeginObject().Member(L"id",L"wallpaper").Member(L"label",i18n::Tr("inspector.wallpaper"));
         w.Member(L"static",wp && wp->sceneFps == 0);
         w.Member(L"panels",(int)doc.layers.size());
         w.Key(L"settings").BeginArray();
         for (const auto &s : doc.controls.settings) {
-            w.BeginObject().Member(L"id",s.id).Member(L"kind",KindName(s.kind)).Member(L"label",s.label);
-            w.Member(L"detail",s.detail).Member(L"value",scene::Effective(doc,o.wallpaperValues,s.id));
+            w.BeginObject().Member(L"id",s.id).Member(L"kind",KindName(s.kind)).Member(L"label",i18n::Label(s.label));
+            w.Member(L"detail",i18n::Label(s.detail)).Member(L"value",scene::Effective(doc,o.wallpaperValues,s.id));
             w.Member(L"modified",o.wallpaperValues.count(s.id)>0).Member(L"min",s.min).Member(L"max",s.max).Member(L"step",s.step);
             WriteOptions(w,s.options); w.EndObject();
         }
         w.EndArray().Key(L"parts").BeginArray();
         for (const auto &p : scene::Parts(doc)) {
             bool modified = false; for (const auto &a : p.adjustments) modified |= o.wallpaperValues.count(a.key)>0;
-            w.BeginObject().Member(L"key",p.key).Member(L"label",p.label).Member(L"modified",modified);
+            w.BeginObject().Member(L"key",p.key).Member(L"label",i18n::Label(p.label)).Member(L"modified",modified);
             w.Key(L"adjustments").BeginArray();
             for (const auto &a : p.adjustments) {
-                w.BeginObject().Member(L"key",a.key).Member(L"label",a.label).Member(L"detail",a.detail);
+                w.BeginObject().Member(L"key",a.key).Member(L"label",i18n::Label(a.label)).Member(L"detail",i18n::Label(a.detail));
                 w.Member(L"control",ControlName(a.control)).Member(L"min",a.min).Member(L"max",a.max).Member(L"step",a.step);
                 w.Member(L"value",scene::Effective(doc,o.wallpaperValues,a.key)).Member(L"modified",o.wallpaperValues.count(a.key)>0);
                 WriteOptions(w,a.options); w.EndObject();
@@ -713,10 +722,10 @@ void Library::WriteOpen(json::Writer &w) const {
         w.Member(L"base", own.Find(i.id) != nullptr).Member(L"visible", i.visible).Member(L"missing", !loaded);
         w.Member(L"modified", !mine.empty()).Member(L"builtIn", IsBuiltInComponent(i.ref));
         w.Member(L"author", loaded ? skin.author : L"");
-        // What it shows besides the clock: 电量, 正在播放, 倒计时.
+        // What it shows besides the clock: the battery, what is playing, a countdown.
         w.Key(L"sources").BeginArray();
         if (loaded)
-            for (data::Source s : skin::SourcesOf(skin)) w.String(data::LabelOf(s));
+            for (data::Source s : skin::SourcesOf(skin)) w.String(i18n::Label(data::LabelOf(s)));
         w.EndArray();
         if (loaded) {
             // The settings each adjustment takes its value from, when the setting is overridden.
@@ -733,8 +742,8 @@ void Library::WriteOpen(json::Writer &w) const {
             w.Key(L"settings").BeginArray();
             for (const skin::Setting &s : skin.settings) {
                 w.BeginObject();
-                w.Member(L"id", s.id).Member(L"kind", KindName(s.kind)).Member(L"label", s.label);
-                w.Member(L"detail", s.detail).Member(L"value", skin::ValueOf(s, i.sets));
+                w.Member(L"id", s.id).Member(L"kind", KindName(s.kind)).Member(L"label", i18n::Label(s.label));
+                w.Member(L"detail", i18n::Label(s.detail)).Member(L"value", skin::ValueOf(s, i.sets));
                 w.Member(L"modified", mine.count(s.id) > 0).Member(L"folded", Folded(skin, s.id));
                 w.Member(L"min", s.min).Member(L"max", s.max).Member(L"step", s.step);
                 WriteOptions(w, s.options);
@@ -759,11 +768,11 @@ void Library::WriteOpen(json::Writer &w) const {
                 if (p.adjustments.empty()) continue;
                 bool modified = false;
                 for (const skin::Adjustment &a : p.adjustments) modified = modified || mine.count(a.key) || fedModified.count(a.key);
-                w.BeginObject().Member(L"key", p.key).Member(L"label", p.label).Member(L"modified", modified);
+                w.BeginObject().Member(L"key", p.key).Member(L"label", i18n::Label(p.label)).Member(L"modified", modified);
                 w.Key(L"adjustments").BeginArray();
                 for (const skin::Adjustment &a : p.adjustments) {
                     w.BeginObject();
-                    w.Member(L"key", a.key).Member(L"label", a.label).Member(L"detail", a.detail);
+                    w.Member(L"key", a.key).Member(L"label", i18n::Label(a.label)).Member(L"detail", i18n::Label(a.detail));
                     w.Member(L"control", ControlName(a.control)).Member(L"min", a.min).Member(L"max", a.max);
                     w.Member(L"step", a.step).Member(L"value", skin::Effective(skin, i.sets, a));
                     w.Member(L"modified", mine.count(a.key) > 0 || fedModified.count(a.key) > 0);

@@ -1,5 +1,7 @@
 #include "animelogon/data.h"
 
+#include "animelogon/i18n.h"
+
 #include <algorithm>
 #include <cmath>
 
@@ -113,10 +115,11 @@ Snapshot Sample(uint64_t now) {
     Snapshot s;
     s.battery = {BatteryState::Discharging, 76, 3 * 3600 + 25 * 60};
     s.media.state = MediaState::Playing;
-    s.media.title = L"示例歌曲";
-    s.media.artist = L"示例歌手";
-    s.media.album = L"示例专辑";
-    s.media.app = L"音乐";
+    // Shown only in the settings app's pictures, so in its language.
+    s.media.title = i18n::Tr("sample.title");
+    s.media.artist = i18n::Tr("sample.artist");
+    s.media.album = i18n::Tr("sample.album");
+    s.media.app = i18n::Tr("sample.app");
     s.media.position = 83.0;
     s.media.duration = 214.0;
     s.media.at = now;

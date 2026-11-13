@@ -63,6 +63,12 @@ std::wstring Tr(std::string_view key, Args args);
 // Whether the current language, or the fallback, has `key`.
 bool Has(std::string_view key);
 
+// A label written into a component or a table in Simplified Chinese (a setting's name, a part's,
+// a built-in component's), in the current language: the files carry each such label under
+// "label.<the label>", and numbered ones ("面板 2") under "label.面板 {n}". A label they lack -- one a
+// third party wrote, say -- is shown as written.
+std::wstring Label(const std::wstring &text);
+
 // One language's file, parsed: false when it is not a flat object of strings. For tests and
 // for the check that every file has the same keys.
 bool ParseTable(std::string_view json, void (*each)(void *context, std::string_view key, const std::wstring &value),

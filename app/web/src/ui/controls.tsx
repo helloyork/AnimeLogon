@@ -2,6 +2,7 @@
 // needs a layer over the page (menus, lists of options, tooltips, dialogs) is Fluent's, restyled
 // in styles/fluent.css; everything else is here.
 import { useEffect, useRef, useState, type ButtonHTMLAttributes, type CSSProperties, type KeyboardEvent, type ReactNode, type Ref } from 'react';
+import { t } from '../i18n';
 import { Combobox as FluentCombobox, Dropdown, Option, Tooltip } from '@fluentui/react-components';
 import { ArrowCounterclockwise16Regular, ChevronDown12Regular } from '@fluentui/react-icons';
 import { UacShield } from '../icons';
@@ -41,7 +42,7 @@ export function IconButton({ label, tip, ...rest }: Omit<ButtonProps, 'children'
 }
 
 // Puts a modified value back as the theme has it.
-export function ResetButton({ onClick, label = '恢复默认值' }: { onClick: () => void; label?: string }) {
+export function ResetButton({ onClick, label = t('field.reset') }: { onClick: () => void; label?: string }) {
   return <IconButton size="xs" quiet label={label} icon={<ArrowCounterclockwise16Regular />} onClick={onClick} />;
 }
 
@@ -245,7 +246,7 @@ export function Progress({ value, label }: { value: number; label: string }) {
   );
 }
 
-// Where one is, each level above it a way back: 主题库 / 4K, 组件 / 时钟 / 时间.
+// Where one is, each level above it a way back: Themes / 4K, Components / Clock / Time.
 export function Crumbs({ label, items, className }: { label: string; items: { label: string; go?: () => void }[]; className?: string }) {
   return (
     <nav className={cx('crumbs', className)} aria-label={label}>

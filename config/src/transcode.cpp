@@ -1,4 +1,5 @@
 #include "transcode.h"
+#include "animelogon/i18n.h"
 
 #include <windows.h>
 #include <mfapi.h>
@@ -125,7 +126,7 @@ bool ConfigureVideo(IMFSourceReader *reader, Frame *frame, UINT32 *fpsNum, UINT3
     ComPtr<IMFMediaType> native;
     if (SUCCEEDED(reader->GetNativeMediaType(kVideo, 0, &native)) &&
         MFGetAttributeUINT32(native.Get(), MF_MT_VIDEO_ROTATION, 0) != 0) {
-        *error = L"该视频带有旋转标记（常见于手机竖拍），暂不支持。请先用其他工具把画面转正后再导入。";
+        *error = animelogon::i18n::Tr("transcode.error.rotated");
         return false;
     }
     ComPtr<IMFMediaType> nv12;
@@ -135,7 +136,7 @@ bool ConfigureVideo(IMFSourceReader *reader, Frame *frame, UINT32 *fpsNum, UINT3
     ComPtr<IMFMediaType> decoded;
     if (FAILED(reader->SetCurrentMediaType(kVideo, nullptr, nv12.Get())) ||
         FAILED(reader->GetCurrentMediaType(kVideo, &decoded)) || !ReadFrame(decoded.Get(), frame)) {
-        *error = L"无法解码该视频的画面。";
+        *error = animelogon::i18n::Tr("transcode.error.decode_picture");
         return false;
     }
     if (frame->Width() > kMaxDimension || frame->Height() > kMaxDimension) {
@@ -148,7 +149,7 @@ bool ConfigureVideo(IMFSourceReader *reader, Frame *frame, UINT32 *fpsNum, UINT3
         if (FAILED(reader->SetCurrentMediaType(kVideo, nullptr, nv12.Get())) ||
             FAILED(reader->GetCurrentMediaType(kVideo, &decoded)) || !ReadFrame(decoded.Get(), frame) ||
             frame->Width() != w || frame->Height() != h) {
-            *error = Format(L"视频分辨率超过 %u，且无法缩小，暂不支持。", kMaxDimension);
+            *error = animelogon::i18n::Tr("transcode.error.resolution", {{L"max", std::to_wstring(kMaxDimension)}});
             return false;
         }
         ALOG(L"transcode: scaling down to %u x %u", w, h);
@@ -176,7 +177,7 @@ bool ConfigureWriter(IMFSinkWriter *writer, UINT32 w, UINT32 h, UINT32 fpsNum, U
     MFSetAttributeRatio(h264.Get(), MF_MT_FRAME_RATE, fpsNum, fpsDen);
     MFSetAttributeRatio(h264.Get(), MF_MT_PIXEL_ASPECT_RATIO, 1, 1);
     if (FAILED(writer->AddStream(h264.Get(), stream))) {
-        *error = L"无法创建 H.264 编码器。";
+        *error = animelogon::i18n::Tr("transcode.error.encoder");
         return false;
     }
     ComPtr<IMFMediaType> input;
@@ -189,7 +190,7 @@ bool ConfigureWriter(IMFSinkWriter *writer, UINT32 w, UINT32 h, UINT32 fpsNum, U
     MFSetAttributeRatio(input.Get(), MF_MT_FRAME_RATE, fpsNum, fpsDen);
     MFSetAttributeRatio(input.Get(), MF_MT_PIXEL_ASPECT_RATIO, 1, 1);
     if (FAILED(writer->SetInputMediaType(*stream, input.Get(), nullptr))) {
-        *error = L"无法配置视频编码。";
+        *error = animelogon::i18n::Tr("transcode.error.configure");
         return false;
     }
     return true;
@@ -286,38 +287,39 @@ bool WriteAudioWav(const std::wstring &source, const std::wstring &wavPath, cons
     HANDLE file = CreateFileW(wavPath.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL,
                               nullptr);
     if (file == INVALID_HANDLE_VALUE) {
-        *error = L"无法写入音频文件。";
+        *error = animelogon::i18n::Tr("transcode.error.audio_write");
         return false;
     }
-    auto fail = [&](const wchar_t *message) {
+    auto fail = [&](const std::wstring &message) {
         CloseHandle(file);
         DeleteFileW(wavPath.c_str());
-        if (message) *error = message;
+        if (!message.empty()) *error = message;
         return false;
     };
     uint64_t dataBytes = 0;
-    // Appends to the data chunk, never past what a RIFF header can describe.
-    auto append = [&](const void *bytes, DWORD size) -> const wchar_t * {
-        if (dataBytes + size > kMaxWavData) return L"音频过长，超出 WAV 文件 4 GB 的上限。";
-        if (!WriteAll(file, bytes, size)) return L"无法写入音频文件。";
+    // Appends to the data chunk, never past what a RIFF header can describe. Says what went wrong,
+    // or nothing.
+    auto append = [&](const void *bytes, DWORD size) -> std::wstring {
+        if (dataBytes + size > kMaxWavData) return animelogon::i18n::Tr("transcode.error.audio_long");
+        if (!WriteAll(file, bytes, size)) return animelogon::i18n::Tr("transcode.error.audio_write");
         dataBytes += size;
-        return nullptr;
+        return {};
     };
     uint8_t header[44] = {};
-    if (!WriteAll(file, header, sizeof(header))) return fail(L"无法写入音频文件。");  // patched at the end
+    if (!WriteAll(file, header, sizeof(header))) return fail(animelogon::i18n::Tr("transcode.error.audio_write"));  // patched at the end
     LONGLONG first = -1;
     std::vector<uint8_t> silence;
     for (;;) {
-        if (cancel.load()) return fail(nullptr);
+        if (cancel.load()) return fail({});
         DWORD flags = 0;
         LONGLONG ts = 0;
         ComPtr<IMFSample> sample;
         const HRESULT hr = reader->ReadSample(kAudio, 0, nullptr, &flags, &ts, &sample);
-        if (FAILED(hr) || (flags & MF_SOURCE_READERF_ERROR)) return fail(L"解码音频时出错。");
+        if (FAILED(hr) || (flags & MF_SOURCE_READERF_ERROR)) return fail(animelogon::i18n::Tr("transcode.error.audio_decode"));
         if (flags & MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED) {
             ComPtr<IMFMediaType> now;
             if (FAILED(reader->GetCurrentMediaType(kAudio, &now)) || !IsOutputPcm(now.Get()))
-                return fail(L"音频格式在中途改变，暂不支持。");
+                return fail(animelogon::i18n::Tr("transcode.error.audio_changed"));
         }
         if (flags & MF_SOURCE_READERF_ENDOFSTREAM) break;
         if (!sample) continue;  // a stream tick; the gap is filled when the sound resumes
@@ -330,20 +332,20 @@ bool WriteAudioWav(const std::wstring &source, const std::wstring &wavPath, cons
             silence.resize(64 * 1024);
             for (uint64_t gap = due - dataBytes; gap;) {
                 const DWORD n = (DWORD)std::min<uint64_t>(gap, silence.size());
-                if (const wchar_t *e = append(silence.data(), n)) return fail(e);
+                if (const std::wstring e = append(silence.data(), n); !e.empty()) return fail(e);
                 gap -= n;
             }
         }
         ComPtr<IMFMediaBuffer> buffer;
-        if (FAILED(sample->ConvertToContiguousBuffer(&buffer))) return fail(L"解码音频时出错。");
+        if (FAILED(sample->ConvertToContiguousBuffer(&buffer))) return fail(animelogon::i18n::Tr("transcode.error.audio_decode"));
         BYTE *data = nullptr;
         DWORD len = 0;
-        if (FAILED(buffer->Lock(&data, nullptr, &len))) return fail(L"解码音频时出错。");
-        const wchar_t *e = append(data, len - len % kAudioFrameBytes);
+        if (FAILED(buffer->Lock(&data, nullptr, &len))) return fail(animelogon::i18n::Tr("transcode.error.audio_decode"));
+        const std::wstring e = append(data, len - len % kAudioFrameBytes);
         buffer->Unlock();
-        if (e) return fail(e);
+        if (!e.empty()) return fail(e);
     }
-    if (!dataBytes) return fail(nullptr);
+    if (!dataBytes) return fail({});
     // Patch the WAV header now that the size is known.
     const uint32_t chunk = (uint32_t)dataBytes;
     auto put32 = [&](int at, uint32_t v) { memcpy(header + at, &v, 4); };
@@ -362,10 +364,10 @@ bool WriteAudioWav(const std::wstring &source, const std::wstring &wavPath, cons
     put32(40, chunk);
     LARGE_INTEGER zero{};
     if (!SetFilePointerEx(file, zero, nullptr, FILE_BEGIN) || !WriteAll(file, header, sizeof(header)))
-        return fail(L"无法写入音频文件。");
+        return fail(animelogon::i18n::Tr("transcode.error.audio_write"));
     if (!CloseHandle(file)) {
         DeleteFileW(wavPath.c_str());
-        *error = L"无法写入音频文件。";
+        *error = animelogon::i18n::Tr("transcode.error.audio_write");
         return false;
     }
     return true;
@@ -384,16 +386,16 @@ Result Run(const std::wstring &source, const std::wstring &outputDir, const std:
            const std::atomic<bool> &cancel, const std::function<void(double)> &progress) {
     Result r;
     if (!MediaFoundationPresent()) {
-        r.error = L"此系统缺少 Media Foundation，无法转码。Windows N 版需要先安装媒体功能包。";
+        r.error = animelogon::i18n::Tr("transcode.error.no_mf");
         return r;
     }
     MfScope mf;
     if (!mf.ok) {
-        r.error = L"无法启动 Media Foundation，无法转码。";
+        r.error = animelogon::i18n::Tr("transcode.error.mf_start");
         return r;
     }
     if (!paths::CreateDirectories(outputDir)) {
-        r.error = L"无法创建临时目录。";
+        r.error = animelogon::i18n::Tr("error.temp_dir");
         return r;
     }
     const std::wstring videoPath = outputDir + L"\\video.mp4";
@@ -405,7 +407,7 @@ Result Run(const std::wstring &source, const std::wstring &outputDir, const std:
     readerAttrs->SetUINT32(MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING, TRUE);
     ComPtr<IMFSourceReader> reader;
     if (FAILED(MFCreateSourceReaderFromURL(source.c_str(), readerAttrs.Get(), &reader))) {
-        r.error = L"无法打开所选文件，可能不是受支持的视频格式。";
+        r.error = animelogon::i18n::Tr("transcode.error.open");
         return r;
     }
     const LONGLONG duration = Duration(reader.Get());
@@ -429,16 +431,16 @@ Result Run(const std::wstring &source, const std::wstring &outputDir, const std:
     writerAttrs->SetUINT32(MF_SINK_WRITER_DISABLE_THROTTLING, TRUE);
     ComPtr<IMFSinkWriter> writer;
     if (FAILED(MFCreateSinkWriterFromURL(videoPath.c_str(), nullptr, writerAttrs.Get(), &writer))) {
-        r.error = L"无法创建输出文件。";
+        r.error = animelogon::i18n::Tr("transcode.error.output");
         return r;
     }
     DWORD stream = 0;
     if (!ConfigureWriter(writer.Get(), w, h, fpsNum, fpsDen, &stream, &r.error)) return r;
     if (FAILED(writer->BeginWriting())) {
-        r.error = L"无法开始写入。";
+        r.error = animelogon::i18n::Tr("transcode.error.begin");
         return r;
     }
-    auto abandon = [&](const wchar_t *message) {
+    auto abandon = [&](const std::wstring &message) {
         r.error = message;
         writer->Finalize();
         writer.Reset();
@@ -449,19 +451,19 @@ Result Run(const std::wstring &source, const std::wstring &outputDir, const std:
     LONGLONG lastTs = 0;
     bool wroteAny = false;
     for (;;) {
-        if (cancel.load()) return abandon(L"已取消。");
+        if (cancel.load()) return abandon(animelogon::i18n::Tr("error.cancelled"));
         DWORD flags = 0;
         LONGLONG ts = 0;
         ComPtr<IMFSample> sample;
         const HRESULT hr = reader->ReadSample(kVideo, 0, nullptr, &flags, &ts, &sample);
-        if (FAILED(hr) || (flags & MF_SOURCE_READERF_ERROR)) return abandon(L"解码视频时出错。");
+        if (FAILED(hr) || (flags & MF_SOURCE_READERF_ERROR)) return abandon(animelogon::i18n::Tr("transcode.error.video_decode"));
         if (flags & MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED) {
             // Same picture size with a new layout is fine; a new size is not.
             ComPtr<IMFMediaType> now;
             Frame next;
             if (FAILED(reader->GetCurrentMediaType(kVideo, &now)) || !ReadFrame(now.Get(), &next) ||
                 next.Width() != w || next.Height() != h)
-                return abandon(L"视频画面尺寸在中途改变，暂不支持。");
+                return abandon(animelogon::i18n::Tr("transcode.error.size_changed"));
             frame = next;
         }
         if (flags & MF_SOURCE_READERF_ENDOFSTREAM) break;
@@ -473,22 +475,22 @@ Result Run(const std::wstring &source, const std::wstring &outputDir, const std:
         if (firstTs < 0) firstTs = ts;
         if (resample && ts - firstTs < slotsWritten * slot - slot / 2) continue;  // not due yet
         ComPtr<IMFSample> packed;
-        if (FAILED(CopyPicture(sample.Get(), frame, &packed))) return abandon(L"编码视频时出错。");
+        if (FAILED(CopyPicture(sample.Get(), frame, &packed))) return abandon(animelogon::i18n::Tr("transcode.error.video_encode"));
         if (resample) {
             packed->SetSampleTime(firstTs + slotsWritten * slot);
             packed->SetSampleDuration(slot);
             ++slotsWritten;
         }
-        if (FAILED(writer->WriteSample(stream, packed.Get()))) return abandon(L"编码视频时出错。");
+        if (FAILED(writer->WriteSample(stream, packed.Get()))) return abandon(animelogon::i18n::Tr("transcode.error.video_encode"));
         lastTs = ts;
         wroteAny = true;
         if (duration > 0 && progress) progress(0.9 * std::min(1.0, (double)ts / duration));
     }
-    if (!wroteAny) return abandon(L"视频中没有可用的画面。");
+    if (!wroteAny) return abandon(animelogon::i18n::Tr("transcode.error.no_frames"));
     const HRESULT finalized = writer->Finalize();
     writer.Reset();
     if (FAILED(finalized)) {
-        r.error = L"无法完成视频文件。";
+        r.error = animelogon::i18n::Tr("transcode.error.finish");
         DeleteFileW(videoPath.c_str());
         return r;
     }
@@ -497,7 +499,7 @@ Result Run(const std::wstring &source, const std::wstring &outputDir, const std:
     std::wstring audioError;
     const bool hasAudio = WriteAudioWav(source, wavPath, cancel, &audioError);
     if (!audioError.empty() || cancel.load()) {
-        r.error = cancel.load() ? L"已取消。" : audioError;
+        r.error = cancel.load() ? animelogon::i18n::Tr("error.cancelled") : audioError;
         DeleteFileW(videoPath.c_str());
         return r;
     }
@@ -518,7 +520,7 @@ Result Run(const std::wstring &source, const std::wstring &outputDir, const std:
     info.hasAudio = hasAudio;
 
     if (!WriteText(outputDir + L"\\wallpaper.ini", ToUtf8(SerializeWallpaperInfo(info)))) {
-        r.error = L"无法写入视频信息。";
+        r.error = animelogon::i18n::Tr("transcode.error.info");
         DeleteFileW(videoPath.c_str());
         DeleteFileW(wavPath.c_str());
         return r;

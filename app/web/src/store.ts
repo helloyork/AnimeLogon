@@ -3,6 +3,7 @@
 // here change it.
 import { useSyncExternalStore } from 'react';
 import { onCalmChange } from './motion';
+import { setLang, t } from './i18n';
 import { listen, send } from './native';
 import { onPreview, pv, requestPreviewAgain, resetPreview } from './preview';
 import type { Environment, FromNative, Instance, Library, OpenTheme, SceneControls, Workshop } from './types';
@@ -44,7 +45,7 @@ export interface State {
 }
 
 let state: State = {
-  env: { on: false, installed: false, version: '', user: '', accountPicture: false, wallpaperEngine: false, monitors: [], fonts: [], devices: [] },
+  env: { on: false, installed: false, version: '', user: '', accountPicture: false, lang: '', langChoice: '', wallpaperEngine: false, monitors: [], fonts: [], devices: [] },
   lib: null,
   open: null,
   clock: '',
@@ -98,7 +99,7 @@ export const perMonitor = () => state.lib?.settings.monitorMode === 'per-monitor
 export const spanning = () => state.lib?.settings.monitorMode === 'span' && state.env.monitors.length > 1;
 export function mainMonitor() {
   const ms = state.env.monitors;
-  return ms.find(m => m.primary) || ms[0] || { key: '', name: '显示器', model: '', left: 0, top: 0, width: 16, height: 9, primary: true };
+  return ms.find(m => m.primary) || ms[0] || { key: '', name: t('monitor.name', { n: 1 }), model: '', left: 0, top: 0, width: 16, height: 9, primary: true };
 }
 export function screenTheme(key: string) {
   const id = state.lib?.settings.screens[key];
@@ -117,12 +118,14 @@ export function shapeOf(id: string) {
 }
 export function usedOn(id: string): string[] {
   if (!state.lib) return [];
-  if (!perMonitor()) return state.lib.current === id ? ['使用中'] : [];
+  if (!perMonitor()) return state.lib.current === id ? [t('theme.in_use')] : [];
   const ms = state.env.monitors.filter(m => screenTheme(m.key) === id);
-  return ms.length && ms.length === state.env.monitors.length ? ['所有屏幕'] : ms.map(m => m.name);
+  return ms.length && ms.length === state.env.monitors.length ? [t('monitor.all')] : ms.map(m => m.name);
 }
-export const kindName = (k: string) =>
-  ({ scene: '场景', video: '视频', image: '图片', builtin: '内置背景', none: '无壁纸', missing: '壁纸缺失' } as Record<string, string>)[k] || '';
+const KINDS: Record<string, Parameters<typeof t>[0]> = {
+  scene: 'kind.scene', video: 'kind.video', image: 'kind.image', builtin: 'kind.builtin', none: 'kind.none', missing: 'kind.missing',
+};
+export const kindName = (k: string) => (KINDS[k] ? t(KINDS[k]) : '');
 export function ratioLabel(w: number, h: number) {
   const known = [[16, 9], [16, 10], [21, 9], [32, 9], [4, 3], [3, 2]], r = w / h;
   const best = known.reduce((a, b) => (Math.abs(b[0] / b[1] - r) < Math.abs(a[0] / a[1] - r) ? b : a));
@@ -163,6 +166,19 @@ export function setTab(tab: Tab) {
 export function select(inst: string | null, part: string | null = null) {
   setState({ sel: { inst, part } });
 }
+// Back, as a window's back button, Alt+Left or the mouse's back button go: up one level of where one
+// is (a part to its component, a component to the theme's list), out of a theme's page to the
+// library, and from the settings back to the page left for them. Nothing while a dialog or the
+// lock-screen preview is over the page: Esc closes those.
+export function goBack() {
+  if (state.dialogs.length || state.lock) return;
+  if (state.tab === 'settings') return setTab('mine');
+  if (state.view !== 'theme') return;
+  const { inst, part } = state.sel;
+  if (part) return select(inst === 'wallpaper' ? null : inst, null);
+  if (inst) return select(null);
+  leaveTheme();
+}
 
 /* --- library actions --- */
 export const apply = (id: string, monitor = '') => send('apply', { theme: id, monitor });
@@ -171,19 +187,19 @@ export function applyFlow(id: string) {
   else openDialog({ kind: 'monitor', theme: id });
 }
 export function copyFlow(id: string) {
-  const t = themeOf(id);
-  if (t) openDialog({ kind: 'name', title: '复制主题', value: `${t.name} 副本`, action: '创建副本', run: name => send('copy', { theme: id, name }) });
+  const th = themeOf(id);
+  if (th) openDialog({ kind: 'name', title: t('dialog.copy.title'), value: t('theme.copy_name', { name: th.name }), action: t('dialog.copy.action'), run: name => send('copy', { theme: id, name }) });
 }
 export function renameFlow(id: string) {
-  const t = themeOf(id);
-  if (t) openDialog({ kind: 'name', title: '重命名主题', value: t.name, action: '重命名', run: name => send('rename', { theme: id, name }) });
+  const th = themeOf(id);
+  if (th) openDialog({ kind: 'name', title: t('dialog.rename.title'), value: th.name, action: t('dialog.rename.action'), run: name => send('rename', { theme: id, name }) });
 }
 export function resetFlow(id: string) {
-  const t = themeOf(id);
-  if (!t) return;
+  const th = themeOf(id);
+  if (!th) return;
   openDialog({
-    kind: 'confirm', title: '恢复默认', action: '恢复默认',
-    body: [`清除对「${t.name}」的 ${t.modifications} 项修改，包括更换的壁纸和添加的组件。`],
+    kind: 'confirm', title: t('dialog.reset.title'), action: t('dialog.reset.action'),
+    body: [t('dialog.reset.body', { name: th.name })],
     run: () => {
       if (state.open?.id === id) send('reset', { seq: ++pv.seq });
       else { send('open', { theme: id }); send('reset'); send('close'); }
@@ -191,11 +207,11 @@ export function resetFlow(id: string) {
   });
 }
 export function deleteFlow(id: string) {
-  const t = themeOf(id);
-  if (!t) return;
+  const th = themeOf(id);
+  if (!th) return;
   openDialog({
-    kind: 'confirm', title: `删除「${t.name}」`, action: '删除', elevated: true,
-    body: ['将从此电脑删除该主题，以及仅由该主题使用的壁纸和组件。', ...(usedOn(id).length ? ['该主题正在使用，删除后锁屏将改用「默认」主题。'] : [])],
+    kind: 'confirm', title: t('dialog.delete.title', { name: th.name }), action: t('dialog.delete.action'), elevated: true,
+    body: [t('dialog.delete.body'), ...(usedOn(id).length ? [t('dialog.delete.in_use')] : [])],
     run: () => {
       if (state.view === 'theme' && state.open?.id === id) setState({ view: 'library' });
       send('remove', { theme: id });
@@ -203,6 +219,11 @@ export function deleteFlow(id: string) {
   });
 }
 export const global = (key: string, value: string | number | boolean) => send('global', { key, value: String(value) });
+// The language the app is shown in; empty to follow Windows. The native side stores it and says
+// everything again in it.
+export const setLanguage = (tag: string) => send('language', { tag });
+// The project's pages and the licences, by name (app/src/host.cpp opens them).
+export const openLink = (to: 'home' | 'issues' | 'releases' | 'license' | 'notices') => send('link', { to });
 // Wallpaper Engine's video wallpapers, looked for afresh each time they are shown: as new themes,
 // or with `wallpaper` one as the open theme's wallpaper.
 export function workshopFlow(wallpaper: boolean) {
@@ -215,6 +236,8 @@ function receive(m: FromNative) {
   switch (m.type) {
     case 'environment': {
       const { type: _type, ...env } = m;
+      // The language first, so that everything drawn for this environment is in it.
+      setLang(env.lang);
       setState({ env });
       break;
     }

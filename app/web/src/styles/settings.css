@@ -1,4 +1,4 @@
-/* 设置: groups of rows, each group one card. */
+/* Settings: groups of rows, each group one card. */
 .group { margin-top: var(--s7); }
 .group:first-of-type { margin-top: 0; }
 .group > .t-group { margin: 0 0 var(--s2) 2px; }
@@ -16,6 +16,9 @@
 .row .value { color: var(--text-2); font-size: 13px; }
 .row .range { display: flex; align-items: center; gap: var(--s3); width: 220px; }
 .row .range .value { width: 28px; text-align: right; }
+/* About: the project's links in one quiet row. */
+.row.links { min-height: 44px; flex-wrap: wrap; gap: var(--s2) var(--s5); }
+.row.links .link { font-size: 13px; }
 
 @media (max-width: 640px) {
   .row { flex-wrap: wrap; }

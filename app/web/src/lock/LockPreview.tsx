@@ -3,6 +3,7 @@
 // that fades out over a sketch of the Windows sign-in screen. With `ratio`, it is shown as a
 // display of that shape would show it, with black bars around it.
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { t as tr } from '../i18n';
 import { SceneFrames, WallpaperVideo } from '../media';
 import { calm } from '../motion';
 import { lockUrl, ORIGIN } from '../native';
@@ -30,10 +31,10 @@ function SignIn({ still }: { still: string }) {
             <path d="M18 84c4-17 17-26 32-26s28 9 32 26a50 50 0 0 1-64 0z" fill="#fff" />
           </svg>
         )}
-        <div className="lock-name">{env.user || '用户'}</div>
+        <div className="lock-name">{env.user || tr('lock.user')}</div>
         <div className="lock-pin"><span>PIN</span></div>
-        <div className="lock-link">我忘记了我的 PIN</div>
-        <div className="lock-link">登录选项</div>
+        <div className="lock-link">{tr('lock.forgot_pin')}</div>
+        <div className="lock-link">{tr('lock.options')}</div>
       </div>
       <div className="lock-tray">
         <span>{''}</span>
@@ -203,7 +204,7 @@ export function LockPreview({ theme: id, ratio }: { theme: string; ratio?: numbe
         ? { transform: 'scale(1.08)', opacity: 0, transition: `transform ${leave}s cubic-bezier(.33, 1, .68, 1), opacity ${leave}s ease-in-out` }
         : { opacity: 0, transition: wake === 'cut' ? 'none' : `opacity ${leave}s linear` };
   return (
-    <div ref={root} className="lock" role="dialog" aria-label="锁屏预览" tabIndex={-1} onPointerDown={() => setWoke(true)}>
+    <div ref={root} className="lock" role="dialog" aria-label={tr('lock.label')} tabIndex={-1} onPointerDown={() => setWoke(true)}>
       <div className="lock-frame" style={{ width: `min(100vw, ${(100 * aspect).toFixed(2)}vh)`, height: `min(100vh, ${(100 / aspect).toFixed(2)}vw)` }}>
         <SignIn still={lockUrl(id, 'still', query)} />
 
@@ -220,8 +221,8 @@ export function LockPreview({ theme: id, ratio }: { theme: string; ratio?: numbe
           {parts?.map(p => <EnteringPart key={p.part} p={p} go={go} woke={false} leave={0} />)}
         </div>
       </div>
-      <div className="lock-hint">{woke ? 'Windows 登录界面（示意）' : '按任意键或单击以模拟唤醒'}</div>
-      <Button size="sm" className="lock-exit" onPointerDown={e => e.stopPropagation()} onClick={close}>退出预览 (Esc)</Button>
+      <div className="lock-hint">{woke ? tr('lock.hint.awake') : tr('lock.hint.wake')}</div>
+      <Button size="sm" className="lock-exit" onPointerDown={e => e.stopPropagation()} onClick={close}>{tr('lock.exit')}</Button>
     </div>
   );
 }

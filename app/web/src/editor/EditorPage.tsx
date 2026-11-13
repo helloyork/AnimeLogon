@@ -3,10 +3,11 @@
 // themselves; undo and redo go back and forth through them.
 import { useEffect } from 'react';
 import { Menu, MenuItem, MenuList, MenuPopover, MenuTrigger } from '@fluentui/react-components';
-import { ArrowRedo16Regular, ArrowUndo16Regular, ChevronDown12Regular, MoreHorizontal16Regular, Play16Regular } from '@fluentui/react-icons';
+import { ArrowLeft16Regular, ArrowRedo16Regular, ArrowUndo16Regular, ChevronDown12Regular, MoreHorizontal16Regular, Play16Regular } from '@fluentui/react-icons';
+import { t as tr } from '../i18n';
 import { ThemeMenuItems } from '../library/LibraryPage';
 import { edit, endGesture, liveSet, newGesture, pendingValues, pv, setValue } from '../preview';
-import { applyFlow, getState, instOf, leaveTheme, multiPanel, panelKey, select, setState, themeOf, usedOn, useStore } from '../store';
+import { applyFlow, getState, goBack, instOf, leaveTheme, multiPanel, panelKey, select, setState, themeOf, usedOn, useStore } from '../store';
 import { Button, Crumbs, IconButton } from '../ui/controls';
 import { Canvas } from './Canvas';
 import { clamp, geometry, offsetLimits, roundTo, shownOffset, valueOf } from './geometry';
@@ -20,28 +21,30 @@ export function EditorPage() {
   const entry = themeOf(t.id);
   const used = usedOn(t.id);
   useKeys();
-  const status = [used.length ? (used[0] === '使用中' ? '使用中' : `用于${used.join('、')}`) : null, '已自动保存'].filter(Boolean).join(' · ');
   return (
     <div className="themepage">
       <header className="subhead" data-own-keys>
-        <Crumbs label="主题页" items={[{ label: '主题库', go: () => leaveTheme() }, { label: t.name }]} />
-        <span className="t-cap3 state">{status}</span>
+        {/* Back up to the library, as Windows' own pages go back; Alt+Left and the mouse's back button do the same. */}
+        <IconButton size="sm" label={tr('nav.back')} tip={tr('nav.back.tip')} icon={<ArrowLeft16Regular />} onClick={goBack} />
+        <Crumbs label={tr('theme.page')} items={[{ label: tr('nav.library'), go: () => leaveTheme() }, { label: t.name }]} />
         <div className="tools">
-          <IconButton size="sm" label="撤销" tip="撤销 (Ctrl+Z)" icon={<ArrowUndo16Regular />} disabled={!t.canUndo} onClick={() => edit('undo')} />
-          <IconButton size="sm" label="重做" tip="重做 (Ctrl+Y)" icon={<ArrowRedo16Regular />} disabled={!t.canRedo} onClick={() => edit('redo')} />
+          <IconButton size="sm" label={tr('edit.undo')} tip={tr('edit.undo.tip')} icon={<ArrowUndo16Regular />} disabled={!t.canUndo} onClick={() => edit('undo')} />
+          <IconButton size="sm" label={tr('edit.redo')} tip={tr('edit.redo.tip')} icon={<ArrowRedo16Regular />} disabled={!t.canRedo} onClick={() => edit('redo')} />
           <span className="vsep" />
-          {!used.length && <Button size="sm" variant="primary" onClick={() => applyFlow(t.id)}>套用</Button>}
+          {/* In use already: said by the button that would apply it, which then does nothing. */}
+          {used.length ? <Button size="sm" disabled>{tr('theme.in_use')}</Button>
+            : <Button size="sm" variant="primary" onClick={() => applyFlow(t.id)}>{tr('theme.apply')}</Button>}
           {/* The lock screen at this display's shape; the menu shows it at others. */}
           <div className="split">
-            <Button size="sm" icon={<Play16Regular />} onClick={() => setState({ lock: { theme: t.id } })}>锁屏预览</Button>
+            <Button size="sm" icon={<Play16Regular />} onClick={() => setState({ lock: { theme: t.id } })}>{tr('theme.lock_preview')}</Button>
             <Menu positioning={{ position: 'below', align: 'end', offset: 4 }}>
               <MenuTrigger disableButtonEnhancement>
-                <IconButton size="sm" variant="secondary" label="以其他比例预览" icon={<ChevronDown12Regular />} />
+                <IconButton size="sm" variant="secondary" label={tr('theme.preview_ratio.label')} icon={<ChevronDown12Regular />} />
               </MenuTrigger>
               <MenuPopover className="menu">
                 <MenuList>
                   {RATIOS.map(([a, b]) => (
-                    <MenuItem key={a + ':' + b} onClick={() => setState({ lock: { theme: t.id, ratio: a / b } })}>{`以 ${a}:${b} 预览`}</MenuItem>
+                    <MenuItem key={a + ':' + b} onClick={() => setState({ lock: { theme: t.id, ratio: a / b } })}>{tr('theme.preview_ratio', { ratio: `${a}:${b}` })}</MenuItem>
                   ))}
                 </MenuList>
               </MenuPopover>
@@ -50,7 +53,7 @@ export function EditorPage() {
           {entry && (
             <Menu positioning={{ position: 'below', align: 'end', offset: 4 }}>
               <MenuTrigger disableButtonEnhancement>
-                <IconButton size="sm" label="更多" icon={<MoreHorizontal16Regular />} />
+                <IconButton size="sm" label={tr('common.more')} icon={<MoreHorizontal16Regular />} />
               </MenuTrigger>
               <MenuPopover className="menu">
                 <ThemeMenuItems theme={entry} onPage />

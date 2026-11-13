@@ -16,6 +16,7 @@
 
 #include "animelogon/clock.h"
 #include "animelogon/components.h"
+#include "animelogon/i18n.h"
 #include "animelogon/log.h"
 #include "animelogon/machine.h"
 #include "animelogon/paths.h"
@@ -55,6 +56,22 @@ std::wstring WorkshopHost(size_t folder) { return L"r" + std::to_wstring(folder)
 // installing more than fit takes another prompt.
 constexpr size_t kMaxElevatedArgs = 2000;
 
+// A file dialog's list of filters, as OPENFILENAME takes it: each name, then its patterns.
+std::wstring Filters(std::initializer_list<std::pair<std::wstring, const wchar_t *>> entries) {
+    std::wstring out;
+    for (const auto &[name, patterns] : entries) {
+        out += name;
+        out += L'\0';
+        out += patterns;
+        out += L'\0';
+    }
+    out += L'\0';
+    return out;
+}
+
+constexpr const wchar_t *kPicturePatterns = L"*.png;*.jpg;*.jpeg;*.webp;*.bmp;*.gif;*.tif;*.tiff;*.heic;*.heif;*.avif";
+constexpr const wchar_t *kVideoPatterns = L"*.mp4;*.mkv;*.mov;*.webm;*.avi;*.m4v;*.wmv";
+
 std::wstring PickFile(HWND owner, const wchar_t *filter, const wchar_t *extension, bool save,
                       const std::wstring &suggested) {
     wchar_t buf[MAX_PATH * 4] = L"";
@@ -74,7 +91,7 @@ std::wstring PickFile(HWND owner, const wchar_t *filter, const wchar_t *extensio
 std::wstring FileNameFor(const std::wstring &name) {
     std::wstring out;
     for (wchar_t c : name) out += (c < 0x20 || wcschr(L"\\/:*?\"<>|", c)) ? L'_' : c;
-    return out.empty() ? std::wstring(L"主题") : out;
+    return out.empty() ? i18n::Tr("theme.file_name") : out;
 }
 
 std::wstring FileStem(const std::wstring &path) {
@@ -190,6 +207,59 @@ std::wstring AccountPicture() {
     return GetFileAttributesW(file) == INVALID_FILE_ATTRIBUTES ? L"" : file;
 }
 
+// Where the window was when it was last closed, so that it opens there again: per person, and apart
+// for a sandbox window. HKCU\Software\AnimeLogon, beside the person's language.
+const wchar_t *PlacementValue() { return paths::Sandbox().empty() ? L"Window" : L"SandboxWindow"; }
+
+bool LoadPlacement(WINDOWPLACEMENT *wp) {
+    DWORD size = sizeof(*wp);
+    if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\AnimeLogon", PlacementValue(), RRF_RT_REG_BINARY, nullptr, wp, &size) !=
+            ERROR_SUCCESS ||
+        size != sizeof(*wp) || wp->length != sizeof(*wp))
+        return false;
+    // Only onto a display that is still there, and at a size that is still a window.
+    const RECT &r = wp->rcNormalPosition;
+    return r.right - r.left >= 400 && r.bottom - r.top >= 300 && MonitorFromRect(&r, MONITOR_DEFAULTTONULL) != nullptr;
+}
+
+void SavePlacement(HWND hwnd) {
+    WINDOWPLACEMENT wp{sizeof(wp)};
+    if (!GetWindowPlacement(hwnd, &wp)) return;
+    HKEY key = nullptr;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\AnimeLogon", 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, nullptr) != ERROR_SUCCESS)
+        return;
+    RegSetValueExW(key, PlacementValue(), 0, REG_BINARY, reinterpret_cast<const BYTE *>(&wp), sizeof(wp));
+    RegCloseKey(key);
+}
+
+// The program's icon at `px` pixels as a PNG, for the page's title bar: the icon file's own
+// drawing for that size (res/animelogon.ico redraws the small ones), with its transparency.
+std::vector<uint8_t> IconPng(int px) {
+    HICON icon = (HICON)LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(ANIMELOGON_ICON_ID), IMAGE_ICON, px, px, 0);
+    if (!icon) return {};
+    ICONINFO info{};
+    std::vector<uint8_t> png;
+    if (GetIconInfo(icon, &info) && info.hbmColor) {
+        Picture p;
+        p.width = p.height = px;
+        p.bgra.resize((size_t)px * px * 4);
+        BITMAPINFO bi{};
+        bi.bmiHeader = {sizeof(BITMAPINFOHEADER), px, -px, 1, 32, BI_RGB};
+        HDC dc = GetDC(nullptr);
+        const int rows = GetDIBits(dc, info.hbmColor, 0, px, p.bgra.data(), &bi, DIB_RGB_COLORS);
+        ReleaseDC(nullptr, dc);
+        if (rows == px) {
+            for (size_t i = 0; i < p.bgra.size(); i += 4)
+                for (int c = 0; c < 3; ++c) p.bgra[i + c] = (uint8_t)(p.bgra[i + c] * p.bgra[i + 3] / 255);
+            png = Png(p);
+        }
+    }
+    if (info.hbmColor) DeleteObject(info.hbmColor);
+    if (info.hbmMask) DeleteObject(info.hbmMask);
+    DestroyIcon(icon);
+    return png;
+}
+
 }  // namespace
 
 Host::Host() : library_(DiskStores()), pictures_(library_) { monitors_ = EnumerateMonitors(); }
@@ -224,6 +294,14 @@ bool Host::Create(int show) {
     if (!hwnd_) return false;
     SetIcons();
     frame_.Attach(hwnd_, dark_);
+    // Where it was left, maximised or not; otherwise where the shell puts a new window.
+    WINDOWPLACEMENT placement{sizeof(placement)};
+    if (LoadPlacement(&placement)) {
+        const bool maximised = placement.showCmd == SW_SHOWMAXIMIZED || (placement.flags & WPF_RESTORETOMAXIMIZED);
+        placement.showCmd = SW_HIDE;
+        SetWindowPlacement(hwnd_, &placement);
+        if (maximised && (show_ == SW_SHOWNORMAL || show_ == SW_SHOWDEFAULT || show_ == SW_SHOW)) show_ = SW_SHOWMAXIMIZED;
+    }
     ShowWindow(hwnd_, show_);
     UpdateWindow(hwnd_);
     StartWebView();
@@ -330,6 +408,7 @@ LRESULT Host::Handle(UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     case WM_CLOSE:
         if (importing_) cancel_ = true;
+        SavePlacement(hwnd_);
         DestroyWindow(hwnd_);
         return 0;
     case WM_DESTROY:
@@ -351,17 +430,13 @@ void Host::Fit() {
 void Host::StartWebView() {
     // Delay-loaded, so the elevated helper runs without it; it ships beside the program.
     if (!LoadLibraryExW(L"WebView2Loader.dll", nullptr, LOAD_LIBRARY_SEARCH_APPLICATION_DIR)) {
-        MessageBoxW(hwnd_, L"AnimeLogon 设置缺少 WebView2Loader.dll，请重新安装 AnimeLogon。", L"AnimeLogon",
-                    MB_OK | MB_ICONWARNING);
+        MessageBoxW(hwnd_, i18n::Tr("app.error.loader").c_str(), L"AnimeLogon", MB_OK | MB_ICONWARNING);
         DestroyWindow(hwnd_);
         return;
     }
     LPWSTR version = nullptr;
     if (FAILED(GetAvailableCoreWebView2BrowserVersionString(nullptr, &version)) || !version) {
-        MessageBoxW(hwnd_,
-                    L"AnimeLogon 设置需要 Microsoft Edge WebView2 运行时，但此电脑上未找到。\n\n"
-                    L"请从 Microsoft 网站安装 WebView2 运行时后重试。",
-                    L"AnimeLogon", MB_OK | MB_ICONWARNING);
+        MessageBoxW(hwnd_, i18n::Tr("app.error.webview2").c_str(), L"AnimeLogon", MB_OK | MB_ICONWARNING);
         DestroyWindow(hwnd_);
         return;
     }
@@ -512,6 +587,8 @@ void Host::SendEnvironment() {
     const bool sandbox = !paths::Sandbox().empty();
     w.Member(L"on", sandbox || machine::IsOn()).Member(L"installed", sandbox || !machine::InstallDir().empty());
     w.Member(L"version", L"" ANIMELOGON_VERSION);
+    // The language the page is shown in, and whether the person chose it or it follows Windows.
+    w.Member(L"lang", i18n::Tag(i18n::Current())).Member(L"langChoice", i18n::UserChoice());
     // Who the sign-in screen would greet, for the lock-screen preview.
     w.Member(L"user", AccountName()).Member(L"accountPicture", !AccountPicture().empty());
     // Whether there are Wallpaper Engine wallpapers to offer; the page asks for them when it shows them.
@@ -519,7 +596,7 @@ void Host::SendEnvironment() {
     w.Key(L"monitors").BeginArray();
     int n = 0;
     for (const MonitorInfo &m : monitors_) {
-        w.BeginObject().Member(L"key", m.key).Member(L"name", Format(L"显示器 %d", ++n)).Member(L"model", m.name);
+        w.BeginObject().Member(L"key", m.key).Member(L"name", i18n::Tr("monitor.name", {{L"n", std::to_wstring(++n)}})).Member(L"model", m.name);
         w.Member(L"left", (int)m.rect.left).Member(L"top", (int)m.rect.top);
         w.Member(L"width", (int)(m.rect.right - m.rect.left)).Member(L"height", (int)(m.rect.bottom - m.rect.top));
         w.Member(L"primary", m.primary).EndObject();
@@ -592,7 +669,7 @@ bool Host::Save() {
         saveFailed_ = false;
         return true;
     }
-    if (!saveFailed_) Problem(L"无法写入设置，更改仅在本次运行期间有效。请确认已安装 AnimeLogon。");
+    if (!saveFailed_) Problem(i18n::Tr("msg.save_failed"));
     saveFailed_ = true;
     return false;
 }
@@ -725,7 +802,18 @@ void Host::OnResource(ICoreWebView2WebResourceRequestedEventArgs *args) {
     std::wstring partBox;  // X-Part-Box: where a lone panel is, in fractions of the picture
     Picture p;
     if (WebFile(path, &body, &type)) {
-        // one of the page's own files
+        // One of the page's own files. The page itself goes out in the language chosen, so that
+        // its first paint is in it (app/web/src/i18n.ts reads data-lang).
+        if (type.rfind(L"text/html", 0) == 0) {
+            std::string html(body.begin(), body.end());
+            const std::string from = "<html lang=\"zh-CN\">";
+            const size_t at = html.find(from);
+            if (at != std::string::npos) {
+                const i18n::Lang lang = i18n::Current();
+                html.replace(at, from.size(), "<html lang=\"" + ToUtf8(i18n::Locale(lang)) + "\" data-lang=\"" + ToUtf8(i18n::Tag(lang)) + "\">");
+                body.assign(html.begin(), html.end());
+            }
+        }
     } else if (path.rfind(L"scene/",0) == 0 && EndsWith(path,L".bmp") && !IsIconic(hwnd_)) {
         const auto id=path.substr(6,path.size()-10);
         if (library_.Entry(id)) {
@@ -852,6 +940,9 @@ void Host::OnResource(ICoreWebView2WebResourceRequestedEventArgs *args) {
             }
         }
         type = L"image/png";
+    } else if (path == L"icon") {
+        body = IconPng((int)ParamSize(query, L"px", 16, 256));
+        type = L"image/png";
     } else if (path == L"account") {
         // The person's account picture, for the lock-screen preview's sketch of the sign-in screen.
         const std::wstring file = AccountPicture();
@@ -923,7 +1014,7 @@ void Host::OnMessage(const json::Value &m) {
     } else if (op == L"apply") {
         const std::wstring id = m[L"theme"].Str();
         if (library_.Apply(id, m[L"monitor"].Str()) && Save())
-            if (const ThemeEntry *e = library_.Entry(id)) Toast(L"已套用「" + e->name + L"」，下次锁屏生效");
+            if (const ThemeEntry *e = library_.Entry(id)) Toast(i18n::Tr("msg.applied", {{L"name", e->name}}));
         SendState();
     } else if (op == L"preview") {
         previewW_ = (UINT)std::clamp(m[L"width"].Num(), 0.0, 3840.0);
@@ -1006,9 +1097,38 @@ void Host::OnMessage(const json::Value &m) {
         Switch(m[L"on"].Bool());
     } else if (op == L"logs") {
         ShellExecuteW(hwnd_, L"open", paths::LogDir().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+    } else if (op == L"language") {
+        // The person's own choice, or none to follow Windows again; everything is said again in it.
+        const std::wstring tag = m[L"tag"].Str();
+        i18n::Lang lang;
+        if (!tag.empty() && !i18n::FromTag(tag, &lang)) return;
+        const DWORD e = i18n::SetUserChoice(tag);
+        if (e != ERROR_SUCCESS) ALOG(L"language: not stored (%lu)", e);
+        i18n::Use(i18n::Preferred());
+        if (!paths::Sandbox().empty()) {
+            SetWindowTextW(hwnd_, paths::SandboxTitle().c_str());
+            frame_.Tell();
+        }
+        SendEnvironment();
+        SendState();
+    } else if (op == L"link") {
+        // The project's pages and the licences, by name: the page cannot open anything else.
+        const std::wstring to = m[L"to"].Str(), dir = machine::InstallDir();
+        const std::wstring project = L"https://github.com/helloyork/AnimeLogon";
+        std::wstring target;
+        if (to == L"home") target = project;
+        else if (to == L"issues") target = project + L"/issues";
+        else if (to == L"releases") target = project + L"/releases";
+        else if (to == L"license")
+            target = !dir.empty() && GetFileAttributesW((dir + L"\\LICENSE.txt").c_str()) != INVALID_FILE_ATTRIBUTES
+                         ? dir + L"\\LICENSE.txt" : project + L"/blob/master/LICENSE";
+        else if (to == L"notices")
+            target = !dir.empty() && GetFileAttributesW((dir + L"\\licenses").c_str()) != INVALID_FILE_ATTRIBUTES
+                         ? dir + L"\\licenses" : project + L"/tree/master/vendor";
+        if (!target.empty()) ShellExecuteW(hwnd_, L"open", target.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
     } else if (op == L"uninstall") {
         if (!paths::Sandbox().empty()) {
-            Problem(L"当前为沙盒模式，无法卸载此电脑上的 AnimeLogon。");
+            Problem(i18n::Tr("msg.sandbox.uninstall"));
             return;
         }
         const std::wstring dir = machine::InstallDir();
@@ -1022,19 +1142,22 @@ void Host::Import(bool wallpaper) {
     if (importing_) return;
     const std::wstring source =
         wallpaper ? PickFile(hwnd_,
-                             L"场景、图片和视频\0*.alscene;*.png;*.jpg;*.jpeg;*.webp;*.bmp;*.gif;*.tif;*.tiff;*.heic;*.heif;*.avif;"
-                             L"*.mp4;*.mkv;*.mov;*.webm;*.avi;*.m4v;*.wmv\0"
-                             L"图片\0*.png;*.jpg;*.jpeg;*.webp;*.bmp;*.gif;*.tif;*.tiff;*.heic;*.heif;*.avif\0"
-                             L"视频\0*.mp4;*.mkv;*.mov;*.webm;*.avi;*.m4v;*.wmv\0"
-                             L"所有文件\0*.*\0",
+                             Filters({{i18n::Tr("filter.wallpapers"),
+                                       (std::wstring(L"*.alscene;") + kPicturePatterns + L";" + kVideoPatterns).c_str()},
+                                      {i18n::Tr("filter.pictures"), kPicturePatterns},
+                                      {i18n::Tr("filter.videos"), kVideoPatterns},
+                                      {i18n::Tr("filter.all"), L"*.*"}})
+                                 .c_str(),
                              nullptr, false, L"")
                   : PickFile(hwnd_,
-                             L"主题、场景、图片和视频\0*.altheme;*.alscene;*.png;*.jpg;*.jpeg;*.webp;*.bmp;*.gif;*.tif;*.tiff;*.heic;*.heif;*.avif;"
-                             L"*.mp4;*.mkv;*.mov;*.webm;*.avi;*.m4v;*.wmv\0"
-                             L"主题包 (*.altheme)\0*.altheme\0场景 (*.alscene)\0*.alscene\0"
-                             L"图片\0*.png;*.jpg;*.jpeg;*.webp;*.bmp;*.gif;*.tif;*.tiff;*.heic;*.heif;*.avif\0"
-                             L"视频\0*.mp4;*.mkv;*.mov;*.webm;*.avi;*.m4v;*.wmv\0"
-                             L"所有文件\0*.*\0",
+                             Filters({{i18n::Tr("filter.importable"),
+                                       (std::wstring(L"*.altheme;*.alscene;") + kPicturePatterns + L";" + kVideoPatterns).c_str()},
+                                      {i18n::Tr("filter.themes"), L"*.altheme"},
+                                      {i18n::Tr("filter.scenes"), L"*.alscene"},
+                                      {i18n::Tr("filter.pictures"), kPicturePatterns},
+                                      {i18n::Tr("filter.videos"), kVideoPatterns},
+                                      {i18n::Tr("filter.all"), L"*.*"}})
+                                 .c_str(),
                              nullptr, false, L"");
     if (source.empty()) return;
     StartImport({{source, L"", L""}}, wallpaper);
@@ -1047,7 +1170,7 @@ void Host::StartImport(std::vector<ImportJob> jobs, bool wallpaper) {
         if (j.dir.empty()) {
             for (const ImportJob &made : jobs)
                 if (!made.dir.empty()) secure::RemoveTree(made.dir);
-            Problem(L"无法创建临时目录 " + paths::UserDataDir() + L"\\import。");
+            Problem(i18n::Tr("msg.temp_dir", {{L"path", paths::UserDataDir() + L"\\import"}}));
             return;
         }
     }
@@ -1073,7 +1196,7 @@ void Host::StartImport(std::vector<ImportJob> jobs, bool wallpaper) {
             };
             progressed(0);
             if (FAILED(co)) {
-                results[i].error = L"无法初始化 COM，导入已中止。";
+                results[i].error = i18n::Tr("msg.com");
                 continue;
             }
             const bool scene = EndsWith(j.source, L".alscene");
@@ -1095,10 +1218,12 @@ std::wstring Host::ImportLabel() const {
     const size_t i = std::min<size_t>((size_t)importIndex_.load(), importJobs_.size() - 1);
     const ImportJob &j = importJobs_[i];
     const std::wstring name = j.name.empty() ? FileStem(j.source) : j.name;
-    std::wstring label = !importWallpaper_ && EndsWith(j.source, L".altheme") ? L"正在读取「" + name + L"」"
-                         : staging::LooksLikePicture(j.source)                ? L"正在处理「" + name + L"」"
-                                                                              : L"正在转码「" + name + L"」";
-    if (importJobs_.size() > 1) label += Format(L"（%zu/%zu）", i + 1, importJobs_.size());
+    std::wstring label = i18n::Tr(!importWallpaper_ && EndsWith(j.source, L".altheme") ? "busy.reading"
+                                  : staging::LooksLikePicture(j.source)                ? "busy.processing"
+                                                                                       : "busy.transcoding",
+                                  {{L"name", name}});
+    if (importJobs_.size() > 1)
+        label += i18n::Tr("busy.count", {{L"i", std::to_wstring(i + 1)}, {L"n", std::to_wstring(importJobs_.size())}});
     return label;
 }
 
@@ -1111,7 +1236,7 @@ void Host::FinishImport() {
     bool edited = false;
     if (cancel_.load()) {
         // Stopped from the busy bar: nothing staged so far is installed.
-        Toast(L"已取消导入");
+        Toast(i18n::Tr("msg.import_cancelled"));
     } else if (importWallpaper_) {
         const staging::Result &r = results[0];
         if (r.ok) {
@@ -1122,14 +1247,14 @@ void Host::FinishImport() {
                 pictures_.Forget();
                 // Brought in from a theme's page, for that theme.
                 edited = !library_.open().empty() && library_.SetWallpaper(id);
-                Toast(L"已导入壁纸「" + r.name + L"」");
+                Toast(i18n::Tr("msg.imported_wallpaper", {{L"name", r.name}}));
             } else if (code == commit::kDeclined) {
-                Toast(L"已取消导入");
+                Toast(i18n::Tr("msg.import_cancelled"));
             } else {
-                Problem(L"导入失败：无法将壁纸写入受保护的目录。详细信息见 " + paths::LogPath(L"config.log") + L"。");
+                Problem(i18n::Tr("msg.import_write.wallpaper", {{L"log", paths::LogPath(L"config.log")}}));
             }
         } else {
-            Problem(r.error.empty() ? std::wstring(L"导入失败。") : r.error);
+            Problem(r.error.empty() ? i18n::Tr("msg.import_failed") : r.error);
         }
     } else {
         std::vector<size_t> staged;
@@ -1139,11 +1264,11 @@ void Host::FinishImport() {
                 staged.push_back(i);
                 continue;
             }
-            const std::wstring why = results[i].error.empty() ? std::wstring(L"导入失败。") : results[i].error;
+            const std::wstring why = results[i].error.empty() ? i18n::Tr("msg.import_failed") : results[i].error;
             if (results.size() == 1) problems = why;
             else {
                 const ImportJob &j = importJobs_[i];
-                problems += L"\n「" + (j.name.empty() ? FileStem(j.source) : j.name) + L"」：" + why;
+                problems += L"\n" + i18n::Tr("msg.not_imported.item", {{L"name", j.name.empty() ? FileStem(j.source) : j.name}, {L"why", why}});
             }
         }
         if (!staged.empty()) {
@@ -1170,19 +1295,19 @@ void Host::FinishImport() {
                 if (code == commit::kOk) {
                     const bool applied = added.size() == 1 && library_.Apply(added[0], L"all");
                     if (applied) Save();
-                    Toast(L"已导入「" + results[staged[0]].name + (applied ? L"」并设为当前主题" : L"」"));
+                    Toast(i18n::Tr(applied ? "msg.imported_applied" : "msg.imported", {{L"name", results[staged[0]].name}}));
                 }
             } else if (!added.empty()) {
-                Toast(Format(L"已导入 %zu 个主题", added.size()));
+                Toast(i18n::Tr("msg.imported_many", {{L"n", std::to_wstring(added.size())}}));
             }
             if (code == commit::kDeclined) {
-                if (added.empty()) Toast(L"已取消导入");
+                if (added.empty()) Toast(i18n::Tr("msg.import_cancelled"));
             } else if (code != commit::kOk) {
-                Problem(L"导入失败：无法将主题写入受保护的目录。详细信息见 " + paths::LogPath(L"config.log") + L"。");
+                Problem(i18n::Tr("msg.import_write.theme", {{L"log", paths::LogPath(L"config.log")}}));
             }
         }
         if (!problems.empty())
-            Problem(results.size() == 1 ? problems : Format(L"有 %zu 个没有导入：", results.size() - staged.size()) + problems);
+            Problem(results.size() == 1 ? problems : i18n::Tr("msg.not_imported", {{L"n", std::to_wstring(results.size() - staged.size())}}) + problems);
     }
     for (const ImportJob &j : importJobs_) secure::RemoveTree(j.dir);  // best effort; each holds only its own staging
     importJobs_.clear();
@@ -1229,24 +1354,24 @@ void Host::ImportWorkshop(const json::Value &ids, bool wallpaper) {
         if (wallpaper && !jobs.empty()) break;
     }
     if (jobs.empty()) {
-        Problem(L"找不到选中的壁纸。它可能已经从 Wallpaper Engine 里删除。");
+        Problem(i18n::Tr("msg.workshop_missing"));
         return;
     }
     StartImport(std::move(jobs), wallpaper);
 }
 
 void Host::ImportComponent(bool add) {
-    const std::wstring path = PickFile(hwnd_, L"组件文件 (*.xml)\0*.xml\0所有文件\0*.*\0", L"xml", false, L"");
+    const std::wstring path = PickFile(hwnd_, Filters({{i18n::Tr("filter.components"), L"*.xml"}, {i18n::Tr("filter.all"), L"*.*"}}).c_str(), L"xml", false, L"");
     if (path.empty()) return;
     const std::wstring dir = staging::NewImportDir();
     if (dir.empty()) {
-        Problem(L"无法创建临时目录 " + paths::UserDataDir() + L"\\import。");
+        Problem(i18n::Tr("msg.temp_dir", {{L"path", paths::UserDataDir() + L"\\import"}}));
         return;
     }
     const staging::Result r = staging::Component(path, dir);
     if (!r.ok) {
         secure::RemoveTree(dir);
-        Problem(L"无法导入此组件：" + r.error);
+        Problem(i18n::Tr("msg.component_invalid", {{L"why", r.error}}));
         return;
     }
     const std::wstring id = NewComponentId();
@@ -1254,7 +1379,7 @@ void Host::ImportComponent(bool add) {
     secure::RemoveTree(dir);
     if (code == commit::kOk) {
         library_.Reload();
-        Toast(L"已导入组件「" + r.name + L"」");
+        Toast(i18n::Tr("msg.imported_component", {{L"name", r.name}}));
         if (add && !library_.open().empty()) {
             const std::wstring instance = library_.AddInstance(id);
             if (!instance.empty()) {
@@ -1266,9 +1391,9 @@ void Host::ImportComponent(bool add) {
             return;
         }
     } else if (code == commit::kDeclined) {
-        Toast(L"已取消导入");
+        Toast(i18n::Tr("msg.import_cancelled"));
     } else {
-        Problem(L"导入失败：无法将组件写入受保护的目录。");
+        Problem(i18n::Tr("msg.import_write.component"));
     }
     SendState();
 }
@@ -1279,20 +1404,20 @@ std::wstring Host::CommitTheme(const theme::Theme &t, const std::wstring &then) 
     theme::Theme check;
     std::wstring error;
     if (!theme::Parse(text, theme::Form::Installed, &check, &error)) {
-        Problem(L"无法保存此主题：" + error);
+        Problem(i18n::Tr("msg.save_theme_failed", {{L"why", error}}));
         return L"";
     }
     const std::wstring dir = staging::NewImportDir();
     if (dir.empty() || !WriteBytes(dir + L"\\theme.xml", text)) {
         if (!dir.empty()) secure::RemoveTree(dir);
-        Problem(L"无法创建临时目录 " + paths::UserDataDir() + L"\\import。");
+        Problem(i18n::Tr("msg.temp_dir", {{L"path", paths::UserDataDir() + L"\\import"}}));
         return L"";
     }
     const std::wstring id = NewThemeId();
     const int code = commit::RunElevated(hwnd_, L"--commit-theme " + id + L" " + commit::Quote(dir) + then);
     secure::RemoveTree(dir);
-    if (code == commit::kDeclined) Toast(L"已取消");
-    else if (code != commit::kOk && !ThemeExists(id)) Problem(L"操作失败：无法写入受保护的目录。");
+    if (code == commit::kDeclined) Toast(i18n::Tr("msg.cancelled"));
+    else if (code != commit::kOk && !ThemeExists(id)) Problem(i18n::Tr("msg.write_failed"));
     return ThemeExists(id) ? id : L"";
 }
 
@@ -1305,7 +1430,7 @@ void Host::NewTheme(const std::wstring &name, const std::wstring &wallpaper) {
     if (id.empty()) return;
     library_.Reload();
     library_.Open(id);
-    Toast(L"已创建「" + name + L"」");
+    Toast(i18n::Tr("msg.created", {{L"name", name}}));
     json::Writer w;
     w.BeginObject().Member(L"type", L"navigate").Member(L"theme", id).EndObject();
     Send(w);
@@ -1320,7 +1445,7 @@ void Host::CopyTheme(const std::wstring &id, const std::wstring &name) {
     t.name = name;
     if (CommitTheme(t).empty()) return;
     library_.Reload();
-    Toast(L"已创建「" + name + L"」");
+    Toast(i18n::Tr("msg.created", {{L"name", name}}));
     SendState();
 }
 
@@ -1336,7 +1461,7 @@ void Host::RenameTheme(const std::wstring &id, const std::wstring &name) {
     if (!ThemeExists(id)) library_.Move(id, added);
     Save();
     library_.Reload();
-    Toast(L"已重命名为「" + name + L"」");
+    Toast(i18n::Tr("msg.renamed", {{L"name", name}}));
     if (library_.open() == added) RenderPreview();
     SendState();
     if (library_.open() == added) SendPreview(0);
@@ -1360,37 +1485,37 @@ void Host::RemoveTheme(const std::wstring &id) {
     }
     library_.Reload();
     pictures_.Forget();
-    if (code == commit::kOk) Toast(L"已删除「" + name + L"」");
-    else if (code == commit::kDeclined) Toast(L"已取消");
-    else if (gone) Problem(L"已删除「" + name + L"」，但其壁纸或组件可能正被登录界面占用，暂时无法删除。");
-    else Problem(L"无法删除此主题，其文件可能正被登录界面占用。请稍后重试。");
+    if (code == commit::kOk) Toast(i18n::Tr("msg.deleted", {{L"name", name}}));
+    else if (code == commit::kDeclined) Toast(i18n::Tr("msg.cancelled"));
+    else if (gone) Problem(i18n::Tr("msg.deleted_partly", {{L"name", name}}));
+    else Problem(i18n::Tr("msg.delete_failed"));
     SendState();
 }
 
 void Host::ExportTheme(const std::wstring &id) {
     const ThemeEntry *e = library_.Entry(id);
     if (!e) return;
-    const std::wstring path = PickFile(hwnd_, L"AnimeLogon 主题 (*.altheme)\0*.altheme\0所有文件\0*.*\0", L"altheme",
+    const std::wstring path = PickFile(hwnd_, Filters({{i18n::Tr("filter.theme_export"), L"*.altheme"}, {i18n::Tr("filter.all"), L"*.*"}}).c_str(), L"altheme",
                                        true, FileNameFor(e->name) + L".altheme");
     if (path.empty()) return;
     HCURSOR was = SetCursor(LoadCursorW(nullptr, IDC_WAIT));
     std::wstring error;
     const bool ok = exporter::Export(id, library_.settings(), path, &error);
     SetCursor(was);
-    if (ok) Toast(L"已导出到 " + path);
+    if (ok) Toast(i18n::Tr("msg.exported", {{L"path", path}}));
     else Problem(error);
 }
 
 void Host::Switch(bool on) {
     if (!paths::Sandbox().empty()) {
-        Problem(L"当前为沙盒模式，无法启用或关闭此电脑上的 AnimeLogon。");
+        Problem(i18n::Tr("msg.sandbox.switch"));
         SendEnvironment();
         return;
     }
     const int code = commit::RunElevated(hwnd_, on ? L"--switch-on" : L"--switch-off");
-    if (code == commit::kOk) Toast(on ? L"已启用，下次锁屏生效" : L"已关闭，锁屏已恢复为 Windows 默认界面");
-    else if (code == commit::kDeclined) Toast(L"已取消");
-    else Problem(L"操作失败。请确认已安装 AnimeLogon 并具有管理员权限。");
+    if (code == commit::kOk) Toast(i18n::Tr(on ? "msg.on" : "msg.off"));
+    else if (code == commit::kDeclined) Toast(i18n::Tr("msg.cancelled"));
+    else Problem(i18n::Tr("msg.switch_failed"));
     SendEnvironment();
 }
 

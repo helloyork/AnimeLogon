@@ -7,8 +7,6 @@ import { instOf } from '../store';
 import type { Adjustment, Bound } from '../types';
 
 export const ANCHORS = ['top-left', 'top', 'top-right', 'left', 'center', 'right', 'bottom-left', 'bottom', 'bottom-right'];
-export const ANCHOR_NAMES = ['左上', '上方居中', '右上', '左侧居中', '居中', '右侧居中', '左下', '下方居中', '右下'];
-export const anchorName = (anchor: string) => ANCHOR_NAMES[Math.max(0, ANCHORS.indexOf(anchor))];
 
 export interface Rect {
   left: number;

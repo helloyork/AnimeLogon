@@ -2,7 +2,7 @@
 
 export interface Monitor {
   key: string;
-  name: string;   // 显示器 1, 显示器 2…
+  name: string;   // Display 1, Display 2…, in the page's language
   model: string;
   left: number;
   top: number;
@@ -18,6 +18,8 @@ export interface Environment {
   user: string;        // the name Windows' sign-in screen greets this person by
   accountPicture: boolean;  // they have an account picture, served as `account`
   wallpaperEngine: boolean; // Wallpaper Engine keeps wallpapers on this computer (app/src/workshop.h)
+  lang: string;        // the language the page is shown in: zh-Hans, zh-Hant, en or ja (i18n.ts)
+  langChoice: string;  // the person's own choice of it, or empty when it follows Windows
   monitors: Monitor[];
   fonts: { name: string; stored: string }[];
   devices: { id: string; name: string }[];
@@ -51,7 +53,7 @@ export interface ThemeEntry {
   wake: Wake;
   wakeSeconds: number;
   sceneStatic: boolean;
-  summary: string;          // the visible components, or 只有壁纸
+  summary: string;          // the visible components, or a word saying there are none
   modifications: number;
   revision: number;
 }
@@ -134,7 +136,7 @@ export interface Instance {
   modified: boolean;
   builtIn: boolean;
   author: string;
-  sources: string[];  // 电量, 正在播放, 倒计时
+  sources: string[];  // what it shows besides the clock: the battery, what is playing, a countdown
   panels?: number;
   settings?: Setting[];
   parts?: Part[];

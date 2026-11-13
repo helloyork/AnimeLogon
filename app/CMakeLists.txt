@@ -8,7 +8,9 @@ find_program(NODE_EXECUTABLE node REQUIRED)
 find_program(NPM_EXECUTABLE NAMES npm.cmd npm REQUIRED)
 set(APP_WEB_SRC ${CMAKE_CURRENT_SOURCE_DIR}/web)
 set(APP_WEB_DIR ${CMAKE_CURRENT_BINARY_DIR}/web)
-file(GLOB_RECURSE app_web_sources CONFIGURE_DEPENDS ${APP_WEB_SRC}/src/*.ts ${APP_WEB_SRC}/src/*.tsx ${APP_WEB_SRC}/src/*.css)
+# The page's strings are res/locales/*.json, which it bundles.
+file(GLOB_RECURSE app_web_sources CONFIGURE_DEPENDS ${APP_WEB_SRC}/src/*.ts ${APP_WEB_SRC}/src/*.tsx ${APP_WEB_SRC}/src/*.css
+     ${PROJECT_SOURCE_DIR}/res/locales/*.json)
 add_custom_command(OUTPUT ${APP_WEB_SRC}/node_modules/.package-lock.json
     # npm is a .cmd script: called through cmd so that the build step goes on after it.
     COMMAND cmd /c npm ci --ignore-scripts --no-audit --no-fund
@@ -29,7 +31,7 @@ set_source_files_properties(${CMAKE_CURRENT_BINARY_DIR}/web.rc PROPERTIES
     OBJECT_DEPENDS "${APP_WEB_DIR}/index.html;${APP_WEB_DIR}/app.css;${APP_WEB_DIR}/app.js")
 
 set(config_src ${PROJECT_SOURCE_DIR}/config/src)
-animelogon_add_executable(app WIN32
+animelogon_add_executable(app WIN32 LOCALES
     OUTPUT_NAME animelogon
     SOURCES
         src/main.cpp

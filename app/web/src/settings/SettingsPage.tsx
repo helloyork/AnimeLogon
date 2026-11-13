@@ -1,10 +1,11 @@
-// 设置: what every theme shares. Settings come in groups, each group one card whose rows are its
+// Settings: what every theme shares. Settings come in groups, each group one card whose rows are its
 // settings: the name and a line about it on the left, the control on the right. A setting's
 // sub-settings follow it in the same card, indented.
 import { useId, useState, type ReactNode } from 'react';
 import { UacShield } from '../icons';
+import { LANGUAGES, t, tn, type Key } from '../i18n';
 import { send } from '../native';
-import { global, perMonitor, themeOf, useStore } from '../store';
+import { global, openLink, perMonitor, setLanguage, themeOf, useStore } from '../store';
 import { Button, cx, Select, Slider, Switch, type Choice } from '../ui/controls';
 
 // The control in a row is named by the row's title.
@@ -30,7 +31,7 @@ function Group({ title, children }: { title?: string; children: ReactNode }) {
   );
 }
 
-const choices = (pairs: [string, string][]): Choice[] => pairs.map(([value, label]) => ({ value, label }));
+const choices = (pairs: [string, Key][]): Choice[] => pairs.map(([value, key]) => ({ value, label: t(key) }));
 
 // A volume: moves freely, saved when let go.
 function Volume({ value, onDone, labelledBy }: { value: number; onDone: (v: number) => void; labelledBy: string }) {
@@ -55,115 +56,142 @@ export function SettingsPage() {
     <main className="scroll">
       <div className="page narrow">
         <div className="pagehead">
-          <h1 className="t-title">设置</h1>
+          <h1 className="t-title">{t('settings.title')}</h1>
         </div>
 
         {/* The switch for the whole program comes first. */}
         <Group>
-          <Row title="启用 AnimeLogon" description="关闭后锁屏恢复为 Windows 默认界面，主题和设置将保留。">
+          <Row title={t('settings.enable')} description={t('settings.enable.detail')}>
             {() => (
               <>
                 <UacShield />
-                <Switch label="启用 AnimeLogon" checked={s.env.on} onChange={v => send('switch', { on: v })} />
+                <Switch label={t('settings.enable')} checked={s.env.on} onChange={v => send('switch', { on: v })} />
               </>
             )}
           </Row>
         </Group>
 
-        <Group title="时钟">
-          <Row title="现在显示为">{() => <span className="value num selectable">{s.clock}</span>}</Row>
-          <Row title="时间制式" description="「跟随区域格式」与任务栏一致。">
-            {() => <Select label="时间制式" value={c.hours} onChange={v => global('clock.hours', v)} options={choices([['auto', '跟随区域格式'], ['12', '12 小时制'], ['24', '24 小时制']])} />}
-          </Row>
-          <Row sub dim={c.hours === '24'} title="显示上午/下午" description={c.hours === '24' ? '仅用于 12 小时制。' : undefined}>
-            {() => <Switch label="显示上午/下午" checked={c.ampm} disabled={c.hours === '24'} onChange={v => global('clock.ampm', v)} />}
-          </Row>
-          <Row title="日期">
-            {() => <Select label="日期" value={c.date} onChange={v => global('clock.date', v)} options={choices([['weekday', '星期与月日'], ['long', '完整日期'], ['none', '不显示']])} />}
-          </Row>
-          <Row title="语言" description="时间和日期使用的语言。">
+        <Group title={t('settings.general')}>
+          {/* Each language in its own name, so that it can be found from any of the others. */}
+          <Row title={t('settings.language')}>
             {() => (
-              <Select label="语言" value={c.language} onChange={v => global('clock.language', v)}
-                options={choices([['', '跟随区域格式'], ['zh-CN', '简体中文'], ['zh-TW', '繁體中文'], ['ja-JP', '日本語'], ['ko-KR', '한국어'], ['en-US', 'English']])} />
+              <Select label={t('settings.language')} value={s.env.langChoice} onChange={setLanguage}
+                options={[{ value: '', label: t('settings.language.system') }, ...LANGUAGES.map(([value, label]) => ({ value, label }))]} />
             )}
           </Row>
         </Group>
 
-        <Group title="组件">
-          <Row title="显示组件" description="关闭后所有主题仅显示壁纸。">
-            {() => <Switch label="显示组件" checked={set.components} onChange={v => global('components', v)} />}
+        <Group title={t('settings.clock')}>
+          <Row title={t('settings.clock.now')}>{() => <span className="value num selectable">{s.clock}</span>}</Row>
+          <Row title={t('settings.clock.hours')} description={t('settings.clock.hours.detail')}>
+            {() => (
+              <Select label={t('settings.clock.hours')} value={c.hours} onChange={v => global('clock.hours', v)}
+                options={choices([['auto', 'settings.clock.hours.auto'], ['12', 'settings.clock.hours.12'], ['24', 'settings.clock.hours.24']])} />
+            )}
           </Row>
-          <Row title="显示正在播放" description="仅在你锁定自己的账户时显示标题和艺术家，其他账户和开机登录界面不显示。">
-            {() => <Switch label="显示正在播放" checked={set.media} onChange={v => global('media', v)} />}
+          <Row sub dim={c.hours === '24'} title={t('settings.clock.ampm')} description={c.hours === '24' ? t('settings.clock.ampm.only12') : undefined}>
+            {() => <Switch label={t('settings.clock.ampm')} checked={c.ampm} disabled={c.hours === '24'} onChange={v => global('clock.ampm', v)} />}
+          </Row>
+          <Row title={t('settings.clock.date')}>
+            {() => (
+              <Select label={t('settings.clock.date')} value={c.date} onChange={v => global('clock.date', v)}
+                options={choices([['weekday', 'settings.clock.date.weekday'], ['long', 'settings.clock.date.long'], ['none', 'settings.clock.date.none']])} />
+            )}
+          </Row>
+          <Row title={t('settings.clock.language')} description={t('settings.clock.language.detail')}>
+            {() => (
+              <Select label={t('settings.clock.language')} value={c.language} onChange={v => global('clock.language', v)}
+                options={[{ value: '', label: t('settings.clock.language.auto') },
+                  ...[['zh-CN', '简体中文'], ['zh-TW', '繁體中文'], ['ja-JP', '日本語'], ['ko-KR', '한국어'], ['en-US', 'English']].map(([value, label]) => ({ value, label }))]} />
+            )}
           </Row>
         </Group>
 
-        <Group title="屏幕">
-          <Row title="多显示器" dim={!several} description={`此电脑连接了 ${s.env.monitors.length} 台显示器。`}>
+        <Group title={t('settings.components')}>
+          <Row title={t('settings.components.show')} description={t('settings.components.show.detail')}>
+            {() => <Switch label={t('settings.components.show')} checked={set.components} onChange={v => global('components', v)} />}
+          </Row>
+          <Row title={t('settings.media')} description={t('settings.media.detail')}>
+            {() => <Switch label={t('settings.media')} checked={set.media} onChange={v => global('media', v)} />}
+          </Row>
+        </Group>
+
+        <Group title={t('settings.displays')}>
+          <Row title={t('settings.monitors')} dim={!several} description={tn('settings.monitors.count', s.env.monitors.length)}>
             {() => (
-              <Select label="多显示器" value={set.monitorMode} disabled={!several} onChange={v => global('monitorMode', v)}
-                options={choices([['duplicate', '所有屏幕相同'], ['span', '跨屏显示'], ['per-monitor', '每个屏幕单独设置']])} />
+              <Select label={t('settings.monitors')} value={set.monitorMode} disabled={!several} onChange={v => global('monitorMode', v)}
+                options={choices([['duplicate', 'settings.monitors.duplicate'], ['span', 'settings.monitors.span'], ['per-monitor', 'settings.monitors.per']])} />
             )}
           </Row>
           {perMonitor() && s.env.monitors.map(m => (
-            <Row key={m.key} sub title={m.name + (m.primary ? '（主）' : '')} description={`${m.width}×${m.height}`}>
+            <Row key={m.key} sub title={m.primary ? t('monitor.primary', { name: m.name }) : m.name} description={`${m.width}×${m.height}`}>
               {() => (
                 <Select label={m.name} value={set.screens[m.key] || ''} onChange={v => global('screen.' + m.key, v)}
-                  options={[{ value: '', label: `跟随当前主题（${themeOf(s.lib!.current)?.name ?? ''}）` }, ...s.lib!.themes.map(t => ({ value: t.id, label: t.name }))]} />
+                  options={[{ value: '', label: t('settings.screen.follow', { name: themeOf(s.lib!.current)?.name ?? '' }) },
+                    ...s.lib!.themes.map(th => ({ value: th.id, label: th.name }))]} />
               )}
             </Row>
           ))}
           {/* Only a choice where there is more than one display to choose from. */}
           {several && (
-            <Row title="组件显示位置" description="壁纸显示在所有屏幕上，组件仅显示在所选屏幕。">
+            <Row title={t('settings.component_displays')} description={t('settings.component_displays.detail')}>
               {() => (
-                <Select label="组件显示位置" value={set.componentDisplays} onChange={v => global('componentDisplays', v)}
-                  options={choices([['auto', '显示登录界面的屏幕'], ['primary', '主屏幕'], ['all', '所有屏幕']])} />
+                <Select label={t('settings.component_displays')} value={set.componentDisplays} onChange={v => global('componentDisplays', v)}
+                  options={choices([['auto', 'settings.component_displays.auto'], ['primary', 'settings.component_displays.primary'], ['all', 'settings.component_displays.all']])} />
               )}
             </Row>
           )}
           {several && (
-            <Row title="其他屏幕的登录背景" description="输入密码时，Windows 仅在一个屏幕上显示登录界面。此项设置其他屏幕在登录完成前显示的内容。">
+            <Row title={t('settings.other_displays')} description={t('settings.other_displays.detail')}>
               {() => (
-                <Select label="其他屏幕的登录背景" value={set.otherDisplays} onChange={v => global('otherDisplays', v)}
-                  options={choices([['blur', '模糊壁纸'], ['picture', '壁纸'], ['black', '黑屏']])} />
+                <Select label={t('settings.other_displays')} value={set.otherDisplays} onChange={v => global('otherDisplays', v)}
+                  options={choices([['blur', 'settings.other_displays.blur'], ['picture', 'settings.other_displays.picture'], ['black', 'settings.other_displays.black']])} />
               )}
             </Row>
           )}
         </Group>
 
-        <Group title="声音">
-          <Row title="播放声音">
-            {() => <Switch label="播放声音" checked={set.audio.enabled} onChange={v => global('audio.enabled', v)} />}
+        <Group title={t('settings.sound')}>
+          <Row title={t('settings.sound.play')}>
+            {() => <Switch label={t('settings.sound.play')} checked={set.audio.enabled} onChange={v => global('audio.enabled', v)} />}
           </Row>
           {set.audio.enabled && (
             <>
-              <Row sub title="输出设备">
+              <Row sub title={t('settings.sound.device')}>
                 {() => (
-                  <Select label="输出设备" value={set.audio.device} onChange={v => global('audio.device', v)}
-                    options={[{ value: '', label: '自动（跟随系统）' }, ...s.env.devices.map(d => ({ value: d.id, label: d.name }))]} />
+                  <Select label={t('settings.sound.device')} value={set.audio.device} onChange={v => global('audio.device', v)}
+                    options={[{ value: '', label: t('settings.sound.device.auto') }, ...s.env.devices.map(d => ({ value: d.id, label: d.name }))]} />
                 )}
               </Row>
-              <Row sub title="总音量">{id => <Volume labelledBy={id} value={set.audio.volume} onDone={v => global('audio.volume', v)} />}</Row>
-              <Row sub title="视频声音" description="播放视频壁纸的音轨。">
-            {() => <Switch label="视频声音" checked={set.audio.video} onChange={v => global('audio.video', v)} />}
+              <Row sub title={t('settings.sound.volume')}>{id => <Volume labelledBy={id} value={set.audio.volume} onDone={v => global('audio.volume', v)} />}</Row>
+              <Row sub title={t('settings.sound.video')} description={t('settings.sound.video.detail')}>
+                {() => <Switch label={t('settings.sound.video')} checked={set.audio.video} onChange={v => global('audio.video', v)} />}
               </Row>
               {set.audio.video && (
-                <Row sub title="视频音量">{id => <Volume labelledBy={id} value={set.audio.videoVolume} onDone={v => global('audio.videoVolume', v)} />}</Row>
+                <Row sub title={t('settings.sound.video_volume')}>{id => <Volume labelledBy={id} value={set.audio.videoVolume} onDone={v => global('audio.videoVolume', v)} />}</Row>
               )}
             </>
           )}
         </Group>
 
-        <Group title="系统">
-          <Row title="日志" description="反馈问题时请附上日志文件。">{() => <Button size="sm" onClick={() => send('logs')}>打开</Button>}</Row>
-          <Row title="卸载 AnimeLogon" description="移除本程序并还原所有系统更改。">
-            {() => <Button size="sm" shield danger onClick={() => send('uninstall')}>卸载</Button>}
+        <Group title={t('settings.system')}>
+          <Row title={t('settings.logs')} description={t('settings.logs.detail')}>{() => <Button size="sm" onClick={() => send('logs')}>{t('settings.logs.open')}</Button>}</Row>
+          <Row title={t('settings.uninstall')} description={t('settings.uninstall.detail')}>
+            {() => <Button size="sm" shield danger onClick={() => send('uninstall')}>{t('settings.uninstall.button')}</Button>}
           </Row>
         </Group>
 
-        <Group title="关于">
-          <Row title="AnimeLogon" description={`版本 ${s.env.version} · MIT 许可证`} />
+        <Group title={t('settings.about')}>
+          <Row title="AnimeLogon" description={t('settings.about.version', { version: s.env.version })}>
+            {() => <Button size="sm" onClick={() => openLink('releases')}>{t('settings.about.updates')}</Button>}
+          </Row>
+          {/* Where the project is, where to say what is wrong, and the licences. */}
+          <nav className="row links" aria-label={t('settings.about.links')}>
+            <button type="button" className="link" onClick={() => openLink('home')}>{t('settings.about.home')}</button>
+            <button type="button" className="link" onClick={() => openLink('issues')}>{t('settings.about.issues')}</button>
+            <button type="button" className="link" onClick={() => openLink('license')}>{t('settings.about.license')}</button>
+            <button type="button" className="link" onClick={() => openLink('notices')}>{t('settings.about.notices')}</button>
+          </nav>
         </Group>
       </div>
     </main>
