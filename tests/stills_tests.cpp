@@ -281,18 +281,35 @@ TEST(SoftenedStillsAreSmoothAndDarker) {
     stills::Finish(bgr, 2, 1, OtherDisplays::Picture, bgra.data());
     CHECK((bgra == std::vector<uint8_t>{1, 2, 3, 255, 250, 251, 252, 255}));
 
-    // One colour stays that colour, darkened, to within the dither, at any size -- including a
-    // grid whose last row and column are partly empty.
+    // The tone: grey goes darker and toward a dark grey, white to about 180 as Windows has it,
+    // and a colour keeps a little more of its colour than grey does.
+    float toned[3];
+    const float white[3] = {255, 255, 255}, black[3] = {0, 0, 0}, red[3] = {40, 40, 220};
+    stills::Tone(white, toned);
+    CHECK(std::abs(toned[0] - 180.5f) < 1.0f && toned[0] == toned[1] && toned[1] == toned[2]);
+    stills::Tone(black, toned);
+    CHECK(std::abs(toned[0] - stills::kLift) < 0.01f);
+    stills::Tone(red, toned);
+    CHECK(toned[2] - toned[1] > stills::kLevel * 180.0f && toned[0] == toned[1]);
+
+    // One colour stays that colour, toned, to within the grain, at any size -- including a grid
+    // whose last row and column are partly empty.
     for (const auto &[w, h] : std::vector<std::pair<int, int>>{{64, 48}, {1003, 701}}) {
         bgr.assign((size_t)w * h * 3, 0);
         for (size_t i = 0; i < bgr.size(); i += 3) bgr[i] = 100, bgr[i + 1] = 150, bgr[i + 2] = 200;
+        const float source[3] = {100, 150, 200};
+        stills::Tone(source, toned);
         bgra.assign((size_t)w * h * 4, 0);
         stills::Finish(bgr, w, h, OtherDisplays::Blur, bgra.data());
         bool flat = true;
-        for (size_t i = 0; flat && i < bgra.size(); i += 4)
-            flat = std::abs(bgra[i] - 100.0f * stills::kDim) <= 1.5f && std::abs(bgra[i + 1] - 150.0f * stills::kDim) <= 1.5f &&
-                   std::abs(bgra[i + 2] - 200.0f * stills::kDim) <= 1.5f && bgra[i + 3] == 255;
+        double sum = 0;
+        for (size_t i = 0; flat && i < bgra.size(); i += 4) {
+            for (int c = 0; c < 3; ++c) flat = flat && std::abs(bgra[i + c] - toned[c]) <= stills::kGrain + 1.0f;
+            flat = flat && bgra[i + 3] == 255;
+            sum += bgra[i + 1];
+        }
         CHECK(flat);
+        CHECK(std::abs(sum / ((double)w * h) - toned[1]) < 0.5);  // the grain averages out
     }
 
     // A hard edge becomes a soft one, about kBlurSigma of the height wide, and the same input
@@ -304,12 +321,14 @@ TEST(SoftenedStillsAreSmoothAndDarker) {
             for (int c = 0; c < 3; ++c) bgr[((size_t)y * w + x) * 3 + c] = 255;
     bgra.assign((size_t)w * h * 4, 0);
     stills::Finish(bgr, w, h, OtherDisplays::Blur, bgra.data());
-    const float top = 255.0f * stills::kDim, sigma = stills::kBlurSigma * h;
-    auto at = [&](int x) { return (float)bgra[((size_t)(h / 2) * w + x) * 4 + 1]; };
-    CHECK(at(0) <= 1.0f && std::abs(at(w - 1) - top) <= 1.5f);
-    CHECK(std::abs(at(w / 2) - top * 0.5f) <= 0.15f * top && std::abs(at(w / 2 - 1) - top * 0.5f) <= 0.15f * top);
-    CHECK(at(w / 2 + (int)(2 * sigma)) > 0.9f * top && at(w / 2 - (int)(2 * sigma)) < 0.1f * top);
-    CHECK(at(w / 2 + (int)(sigma / 2)) < 0.9f * top && at(w / 2 - (int)(sigma / 2)) > 0.1f * top);
+    const float low = stills::kLift, high = 255.0f * stills::kLevel + stills::kLift, span = high - low;
+    const float sigma = stills::kBlurSigma * h, slack = stills::kGrain + 1.0f;
+    // The share of the way from the dark side to the light one at x, from the middle row.
+    auto at = [&](int x) { return ((float)bgra[((size_t)(h / 2) * w + x) * 4 + 1] - low) / span; };
+    CHECK(std::abs(at(0)) * span <= slack && std::abs(at(w - 1) - 1.0f) * span <= slack);
+    CHECK(std::abs(at(w / 2) - 0.5f) <= 0.15f && std::abs(at(w / 2 - 1) - 0.5f) <= 0.15f);
+    CHECK(at(w / 2 + (int)(2.5f * sigma)) > 0.9f && at(w / 2 - (int)(2.5f * sigma)) < 0.1f);
+    CHECK(at(w / 2 + (int)(sigma / 2)) < 0.9f && at(w / 2 - (int)(sigma / 2)) > 0.1f);
     std::vector<uint8_t> again(bgra.size(), 0);
     stills::Finish(bgr, w, h, OtherDisplays::Blur, again.data());
     CHECK(again == bgra);

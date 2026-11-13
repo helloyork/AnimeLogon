@@ -18,8 +18,8 @@ int Width(const RECT &r) { return r.right - r.left; }
 int Height(const RECT &r) { return r.bottom - r.top; }
 
 // A value in (-1, 1), most often near 0, the same for the same pixel every time: the sum of two
-// uniform values, which spreads the rounding error without a pattern the eye can follow.
-float Dither(int x, int y) {
+// uniform values, a grain without a pattern the eye can follow.
+float Grain(int x, int y) {
     auto hash = [](uint32_t n) {
         n ^= n >> 16;
         n *= 0x7FEB352Du;
@@ -117,6 +117,11 @@ void Finish(const std::vector<uint8_t> &bgr, int width, int height, animelogon::
     if (mode == animelogon::OtherDisplays::Blur) Soften(width, height, bgra);
 }
 
+void Tone(const float bgr[3], float out[3]) {
+    const float luma = 0.0722f * bgr[0] + 0.7152f * bgr[1] + 0.2126f * bgr[2];
+    for (int c = 0; c < 3; ++c) out[c] = kLevel * (luma + kSaturation * (bgr[c] - luma)) + kLift;
+}
+
 void Soften(int width, int height, uint8_t *bgra) {
     if (width <= 0 || height <= 0) return;
     // Down: each cell the mean of the f x f pixels it covers (fewer at the right and bottom).
@@ -147,7 +152,7 @@ void Soften(int width, int height, uint8_t *bgra) {
     Pass(cells, gw, gh, kernel, true);
     Pass(cells, gw, gh, kernel, false);
 
-    // Up: bilinear between cell centres, darkened, dithered.
+    // Up: bilinear between cell centres, toned, with the grain.
     for (int y = 0; y < height; ++y) {
         const float fy = std::clamp(((float)y + 0.5f) / (float)f - 0.5f, 0.0f, (float)(gh - 1));
         const int y0 = (int)fy, y1 = std::min(y0 + 1, gh - 1);
@@ -157,14 +162,16 @@ void Soften(int width, int height, uint8_t *bgra) {
             const float fx = std::clamp(((float)x + 0.5f) / (float)f - 0.5f, 0.0f, (float)(gw - 1));
             const int x0 = (int)fx, x1 = std::min(x0 + 1, gw - 1);
             const float tx = fx - (float)x0;
-            const float d = Dither(x, y);
+            float v[3], toned[3];
             for (int c = 0; c < 3; ++c) {
                 const float a = cells[((size_t)y0 * gw + x0) * 3 + c], b = cells[((size_t)y0 * gw + x1) * 3 + c];
                 const float p = cells[((size_t)y1 * gw + x0) * 3 + c], q = cells[((size_t)y1 * gw + x1) * 3 + c];
                 const float top = a + (b - a) * tx, bottom = p + (q - p) * tx;
-                const float v = (top + (bottom - top) * ty) * kDim + d;
-                row[x * 4 + c] = (uint8_t)std::clamp((int)std::lround(v), 0, 255);
+                v[c] = top + (bottom - top) * ty;
             }
+            Tone(v, toned);
+            const float grain = kGrain * Grain(x, y);
+            for (int c = 0; c < 3; ++c) row[x * 4 + c] = (uint8_t)std::clamp((int)std::lround(toned[c] + grain), 0, 255);
             row[x * 4 + 3] = 255;
         }
     }

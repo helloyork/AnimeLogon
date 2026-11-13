@@ -48,15 +48,22 @@ std::vector<uint8_t> BuiltIn(const Still &still);
 // it is.
 void Finish(const std::vector<uint8_t> &bgr, int width, int height, animelogon::OtherDisplays mode, uint8_t *bgra);
 
-// How far the blur reaches and how dark it leaves the picture. The blur is near a Gaussian of
-// kBlurSigma times the display's height; each channel is then scaled by kDim. Chosen by
-// laying the result beside Windows' own blurred sign-in background on the same picture.
-constexpr float kBlurSigma = 0.035f;
-constexpr float kDim = 0.82f;
+// The look of Windows' own sign-in background behind the password box, measured on a test card
+// (Windows 11 26200, 1920x1080): a Gaussian blur of about 30 pixels -- kBlurSigma of the
+// display's height -- then each pixel pulled toward dark grey, Tone, and a fine grain of about
+// one level.
+constexpr float kBlurSigma = 0.028f;
+constexpr float kLevel = 0.655f;      // white comes out at 180, black at kLift
+constexpr float kLift = 13.5f;
+constexpr float kSaturation = 1.15f;  // colours keep a little more of their colour than grey does
+constexpr float kGrain = 2.5f;        // the grain's reach, in levels either way
 
-// The blurred, darkened picture, from and into B G R A at width x height (alpha is set to 255).
+// One blurred pixel's B G R, 0..255, as it is shown.
+void Tone(const float bgr[3], float out[3]);
+
+// The blurred, toned picture, from and into B G R A at width x height (alpha is set to 255).
 // Done on a grid a few times coarser than the display, where the blur is cheap, and brought back
-// up smoothly; a sub-level dither keeps wide gradients from banding.
+// up smoothly; the grain also keeps wide gradients from banding.
 void Soften(int width, int height, uint8_t *bgra);
 
 }  // namespace stills
