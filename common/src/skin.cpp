@@ -39,7 +39,7 @@ const AttributeSpec kText[] = {{L"label", Type::Label, 0, 0, false}, {L"value", 
                                {L"weight", Type::Weight},            {L"style", Type::Style},
                                {L"color", Type::Color},              {L"opacity", Type::Number, 0, 1},
                                {L"tracking", Type::Number, -0.5, 1}, {L"space", Type::Number, 0, 4},
-                               {L"case", Type::Case},                {L"hang", Type::Bool, 0, 0, false}};
+                               {L"case", Type::Case},                {L"hang", Type::Bool}};
 const AttributeSpec kShadow[] = {{L"label", Type::Label, 0, 0, false},
                                  {L"blur", Type::Number, 0, 1},
                                  {L"opacity", Type::Number, 0, 1},
@@ -416,6 +416,8 @@ const Offer kOffers[] = {
     {L"text", L"opacity", L"不透明度", L"", Control::Slider, 0, 1, 0.01, L"1"},
     {L"text", L"style", L"字形", L"", Control::Choice, 0, 0, 0, L"normal"},
     {L"text", L"case", L"大小写", L"只影响拉丁字母。", Control::Choice, 0, 0, 0, L"none"},
+    // Offered only where the component lets a text hang (Parts).
+    {L"text", L"hang", L"对齐", L"挂在旁边时，这一行和其他行只按其余文字对齐。", Control::Choice, 0, 0, 0, L"false"},
     {L"shadow", L"opacity", L"浓度", L"0 为不画阴影。", Control::Slider, 0, 1, 0.01, L"0.3"},
     {L"shadow", L"blur", L"模糊", L"相对于整体大小。", Control::Slider, 0, 0.5, 0.005, L"0.1"},
     {L"shadow", L"x", L"水平偏移", L"相对于整体大小。", Control::Slider, -0.3, 0.3, 0.005, L"0"},
@@ -442,6 +444,7 @@ std::vector<Option> OptionsOf(const std::wstring &attribute) {
         return {{L"auto", L"自动"}, {L"left", L"左"}, {L"center", L"中"}, {L"right", L"右"}};
     if (attribute == L"style") return {{L"normal", L"常规"}, {L"italic", L"斜体"}};
     if (attribute == L"case") return {{L"none", L"原样"}, {L"upper", L"大写"}, {L"lower", L"小写"}};
+    if (attribute == L"hang") return {{L"true", L"挂在旁边"}, {L"false", L"一起对齐"}};
     return {};
 }
 
@@ -652,6 +655,17 @@ std::vector<Part> Parts(const Skin &skin) {
                     offer(text, isBar ? L"bar" : L"text", tk);
                     // The line's distance from the one above goes with its first text or bar.
                     if (lines > 1 && first) offer(text, L"line", lk);
+                    // Whether a text hangs beside the others (an AM/PM marker beside the numbers)
+                    // is a choice only where the component offers it, by writing `hang` on it.
+                    if (!x.Find(L"hang")) {
+                        auto &adj = text.adjustments;
+                        adj.erase(std::remove_if(adj.begin(), adj.end(),
+                                                 [](const Adjustment &a) {
+                                                     return a.key.size() > 5 &&
+                                                            a.key.compare(a.key.size() - 5, 5, L".hang") == 0;
+                                                 }),
+                                  adj.end());
+                    }
                     if (first) {  // and space before one only means something after another
                         auto &adj = text.adjustments;
                         adj.erase(std::remove_if(adj.begin(), adj.end(),

@@ -200,7 +200,7 @@ function Overview() {
 
 /* --- one component --- */
 function InstanceView({ inst }: { inst: Instance }) {
-  const sections = useSections('component', ['look', 'parts']);
+  const sections = useSections('component', ['look', 'layout', 'parts']);
   const parts = (inst.parts || []).filter(p => (inst.panels ?? 1) > 1 || p.key.includes('.'));
   const own = (inst.settings || []).filter(st => !st.folded);
   const keys = [...(inst.settings || []).map(st => st.id), ...(inst.parts || []).flatMap(p => p.adjustments.map(a => a.key))];
@@ -244,8 +244,12 @@ function InstanceView({ inst }: { inst: Instance }) {
               <div className="props">
                 {single && <PanelField instId={inst.id} pk="p1" attr="size" />}
                 {own.map(st => <SettingField key={st.id} instId={inst.id} setting={st} onReset={() => clearValues(inst.id, [st.id])} />)}
-                {single && <PanelField instId={inst.id} pk="p1" attr="align" />}
               </div>
+            </Section>
+          )}
+          {single && (
+            <Section value="layout" title="排版" sections={sections}>
+              <LayoutFields inst={inst} pk="p1" />
             </Section>
           )}
           {single && (
@@ -270,7 +274,7 @@ function InstanceView({ inst }: { inst: Instance }) {
 function PartView({ inst, partKey }: { inst: Instance | SceneControls; partKey: string }) {
   const kind = /^p\d+\.l\d+\.t\d+$/.test(partKey) ? 'text' : /^p\d+$/.test(partKey) ? 'panel' : 'other';
   const sections = useSections(kind === 'text' ? 'text' : kind === 'panel' ? (inst.id === 'wallpaper' ? 'layer' : 'panel') : 'part',
-    kind === 'text' ? ['common'] : ['look', 'place']);
+    kind === 'text' ? ['common'] : ['look', 'layout', 'place']);
   const pt: Part | undefined = inst.parts?.find(p => p.key === partKey);
   if (!pt) return null;
   const attr = (key: string) => key.split('.').pop() || '';
@@ -296,9 +300,14 @@ function PartView({ inst, partKey }: { inst: Instance | SceneControls; partKey: 
           <div className="props">
             <PanelField instId={inst.id} pk={pt.key} attr="size" />
             {look.map(field)}
-            <PanelField instId={inst.id} pk={pt.key} attr="align" />
+            {inst.id === 'wallpaper' && <PanelField instId={inst.id} pk={pt.key} attr="align" />}
           </div>
         </Section>
+        {inst.id !== 'wallpaper' && (
+          <Section value="layout" title="排版" sections={sections}>
+            <LayoutFields inst={inst as Instance} pk={pt.key} />
+          </Section>
+        )}
         <Section value="place" title="位置" sections={sections}><PlaceFields instId={inst.id} pk={pt.key} /></Section>
       </>
     );
@@ -330,6 +339,32 @@ function PanelField({ instId, pk, attr }: { instId: string; pk: string; attr: st
   const a = adjustment(instId, pk + '.' + attr);
   if (!a) return null;
   return <AdjustmentField instId={instId} a={{ ...a, value: draft?.[a.key] ?? a.value }} onReset={() => clearValues(instId, [a.key])} />;
+}
+
+// How a panel's lines sit together, in one place: how they align, whether a text that may hang
+// beside the others (an AM/PM marker beside the numbers) is left out of the alignment or counted
+// in it, and how far each line is from the one above. Counting the marker in centres the date
+// under the whole first line, and the stage's snap lines then take the panel's full width. The
+// same values are also on each text's own page.
+function LayoutFields({ inst, pk }: { inst: Instance; pk: string }) {
+  const draft = useDraft(inst.id);
+  const rows: { label: string; a: Part['adjustments'][number] }[] = [];
+  for (const p of inst.parts || []) {
+    if (!p.key.startsWith(pk + '.')) continue;
+    for (const a of p.adjustments) {
+      if (a.key.endsWith('.hang')) rows.push({ label: p.label, a });
+      else if (/\.l\d+\.gap$/.test(a.key)) rows.push({ label: `${p.label}行距`, a });
+    }
+  }
+  const align = adjustment(inst.id, pk + '.align');
+  return (
+    <div className="props">
+      {align && <AdjustmentField instId={inst.id} a={{ ...align, value: draft?.[align.key] ?? align.value }} onReset={() => clearValues(inst.id, [align.key])} />}
+      {rows.map(({ label, a }) => (
+        <AdjustmentField key={a.key} instId={inst.id} a={{ ...a, label }} onReset={() => clearValues(inst.id, [a.key])} />
+      ))}
+    </div>
+  );
 }
 
 const POSITION_VIEW = (unit: string): View => ({ factor: 1, digits: 1, unit: () => unit });
