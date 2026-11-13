@@ -237,6 +237,8 @@ Result Package(const std::wstring &source, const std::wstring &dir, const std::a
         ALOG(L"import: %s theme.xml %s", source.c_str(), why.c_str());
         return Error(newer ? L"这个主题需要新版 AnimeLogon。" : L"主题包里的 theme.xml 有误：" + why);
     }
+    if (!kTakesScenes && t.wallpaper == L"wallpaper.alscene")
+        return Error(L"这个主题的壁纸是场景，这个版本的 AnimeLogon 暂不支持导入场景壁纸。");
 
     // The files the archive carries must be the ones theme.xml names.
     const package::Entry *wallpaper = reader.Wallpaper();

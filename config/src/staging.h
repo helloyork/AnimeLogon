@@ -18,6 +18,12 @@ struct Result {
 
 using Progress = std::function<void(double)>;
 
+// Whether the importer takes scene wallpapers: .alscene files, and theme packages whose wallpaper
+// is a scene. While this is false both are turned away with a message, and the settings app's
+// file dialogs leave .alscene out. Scenes installed before stay, still play and still export;
+// the scene code is built and tested as before.
+inline constexpr bool kTakesScenes = false;
+
 // A new, empty import directory, %LOCALAPPDATA%\AnimeLogon\import\<12 hex digits>; empty if it
 // cannot be made.
 std::wstring NewImportDir();

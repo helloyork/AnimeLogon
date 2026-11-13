@@ -225,6 +225,9 @@ Result SceneWallpaper(package::Reader &reader, const std::wstring &dir, const st
     Result r; r.ok = true; r.name = info.name; if (progress) progress(1); return r;
 }
 Result Scene(const std::wstring &source, const std::wstring &dir, const std::atomic<bool> &cancel, const Progress &progress) {
+    if (!kTakesScenes) {
+        Result r; r.error = L"这个版本的 AnimeLogon 暂不支持导入场景壁纸（.alscene）。"; return r;
+    }
     package::Reader reader; std::wstring why;
     if (!reader.Open(source,&why)) return Error(reader.Compressed() ? L".alscene 必须是不压缩（存储）的 zip 文件。" : why);
     const auto r = SceneWallpaper(reader,dir+L"\\wallpaper",L"",cancel,progress);

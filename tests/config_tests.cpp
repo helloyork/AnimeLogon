@@ -29,6 +29,7 @@
 
 #include "commit.h"
 #include "exporter.h"
+#include "sceneimport.h"
 #include "scratch.h"
 #include "staging.h"
 #include "store.h"
@@ -746,6 +747,33 @@ TEST(ImportPackageChecksAndStages) {
     package::WriteToMemory(newer, &newerZip, nullptr);
     CHECK(error(newerZip).find(L"新版") != std::wstring::npos);
     secure::RemoveTree(scratch);
+}
+
+// While the importer does not take scenes, an .alscene file and a theme package whose wallpaper
+// is a scene are both turned away with a message naming scenes, and nothing is staged.
+TEST(ImportTurnsAwayScenesWhileTheyAreNotTaken) {
+    if constexpr (!staging::kTakesScenes) {
+        const std::wstring scratch = ScratchDir();
+        std::atomic<bool> cancel{false};
+        std::vector<uint8_t> scene;
+        CHECK(package::WriteToMemory(
+            {{"scene.xml", L"", Bytes("<scene format=\"1\" name=\"Sky\"><base shader=\"sky.hlsl\"/></scene>")},
+             {"sky.hlsl", L"", Bytes("float4 main(float2 uv : TEXCOORD0) : SV_Target { return float4(uv, 1, 1); }")}},
+            &scene, nullptr));
+        const std::wstring alscene = scratch + L"\\sky.alscene";
+        CHECK(WriteAll(alscene, scene));
+        const std::wstring dir = ImportDir(scratch);
+        const staging::Result s = staging::Scene(alscene, dir, cancel, nullptr);
+        CHECK(!s.ok && s.error.find(L"场景") != std::wstring::npos && CountEntries(dir) == 0);
+
+        const std::wstring altheme = scratch + L"\\sky.altheme";
+        CHECK(WriteAll(altheme, Package(PackageTheme(L"wallpaper.alscene", {{L"clock", L"clock"}}),
+                                        {{"wallpaper.alscene", L"", scene}})));
+        const std::wstring dir2 = ImportDir(scratch);
+        const staging::Result p = staging::Package(altheme, dir2, cancel, nullptr);
+        CHECK(!p.ok && p.error.find(L"场景") != std::wstring::npos && CountEntries(dir2) == 0);
+        secure::RemoveTree(scratch);
+    }
 }
 
 // --- the exporter -------------------------------------------------------------------------------
