@@ -56,6 +56,18 @@ bool ParseThemeOverride(std::wstring_view rest, std::wstring_view value, Setting
         s->themeOverrides[themeId].fit = fit;
         return true;
     }
+    if (what == L"wake") {
+        WakeStyle wake = WakeStyle::Fade;
+        if (!Parse(value, &wake)) return false;
+        s->themeOverrides[themeId].wake = wake;
+        return true;
+    }
+    if (what == L"wake-duration") {
+        float seconds = kWakeSeconds;
+        if (!ParseWakeSeconds(value, &seconds)) return false;
+        s->themeOverrides[themeId].wakeSeconds = seconds;
+        return true;
+    }
     const size_t inner = what.find(L'.');
     if (inner == std::wstring_view::npos) return false;
     const std::wstring instance(what.substr(0, inner));
@@ -116,6 +128,34 @@ bool Parse(std::wstring_view text, Scaling *out) {
     else if (text == L"fit") *out = Scaling::Fit;
     else if (text == L"stretch") *out = Scaling::Stretch;
     else return false;
+    return true;
+}
+
+const wchar_t *ToString(WakeStyle style) {
+    switch (style) {
+    case WakeStyle::Zoom: return L"zoom";
+    case WakeStyle::Slide: return L"slide";
+    case WakeStyle::Cut: return L"cut";
+    default: return L"fade";
+    }
+}
+
+bool Parse(std::wstring_view text, WakeStyle *out) {
+    if (text == L"fade") *out = WakeStyle::Fade;
+    else if (text == L"zoom") *out = WakeStyle::Zoom;
+    else if (text == L"slide") *out = WakeStyle::Slide;
+    else if (text == L"cut") *out = WakeStyle::Cut;
+    else return false;
+    return true;
+}
+
+bool ParseWakeSeconds(std::wstring_view text, float *out) {
+    if (text.empty() || text.size() > 8) return false;
+    const std::wstring copy(text);
+    wchar_t *end = nullptr;
+    const double v = std::wcstod(copy.c_str(), &end);
+    if (end != copy.c_str() + copy.size() || !(v >= kWakeSecondsMin && v <= kWakeSecondsMax)) return false;
+    *out = (float)v;
     return true;
 }
 
@@ -219,6 +259,8 @@ void AppendOverrides(const Settings &s, std::wstring *out) {
         const std::wstring prefix = kThemePrefix + themeId + L".";
         if (o.wallpaper) *out += prefix + L"wallpaper = " + *o.wallpaper + L"\r\n";
         if (o.fit) *out += prefix + L"fit = " + ToString(*o.fit) + L"\r\n";
+        if (o.wake) *out += prefix + L"wake = " + ToString(*o.wake) + L"\r\n";
+        if (o.wakeSeconds) *out += prefix + L"wake-duration = " + Format(L"%g", *o.wakeSeconds) + L"\r\n";
         for (const auto &[key, value] : o.wallpaperValues)
             *out += prefix + L"wallpaper." + key + L" = " + value + L"\r\n";
         for (const auto &[instance, io] : o.instances) {

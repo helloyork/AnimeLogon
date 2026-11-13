@@ -126,7 +126,7 @@ const brief = (i: Instance) =>
 
 function Overview() {
   const s = useStore();
-  const sections = useSections('overview', ['wallpaper', 'components']);
+  const sections = useSections('overview', ['wallpaper', 'components', 'wake']);
   const t = s.open!, wp = t.wallpaper, scene = wp.scene;
   const full = t.room <= 0;
   const hoverOn = (id: string, on: boolean) => setState({ hover: on ? { inst: id, pk: null } : getState().hover?.inst === id ? null : getState().hover });
@@ -194,13 +194,28 @@ function Overview() {
         <Button size="sm" variant="ghost" className="add" icon={<Add16Regular />} disabled={full} onClick={() => openDialog({ kind: 'addComponent' })}>添加组件</Button>
         {full && <p className="inote">已有 8 个组件，隐藏的也算在内。</p>}
       </Section>
+      {/* How the lock screen gives way to the sign-in screen when a key or a click wakes it. The
+          lock-screen preview plays it. */}
+      <Section value="wake" title="唤醒" sections={sections}>
+        <div className="props">
+          <ChoiceField id="wake-style" label="过渡" detail="按键或单击后，锁屏怎样让出登录界面。" value={t.wake} modified={t.wakeModified}
+            options={[{ value: 'fade', label: '淡出' }, { value: 'zoom', label: '放大' }, { value: 'slide', label: '上滑' }, { value: 'cut', label: '直接' }]}
+            write={v => edit('wake', { value: v })} onReset={() => edit('wake', { value: t.ownWake })} />
+          {t.wake !== 'cut' && (
+            <NumberField id="wake-seconds" label="时长" min={0.1} max={2} step={0.05} value={String(t.wakeSeconds)} modified={t.wakeSecondsModified}
+              view={{ factor: 1, digits: 2, unit: () => '秒' }}
+              write={(v, gesture) => edit('wakeSeconds', { value: v, ...(gesture ? { gesture } : {}) })}
+              onReset={() => edit('wakeSeconds', { value: t.ownWakeSeconds })} />
+          )}
+        </div>
+      </Section>
     </>
   );
 }
 
 /* --- one component --- */
 function InstanceView({ inst }: { inst: Instance }) {
-  const sections = useSections('component', ['look', 'parts']);
+  const sections = useSections('component', ['look', 'layout', 'parts']);
   const parts = (inst.parts || []).filter(p => (inst.panels ?? 1) > 1 || p.key.includes('.'));
   const own = (inst.settings || []).filter(st => !st.folded);
   const keys = [...(inst.settings || []).map(st => st.id), ...(inst.parts || []).flatMap(p => p.adjustments.map(a => a.key))];
@@ -244,13 +259,22 @@ function InstanceView({ inst }: { inst: Instance }) {
               <div className="props">
                 {single && <PanelField instId={inst.id} pk="p1" attr="size" />}
                 {own.map(st => <SettingField key={st.id} instId={inst.id} setting={st} onReset={() => clearValues(inst.id, [st.id])} />)}
-                {single && <PanelField instId={inst.id} pk="p1" attr="align" />}
               </div>
+            </Section>
+          )}
+          {single && (
+            <Section value="layout" title="排版" sections={sections}>
+              <LayoutFields inst={inst} pk="p1" />
             </Section>
           )}
           {single && (
             <Section value="place" title="位置" sections={sections}>
               <PlaceFields instId={inst.id} pk="p1" />
+            </Section>
+          )}
+          {single && (
+            <Section value="enter" title="出现" sections={sections}>
+              <EnterFields instId={inst.id} pk="p1" />
             </Section>
           )}
           {parts.length > 0 && (
@@ -270,7 +294,7 @@ function InstanceView({ inst }: { inst: Instance }) {
 function PartView({ inst, partKey }: { inst: Instance | SceneControls; partKey: string }) {
   const kind = /^p\d+\.l\d+\.t\d+$/.test(partKey) ? 'text' : /^p\d+$/.test(partKey) ? 'panel' : 'other';
   const sections = useSections(kind === 'text' ? 'text' : kind === 'panel' ? (inst.id === 'wallpaper' ? 'layer' : 'panel') : 'part',
-    kind === 'text' ? ['common'] : ['look', 'place']);
+    kind === 'text' ? ['common'] : ['look', 'layout', 'place']);
   const pt: Part | undefined = inst.parts?.find(p => p.key === partKey);
   if (!pt) return null;
   const attr = (key: string) => key.split('.').pop() || '';
@@ -296,10 +320,18 @@ function PartView({ inst, partKey }: { inst: Instance | SceneControls; partKey: 
           <div className="props">
             <PanelField instId={inst.id} pk={pt.key} attr="size" />
             {look.map(field)}
-            <PanelField instId={inst.id} pk={pt.key} attr="align" />
+            {inst.id === 'wallpaper' && <PanelField instId={inst.id} pk={pt.key} attr="align" />}
           </div>
         </Section>
+        {inst.id !== 'wallpaper' && (
+          <Section value="layout" title="排版" sections={sections}>
+            <LayoutFields inst={inst as Instance} pk={pt.key} />
+          </Section>
+        )}
         <Section value="place" title="位置" sections={sections}><PlaceFields instId={inst.id} pk={pt.key} /></Section>
+        {inst.id !== 'wallpaper' && (
+          <Section value="enter" title="出现" sections={sections}><EnterFields instId={inst.id} pk={pt.key} /></Section>
+        )}
       </>
     );
   } else {
@@ -330,6 +362,48 @@ function PanelField({ instId, pk, attr }: { instId: string; pk: string; attr: st
   const a = adjustment(instId, pk + '.' + attr);
   if (!a) return null;
   return <AdjustmentField instId={instId} a={{ ...a, value: draft?.[a.key] ?? a.value }} onReset={() => clearValues(instId, [a.key])} />;
+}
+
+// How a panel's lines sit together, in one place: how they align, whether a text that may hang
+// beside the others (an AM/PM marker beside the numbers) is left out of the alignment or counted
+// in it, and how far each line is from the one above. Counting the marker in centres the date
+// under the whole first line, and the stage's snap lines then take the panel's full width. The
+// same values are also on each text's own page.
+function LayoutFields({ inst, pk }: { inst: Instance; pk: string }) {
+  const draft = useDraft(inst.id);
+  const rows: { label: string; a: Part['adjustments'][number] }[] = [];
+  for (const p of inst.parts || []) {
+    if (!p.key.startsWith(pk + '.')) continue;
+    for (const a of p.adjustments) {
+      if (a.key.endsWith('.hang')) rows.push({ label: p.label, a });
+      else if (/\.l\d+\.gap$/.test(a.key)) rows.push({ label: `${p.label}行距`, a });
+    }
+  }
+  const align = adjustment(inst.id, pk + '.align');
+  return (
+    <div className="props">
+      {align && <AdjustmentField instId={inst.id} a={{ ...align, value: draft?.[align.key] ?? align.value }} onReset={() => clearValues(inst.id, [align.key])} />}
+      {rows.map(({ label, a }) => (
+        <AdjustmentField key={a.key} instId={inst.id} a={{ ...a, label }} onReset={() => clearValues(inst.id, [a.key])} />
+      ))}
+    </div>
+  );
+}
+
+// How a panel comes in on the logon screen once the wallpaper is up: its way in, how long it
+// waits, how long it takes. The lock-screen preview plays it.
+function EnterFields({ instId, pk }: { instId: string; pk: string }) {
+  const how = adjustment(instId, pk + '.enter');
+  const at = (attr: string) => adjustment(instId, pk + '.' + attr);
+  return (
+    <div className="props">
+      {['enter', 'enter-delay', 'enter-duration'].map(attr => {
+        const a = at(attr);
+        if (!a || (attr === 'enter-duration' && how?.value === 'none')) return null;
+        return <AdjustmentField key={a.key} instId={instId} a={a} onReset={() => clearValues(instId, [a.key])} />;
+      })}
+    </div>
+  );
 }
 
 const POSITION_VIEW = (unit: string): View => ({ factor: 1, digits: 1, unit: () => unit });

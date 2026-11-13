@@ -157,7 +157,8 @@ TEST(ThemeRefusesBadSets) {
     CHECK(!set("<set key=\"color\" value=\"#FFFFFF\" extra=\"1\"/>"));
     CHECK(!set("<set key=\"color\" value=\"#FFFFFF\"><set key=\"a\" value=\"b\"/></set>"));
     CHECK(!set("<value key=\"color\" value=\"#FFFFFF\"/>"));
-    for (const char *key : {"ref", "visible", "Color", "a b", "p1.l1.t1.value", "p1.l1.t1.hang", "p0.size", "p1.q1.size", ""})
+    CHECK(set("<set key=\"p1.l1.t2.hang\" value=\"false\"/>"));
+    for (const char *key : {"ref", "visible", "Color", "a b", "p1.l1.t1.value", "p1.l1.t1.label", "p0.size", "p1.q1.size", ""})
         CHECK(!set("<set key=\"" + std::string(key) + "\" value=\"1\"/>"));
     CHECK(!set("<set key=\"color\" value=\"a&#9;b\"/>"));
     CHECK(set("<set key=\"color\" value=\"" + std::string(128, 'x') + "\"/>"));

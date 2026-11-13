@@ -53,7 +53,9 @@ bool Number(const std::wstring &text, double *out) {
 }
 
 bool Empty(const InstanceOverrides &o) { return !o.ref && !o.visible && o.values.empty(); }
-bool Empty(const ThemeOverrides &o) { return !o.wallpaper && !o.fit && o.wallpaperValues.empty() && o.instances.empty(); }
+bool Empty(const ThemeOverrides &o) {
+    return !o.wallpaper && !o.fit && !o.wake && !o.wakeSeconds && o.wallpaperValues.empty() && o.instances.empty();
+}
 
 // The value `key` has, given `values`: a setting's, or an adjustment's as the page shows it.
 std::wstring ValueFor(const skin::Skin &skin, const skin::Values &values, const std::wstring &key) {
@@ -152,7 +154,8 @@ theme::Theme Library::Edited(const std::wstring &id) const { return theme::Edite
 
 int Library::Modifications(const std::wstring &id) const {
     const ThemeOverrides &o = set_.OverridesFor(id);
-    int n = (o.wallpaper ? 1 : 0) + (o.fit ? 1 : 0) + (int)o.wallpaperValues.size();
+    int n = (o.wallpaper ? 1 : 0) + (o.fit ? 1 : 0) + (o.wake ? 1 : 0) + (o.wakeSeconds ? 1 : 0) +
+            (int)o.wallpaperValues.size();
     for (const auto &[instance, io] : o.instances) n += (io.ref ? 1 : 0) + (io.visible ? 1 : 0) + (int)io.values.size();
     return n;
 }
@@ -415,6 +418,24 @@ bool Library::SetFit(Scaling fit) {
     return true;
 }
 
+bool Library::SetWake(WakeStyle style) {
+    if (open_.empty()) return false;
+    Step(0);
+    if (style == Own(open_).wake) Overrides().wake.reset();
+    else Overrides().wake = style;
+    Tidy();
+    return true;
+}
+
+bool Library::SetWakeSeconds(float seconds, int gesture) {
+    if (open_.empty() || !(seconds >= kWakeSecondsMin && seconds <= kWakeSecondsMax)) return false;
+    Step(gesture);
+    if (std::fabs(seconds - Own(open_).wakeSeconds) < 0.001f) Overrides().wakeSeconds.reset();
+    else Overrides().wakeSeconds = seconds;
+    Tidy();
+    return true;
+}
+
 bool Library::Reset() {
     if (open_.empty() || !set_.themeOverrides.count(open_)) return false;
     Step(0);
@@ -594,6 +615,7 @@ void Library::WriteLibrary(json::Writer &w) const {
         w.Member(L"id", e.id).Member(L"name", e.name).Member(L"author", e.author).Member(L"builtIn", e.builtIn);
         w.Member(L"wallpaper", WallpaperName(edited.wallpaper)).Member(L"wallpaperKind", WallpaperKindName(*this, edited.wallpaper));
         w.Member(L"wallpaperRef", edited.wallpaper).Member(L"fit", ToString(edited.fit));
+        w.Member(L"wake", ToString(edited.wake)).Member(L"wakeSeconds", (double)edited.wakeSeconds);
         const auto *wallpaper=Wallpaper(edited.wallpaper);
         w.Member(L"sceneStatic",wallpaper && wallpaper->kind == WallpaperKind::Scene && wallpaper->sceneFps == 0);
         w.Member(L"summary", summary.empty() ? std::wstring(L"只有壁纸") : summary);
@@ -670,6 +692,9 @@ void Library::WriteOpen(json::Writer &w) const {
     w.Member(L"fit", ToString(edited.fit)).Member(L"fitModified", o.fit.has_value());
     // What the theme itself says, to put back.
     w.Member(L"ownWallpaper", own.wallpaper).Member(L"ownFit", ToString(own.fit));
+    w.Member(L"wake", ToString(edited.wake)).Member(L"wakeModified", o.wake.has_value());
+    w.Member(L"wakeSeconds", (double)edited.wakeSeconds).Member(L"wakeSecondsModified", o.wakeSeconds.has_value());
+    w.Member(L"ownWake", ToString(own.wake)).Member(L"ownWakeSeconds", (double)own.wakeSeconds);
     w.Member(L"room", (int)(theme::kMaxInstances - std::min(theme::kMaxInstances, edited.components.size())));
 
     w.Key(L"instances").BeginArray();
@@ -713,8 +738,21 @@ void Library::WriteOpen(json::Writer &w) const {
             }
             w.EndArray();
 
+            // What a switch of the component's own turns on and off (the clock's 背景暗晕 is its
+            // backdrop's 浓度) is set by that switch alone: offered again among the parts, it was a
+            // second place for the same value, and setting it there left the switch doing nothing.
+            // It still shows where it was set by hand before, so that it can be put back.
+            std::set<std::wstring> switched;
+            for (const skin::Setting &s : skin.settings)
+                if (s.kind == skin::SettingKind::Toggle)
+                    for (const std::wstring &k : skin::AdjustmentsOf(skin, s.id)) switched.insert(k);
             w.Key(L"parts").BeginArray();
-            for (const skin::Part &p : parts) {
+            for (const skin::Part &whole : parts) {
+                skin::Part p = whole;
+                p.adjustments.erase(std::remove_if(p.adjustments.begin(), p.adjustments.end(),
+                                                   [&](const skin::Adjustment &a) { return switched.count(a.key) && !mine.count(a.key); }),
+                                    p.adjustments.end());
+                if (p.adjustments.empty()) continue;
                 bool modified = false;
                 for (const skin::Adjustment &a : p.adjustments) modified = modified || mine.count(a.key) || fedModified.count(a.key);
                 w.BeginObject().Member(L"key", p.key).Member(L"label", p.label).Member(L"modified", modified);

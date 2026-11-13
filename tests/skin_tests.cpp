@@ -128,9 +128,12 @@ TEST(SkinTakesAdjustments) {
     CHECK(p.shadows[0].opacity == 0.5f);
     // Out of range, of the wrong kind, or not adjustable: ignored.
     r = skin::Resolve(s, {{L"p1.size", L"99"}, {L"p1.l1.t1.weight", L"heavy"}, {L"p1.l1.t1.value", L"x"},
-                          {L"p1.l1.t2.hang", L"false"}});
+                          {L"p1.l1.t2.hang", L"maybe"}});
     CHECK(r.panels[0].size == 10.0f && r.panels[0].lines[0].texts[0].weight == 600);
     CHECK(r.panels[0].lines[0].texts[0].value == L"{time}" && r.panels[0].lines[0].texts[1].hang);
+    // Whether the AM/PM marker hangs beside the numbers or counts in the alignment.
+    CHECK(!skin::Resolve(s, {{L"p1.l1.t2.hang", L"false"}}).panels[0].lines[0].texts[1].hang);
+    CHECK(!skin::Resolve(s, {}).panels[0].lines[0].texts[0].hang);
 
     CHECK(skin::IsAdjustmentKey(L"p1.l2.t1.weight") && skin::IsAdjustmentKey(L"p1.b.opacity"));
     CHECK(skin::IsAdjustmentKey(L"p2.s1.blur") && skin::IsAdjustmentKey(L"p1.offset-x"));
@@ -155,6 +158,10 @@ TEST(SkinOffersItsParts) {
     // The date's line carries its distance from the line above; a first text has no space before it.
     CHECK(find(parts[3], L"p1.l2.gap") && !find(parts[1], L"p1.l1.gap") && !find(parts[1], L"p1.l1.t1.space"));
     CHECK(find(parts[2], L"p1.l1.t2.space"));
+    // Only a text the component lets hang offers whether it hangs: AM/PM does, the time does not.
+    const skin::Adjustment *hang = find(parts[2], L"p1.l1.t2.hang");
+    CHECK(hang && !find(parts[1], L"p1.l1.t1.hang") && !find(parts[3], L"p1.l2.t1.hang"));
+    CHECK(hang && skin::Effective(s, {}, *hang) == L"true" && skin::Effective(s, {{L"p1.l1.t2.hang", L"false"}}, *hang) == L"false");
     const skin::Adjustment *weight = find(parts[1], L"p1.l1.t1.weight");
     CHECK(weight && skin::Effective(s, {}, *weight) == L"600");
     CHECK(skin::Effective(s, {{L"p1.l1.t1.weight", L"350"}}, *weight) == L"350");

@@ -294,6 +294,23 @@ TEST(SkinPanelsSayThePointTheyAreHeldBy) {
         // The texts are not placed by an anchor.
         for (const SkinView::Bound &t : bounds) CHECK(t.key == L"p1" || !t.holds);
     }
+    // Counted in, the marker moves the whole first line onto the centre: the panel is held by the
+    // middle of its full width, and the date is centred under the time and the marker together.
+    {
+        Picture out;
+        std::vector<SkinView::Bound> bounds;
+        CHECK(preview.Render(background, skin::Resolve(skin::Default(), {{L"p1.anchor", L"top"}, {L"p1.l1.t2.hang", L"false"}}),
+                             ClockStyle{}, us, now, &out, &bounds));
+        const auto at = [&](const wchar_t *key) {
+            return std::find_if(bounds.begin(), bounds.end(), [&](const SkinView::Bound &b) { return b.key == key; });
+        };
+        const auto p1 = at(L"p1"), time = at(L"p1.l1.t1"), marker = at(L"p1.l1.t2"), date = at(L"p1.l2.t1");
+        CHECK(p1 != bounds.end() && time != bounds.end() && marker != bounds.end() && date != bounds.end());
+        if (p1 != bounds.end() && time != bounds.end() && marker != bounds.end() && date != bounds.end()) {
+            CHECK(about(p1->holdX[1], 320.0f) && about(p1->holdX[1], (p1->rect.left + p1->rect.right) / 2));
+            CHECK(about((time->rect.left + marker->rect.right) / 2, (date->rect.left + date->rect.right) / 2));
+        }
+    }
     if (SUCCEEDED(co)) CoUninitialize();
 }
 

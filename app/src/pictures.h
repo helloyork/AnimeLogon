@@ -47,9 +47,11 @@ public:
     bool Wallpaper(const std::wstring &ref, animelogon::Scaling fit, UINT width, UINT height, animelogon::Picture *out);
     // The theme as a display of that size shows it. With `screens`, the picture is a wall of
     // displays, as spanning shows it: the wallpaper fitted to all of it, the components drawn on
-    // each screen that shows them as on a display of that screen's size.
+    // each screen that shows them as on a display of that screen's size. `only`, as
+    // "<instance>.<panel>" (clock.p1), draws that one panel and no other component.
     bool Theme(const animelogon::theme::Theme &theme, UINT width, UINT height, Draw draw, animelogon::Picture *out,
-               std::vector<Bound> *bounds = nullptr, const std::vector<Screen> *screens = nullptr);
+               std::vector<Bound> *bounds = nullptr, const std::vector<Screen> *screens = nullptr,
+               const std::wstring &only = L"");
 
     // Drops what was read from the stores, after they changed.
     void Forget() { stills_.clear(); }

@@ -98,6 +98,9 @@ public:
     bool RemoveInstance(const std::wstring &instance);
     bool SetWallpaper(const std::wstring &ref);
     bool SetFit(animelogon::Scaling fit);
+    // How the open theme gives way to the sign-in screen when woken, and over how long.
+    bool SetWake(animelogon::WakeStyle style);
+    bool SetWakeSeconds(float seconds, int gesture);
     bool Reset();
     bool Undo();
     bool Redo();

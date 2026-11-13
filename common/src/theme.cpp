@@ -73,12 +73,16 @@ public:
             }
         }
         if (!format || theme_->name.empty()) return Fail(root, L"<theme> needs format and name");
-        bool wallpaper = false;
+        bool wallpaper = false, wake = false;
         for (const xml::Element &e : root.children) {
             if (e.name == L"wallpaper") {
                 if (wallpaper) return Fail(e, L"<wallpaper> must come once");
                 wallpaper = true;
                 if (!Wallpaper(e)) return false;
+            } else if (e.name == L"wake") {
+                if (wake) return Fail(e, L"<wake> may come once");
+                wake = true;
+                if (!Wake(e)) return false;
             } else if (e.name == L"component") {
                 if (theme_->components.size() >= kMaxInstances) return Fail(e, L"too many components");
                 if (!Component(e)) return false;
@@ -111,6 +115,20 @@ private:
         if (!IsWallpaperRefIn(form_, *ref)) return Fail(e, L"a bad wallpaper ref " + *ref);
         if (!animelogon::Parse(*fit, &theme_->fit)) return Fail(e, L"a bad fit " + *fit);
         theme_->wallpaper = *ref;
+        return true;
+    }
+
+    bool Wake(const xml::Element &e) {
+        if (!e.children.empty()) return Fail(e, L"<wake> holds nothing");
+        for (const auto &[name, value] : e.attributes) {
+            if (name == L"style") {
+                if (!animelogon::Parse(value, &theme_->wake)) return Fail(e, L"a bad wake style " + value);
+            } else if (name == L"duration") {
+                if (!ParseWakeSeconds(value, &theme_->wakeSeconds)) return Fail(e, L"a bad wake duration " + value);
+            } else {
+                return Fail(e, L"unknown attribute " + name + L" on <wake>");
+            }
+        }
         return true;
     }
 
@@ -259,6 +277,8 @@ Theme Edited(const Theme &theme, const ThemeOverrides &overrides, std::vector<st
     Theme e = theme;
     if (overrides.wallpaper) e.wallpaper = *overrides.wallpaper;
     if (overrides.fit) e.fit = *overrides.fit;
+    if (overrides.wake) e.wake = *overrides.wake;
+    if (overrides.wakeSeconds) e.wakeSeconds = *overrides.wakeSeconds;
     for (const auto &[id, o] : overrides.instances) {
         Instance *instance = nullptr;
         for (Instance &i : e.components)
@@ -291,6 +311,14 @@ std::string Normalize(const Theme &theme) {
     wallpaper.name = L"wallpaper";
     wallpaper.attributes = {{L"ref", theme.wallpaper}, {L"fit", ToString(theme.fit)}};
     root.children.push_back(std::move(wallpaper));
+    // Written only when it is not the default, so a theme that never set it stays as it was.
+    if (theme.wake != WakeStyle::Fade || theme.wakeSeconds != kWakeSeconds) {
+        xml::Element wake;
+        wake.name = L"wake";
+        if (theme.wake != WakeStyle::Fade) wake.attributes.emplace_back(L"style", ToString(theme.wake));
+        if (theme.wakeSeconds != kWakeSeconds) wake.attributes.emplace_back(L"duration", Format(L"%g", theme.wakeSeconds));
+        root.children.push_back(std::move(wake));
+    }
     for (const Instance &i : theme.components) {
         xml::Element c;
         c.name = L"component";

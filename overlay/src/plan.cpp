@@ -71,6 +71,8 @@ Plan Build(const animelogon::Settings &settings, const std::vector<animelogon::M
 
     const Resolution &first = resolve(monitors.front());
     plan.componentDisplays = first.theme.componentDisplays;
+    plan.wake = first.theme.wake;
+    plan.wakeSeconds = first.theme.wakeSeconds;
     const bool span = settings.monitorMode == animelogon::MonitorMode::Span;
     const RECT bounds = animelogon::VirtualBounds(monitors);
     for (const animelogon::MonitorInfo &m : monitors) {

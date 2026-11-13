@@ -46,6 +46,8 @@ export interface ThemeEntry {
   wallpaperKind: WallpaperKind;
   wallpaperRef: string;
   fit: Fit;
+  wake: Wake;
+  wakeSeconds: number;
   sceneStatic: boolean;
   summary: string;          // the visible components, or 只有壁纸
   modifications: number;
@@ -75,6 +77,8 @@ export interface Library {
 }
 
 export type Fit = 'fill' | 'fit' | 'stretch';
+// How the lock screen gives way to the sign-in screen when woken.
+export type Wake = 'fade' | 'zoom' | 'slide' | 'cut';
 
 export interface Option {
   value: string;
@@ -158,6 +162,12 @@ export interface OpenTheme {
   fitModified: boolean;
   ownWallpaper: string;
   ownFit: Fit;
+  wake: Wake;
+  wakeModified: boolean;
+  wakeSeconds: number;
+  wakeSecondsModified: boolean;
+  ownWake: Wake;
+  ownWakeSeconds: number;
   room: number;       // how many more components fit
   instances: Instance[];
 }
