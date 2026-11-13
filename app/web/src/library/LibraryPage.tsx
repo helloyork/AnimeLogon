@@ -1,6 +1,6 @@
 // The theme library: the theme in use, large, then every theme. A click on a theme puts it in use (D41).
 import { useState, type CSSProperties } from 'react';
-import { Menu, MenuDivider, MenuItem, MenuList, MenuPopover, MenuTrigger } from '@fluentui/react-components';
+import { Menu, MenuDivider, MenuItem, MenuList, MenuPopover, MenuTrigger, useRestoreFocusTarget } from '@fluentui/react-components';
 import { Add16Regular, Edit16Regular, MoreHorizontal16Regular, Play16Regular, Warning16Regular } from '@fluentui/react-icons';
 import { UacShield } from '../icons';
 import { SceneFrames, WallpaperVideo } from '../media';
@@ -10,6 +10,7 @@ import {
   applyFlow,
   copyFlow,
   deleteFlow,
+  importFlow,
   kindName,
   openDialog,
   openTheme,
@@ -23,7 +24,6 @@ import {
   themeOf,
   usedOn,
   useStore,
-  workshopFlow,
 } from '../store';
 import { list, t as tr } from '../i18n';
 import type { ThemeEntry } from '../types';
@@ -38,6 +38,7 @@ const moving = (t: ThemeEntry) => t.wallpaperKind === 'video' || (t.wallpaperKin
 
 export function LibraryPage() {
   const s = useStore();
+  const restoreFocus = useRestoreFocusTarget();
   const lib = s.lib!;
   const others = list(s.env.others.filter(o => o.on).map(o => o.name));
   return (
@@ -46,8 +47,9 @@ export function LibraryPage() {
         <div className="pagehead">
           <h1 className="t-title">{tr('library.title')}</h1>
           <div className="actions">
-            <Button shield onClick={() => send('import')}>{tr('library.import')}</Button>
-            {s.env.wallpaperEngine && <Button onClick={() => workshopFlow(false)}>{tr('library.import_we')}</Button>}
+            {/* Asks what to import first; the administrator's approval comes after that choice. The
+                focus comes back here when the question is closed. */}
+            <Button {...restoreFocus} onClick={() => importFlow()}>{tr('library.import')}</Button>
             <Button icon={<Add16Regular />} onClick={() => openDialog({ kind: 'newTheme' })}>{tr('library.new')}</Button>
           </div>
         </div>

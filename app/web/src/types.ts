@@ -20,12 +20,18 @@ export interface Environment {
   user: string;        // the name Windows' sign-in screen greets this person by
   accountPicture: boolean;  // they have an account picture, served as `account`
   wallpaperEngine: boolean; // Wallpaper Engine keeps wallpapers on this computer (app/src/workshop.h)
+  // The file types each kind of import takes, as extensions without the dot: the ones the file
+  // dialog for that kind lists (app/src/importable.h).
+  importable: Record<ImportKind, string[]>;
   lang: string;        // the language the page is shown in: zh-Hans, zh-Hant, en or ja (i18n.ts)
   langChoice: string;  // the person's own choice of it, or empty when it follows Windows
   monitors: Monitor[];
   fonts: { name: string; stored: string }[];
   devices: { id: string; name: string }[];
 }
+
+// What a file brought in as a new theme can be; the `import` message names one.
+export type ImportKind = 'video' | 'picture' | 'package';
 
 export type MonitorMode = 'duplicate' | 'span' | 'per-monitor';
 
