@@ -67,7 +67,7 @@ export function viewFor(key: string, step: number): View {
     case 'tracking': case 'x': case 'y': case 'blur': return plain('em', 3);
     case 'space': case 'gap': return plain('em', 2);
     case 'enter-delay': case 'enter-duration': return plain('秒', 2);
-    case 'opacity': return { factor: 100, digits: 0, unit: v => (/\.(s\d+|b)\.opacity$/.test(key) && !v ? '不画' : '%') };
+    case 'opacity': return { factor: 100, digits: 0, unit: v => (/\.(s\d+|b)\.opacity$/.test(key) && !v ? '无' : '%') };
   }
   return plain('', decimals(step));
 }
@@ -158,7 +158,7 @@ export function FontField({ id, label, detail, value, modified, write, onReset }
   const { env } = useStore();
   const options = useMemo(() => [{ value: '', label: DEFAULT_FONT }, ...env.fonts.map(f => ({ value: f.stored, label: f.name }))], [env.fonts]);
   return (
-    <Prop id={id} label={label} detail={detail ?? '只列出为所有用户安装的字体。'} modified={modified} onReset={onReset}>
+    <Prop id={id} label={label} detail={detail ?? '仅列出为所有用户安装的字体。'} modified={modified} onReset={onReset}>
       <SearchSelect id={id} label={label} options={options} value={value} onChange={write} placeholder="搜索字体" render={o => ({ fontFamily: fontStack(o.value) })} />
     </Prop>
   );

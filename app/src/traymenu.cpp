@@ -49,7 +49,7 @@ std::wstring ShowingNow(const Library &library, const std::vector<MonitorInfo> &
     if (library.settings().monitorMode == MonitorMode::PerMonitor && !monitors.empty()) {
         id = ThemeOn(library, monitors.front());
         for (const MonitorInfo &m : monitors)
-            if (ThemeOn(library, m) != id) return L"每块屏幕各自使用主题";
+            if (ThemeOn(library, m) != id) return L"每个屏幕单独设置主题";
     }
     const ThemeEntry *e = library.Entry(id);
     return e ? e->name : std::wstring();

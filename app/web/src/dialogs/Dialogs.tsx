@@ -2,12 +2,13 @@
 // the focus inside, closes on Esc and animates itself in and out; what is in it is the page's own.
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Dialog, DialogActions, DialogBody, DialogContent, DialogSurface, DialogTitle } from '@fluentui/react-components';
-import { FolderOpen16Regular } from '@fluentui/react-icons';
+import { FolderOpen16Regular, Video16Regular } from '@fluentui/react-icons';
 import { UacShield } from '../icons';
 import { send, wallpaperUrl } from '../native';
 import { edit } from '../preview';
-import { apply, closeDialog, screenTheme, themeOf, useStore, type Dialog as DialogState } from '../store';
+import { apply, closeDialog, screenTheme, themeOf, useStore, workshopFlow, type Dialog as DialogState } from '../store';
 import { Button, cx, TextInput } from '../ui/controls';
+import { WorkshopDialog } from './Workshop';
 
 export function Dialogs() {
   const { dialogs } = useStore();
@@ -37,8 +38,8 @@ function One({ d }: { d: DialogState }) {
   switch (d.kind) {
     case 'problem':
       return (
-        <Frame d={d} title="出现问题" actions={<Button variant="primary" onClick={close}>确定</Button>}>
-          <p className="selectable">{d.text}</p>
+        <Frame d={d} title="发生错误" actions={<Button variant="primary" onClick={close}>确定</Button>}>
+          <p className="selectable dlg-lines">{d.text}</p>
         </Frame>
       );
     case 'confirm':
@@ -62,6 +63,8 @@ function One({ d }: { d: DialogState }) {
       return <WallpaperDialog d={d} />;
     case 'addComponent':
       return <AddComponentDialog d={d} />;
+    case 'workshop':
+      return <WorkshopDialog d={d} />;
   }
 }
 
@@ -111,21 +114,21 @@ function MonitorDialog({ d }: { d: Extract<DialogState, { kind: 'monitor' }> }) 
         {s.env.monitors.map(m => (
           <button key={m.key} type="button" className="choice" onClick={() => pick(m.key)}>
             <span className="ellipsis">{m.name + (m.primary ? '（主）' : '')}</span>
-            <span className="t-cap3 ellipsis">{`${m.width}×${m.height} · 现在是「${themeOf(screenTheme(m.key))?.name ?? ''}」`}</span>
+            <span className="t-cap3 ellipsis">{`${m.width}×${m.height} · 当前为「${themeOf(screenTheme(m.key))?.name ?? ''}」`}</span>
           </button>
         ))}
         <button type="button" className="choice" onClick={() => pick('all')}>
           <span>所有屏幕</span>
-          <span className="t-cap3">每块屏幕都用这个主题</span>
+          <span className="t-cap3">所有屏幕使用此主题</span>
         </button>
       </div>
     </Frame>
   );
 }
 
-// The wallpapers already here, the chosen one outlined and focused first; the last cell brings in
-// a new one from a file.
-function WallpaperGrid({ current, onPick, onImport, importLabel, focusCurrent }: { current: string; onPick: (id: string) => void; onImport: () => void; importLabel: string; focusCurrent?: boolean }) {
+// The wallpapers already here, the chosen one outlined and focused first; the last cells bring in
+// a new one from a file or, where there is Wallpaper Engine, from its videos.
+function WallpaperGrid({ current, onPick, onImport, importLabel, onWorkshop, focusCurrent }: { current: string; onPick: (id: string) => void; onImport: () => void; importLabel: string; onWorkshop: () => void; focusCurrent?: boolean }) {
   const s = useStore();
   // The dialog puts the focus on its first control as it opens; where the grid is the choice, it
   // goes to the wallpaper chosen now instead, once the dialog has done so.
@@ -149,6 +152,13 @@ function WallpaperGrid({ current, onPick, onImport, importLabel, focusCurrent }:
         <span className="ellipsis shielded"><UacShield />{importLabel}</span>
         <span className="t-cap3 ellipsis">图片或视频</span>
       </button>
+      {s.env.wallpaperEngine && (
+        <button type="button" className="pick" onClick={onWorkshop}>
+          <span className="pic browse"><Video16Regular /></span>
+          <span className="ellipsis">Wallpaper Engine…</span>
+          <span className="t-cap3 ellipsis">视频壁纸</span>
+        </button>
+      )}
     </div>
   );
 }
@@ -169,8 +179,9 @@ function NewThemeDialog({ d }: { d: Extract<DialogState, { kind: 'newTheme' }> }
         <Labelled label="名称" htmlFor="dlg-new-name">
           <TextInput id="dlg-new-name" value="新主题" maxLength={40} autoFocus live={setName} />
         </Labelled>
-        <Labelled label="壁纸" hint="新主题带一个时钟。">
-          <WallpaperGrid current={wallpaper} onPick={setWallpaper} importLabel="导入为新主题…" onImport={() => { closeDialog(d.id); send('import'); }} />
+        <Labelled label="壁纸" hint="新主题默认包含一个时钟组件。">
+          <WallpaperGrid current={wallpaper} onPick={setWallpaper} importLabel="导入为新主题…" onImport={() => { closeDialog(d.id); send('import'); }}
+            onWorkshop={() => { closeDialog(d.id); workshopFlow(false); }} />
         </Labelled>
       </div>
     </Frame>
@@ -182,7 +193,7 @@ function WallpaperDialog({ d }: { d: Extract<DialogState, { kind: 'wallpaper' }>
   return (
     <Frame d={d} title="更换壁纸" wide actions={<Button onClick={() => closeDialog(d.id)}>取消</Button>}>
       <WallpaperGrid current={s.open?.wallpaper.ref ?? ''} focusCurrent onPick={ref => { closeDialog(d.id); edit('wallpaper', { ref }); }} importLabel="从文件导入…"
-        onImport={() => { closeDialog(d.id); send('importWallpaper'); }} />
+        onImport={() => { closeDialog(d.id); send('importWallpaper'); }} onWorkshop={() => { closeDialog(d.id); workshopFlow(true); }} />
     </Frame>
   );
 }
@@ -205,10 +216,10 @@ function AddComponentDialog({ d }: { d: Extract<DialogState, { kind: 'addCompone
           ))}
           <button type="button" className="choice" onClick={() => { closeDialog(d.id); send('importComponent', { add: true }); }}>
             <span>从文件导入…</span>
-            <span className="t-cap3">一个 .xml 组件文件</span>
+            <span className="t-cap3">.xml 组件文件</span>
           </button>
         </div>
-        <p className="t-cap3">{`这个主题还能添加 ${s.open?.room ?? 0} 个组件。`}</p>
+        <p className="t-cap3">{`此主题还可添加 ${s.open?.room ?? 0} 个组件。`}</p>
       </div>
     </Frame>
   );

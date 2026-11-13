@@ -6,6 +6,7 @@ import { WindowButtons, WindowTitle } from './frame';
 import { LibraryPage } from './library/LibraryPage';
 import { LockPreview } from './lock/LockPreview';
 import { SettingsPage } from './settings/SettingsPage';
+import { send } from './native';
 import { onToast, setTab, useStore, type Tab } from './store';
 import { darkTheme, lightTheme, useDark } from './theme';
 import { Button, cx, Progress } from './ui/controls';
@@ -21,7 +22,7 @@ class Fallback extends Component<{ children: ReactNode }, { failed: string | nul
     if (!this.state.failed) return this.props.children;
     return (
       <div className="fallback">
-        <h1 className="t-h">页面出现问题</h1>
+        <h1 className="t-h">页面发生错误</h1>
         <p className="t-cap selectable">{this.state.failed}</p>
         <Button variant="primary" onClick={() => location.reload()}>重新载入</Button>
       </div>
@@ -80,6 +81,7 @@ function BusyBar() {
       <span className="t-cap ellipsis">{busy.label}</span>
       <Progress value={busy.percent} label={busy.label} />
       <span className="t-cap num">{busy.percent}%</span>
+      <Button size="sm" onClick={() => send('cancelImport')}>取消</Button>
     </div>
   );
 }

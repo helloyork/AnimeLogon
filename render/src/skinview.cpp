@@ -567,9 +567,9 @@ bool SkinView::Draw(ID2D1Bitmap1 *target, UINT width, UINT height, size_t slot, 
                                                   D2D1::IdentityMatrix(), shown),
                            nullptr);
         if (b.backdrop) dc_->FillEllipse(b.backdropArea, b.backdrop.Get());
-        for (size_t k = 0; k < panel.shadows.size() && k < shadows_.size(); ++k) {
-            const skin::Shadow &sh = panel.shadows[k];
-            ID2D1Effect *effect = shadows_[k].Get();
+        for (size_t n = 0; n < panel.shadows.size() && n < shadows_.size(); ++n) {
+            const skin::Shadow &sh = panel.shadows[n];
+            ID2D1Effect *effect = shadows_[n].Get();
             const D2D1_COLOR_F c = ColorOf(sh.color, sh.opacity);
             effect->SetInput(0, b.text.Get());
             effect->SetValue(D2D1_SHADOW_PROP_BLUR_STANDARD_DEVIATION, std::max(0.5f, sh.blur * b.px));

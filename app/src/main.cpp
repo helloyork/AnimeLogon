@@ -58,7 +58,7 @@ bool IsAppArgument(const std::wstring &a) { return a == L"--sandbox" || a == L"-
 // An empty sandbox starts as a fresh installation would: its stores and default settings.
 bool PrepareSandbox(const std::wstring &dir) {
     if (!paths::IsPlainAbsolute(dir) || !paths::CreateDirectories(dir)) {
-        MessageBoxW(nullptr, L"--sandbox 后面要跟一个本机目录的完整路径。", L"AnimeLogon", MB_OK | MB_ICONWARNING);
+        MessageBoxW(nullptr, L"--sandbox 参数需要指定本地目录的完整路径。", L"AnimeLogon", MB_OK | MB_ICONWARNING);
         return false;
     }
     paths::UseSandbox(dir);

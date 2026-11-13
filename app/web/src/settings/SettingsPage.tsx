@@ -88,7 +88,7 @@ export function SettingsPage() {
 
         {/* The switch for the whole program comes first. */}
         <Group>
-          <Row title="启用 AnimeLogon" description="关闭后锁屏恢复 Windows 默认，主题和设置保留。" anchor="switch">
+          <Row title="启用 AnimeLogon" description="关闭后锁屏恢复为 Windows 默认界面，主题和设置将保留。" anchor="switch">
             {() => (
               <>
                 <UacShield />
@@ -118,19 +118,19 @@ export function SettingsPage() {
         </Group>
 
         <Group title="组件">
-          <Row title="显示组件" description="关闭后所有主题只显示壁纸。">
+          <Row title="显示组件" description="关闭后所有主题仅显示壁纸。">
             {() => <Switch label="显示组件" checked={set.components} onChange={v => global('components', v)} />}
           </Row>
-          <Row title="显示正在播放" description="只在你自己锁屏时显示歌名和歌手，别的账户和开机登录界面上看不到。">
+          <Row title="显示正在播放" description="仅在你锁定自己的账户时显示标题和艺术家，其他账户和开机登录界面不显示。">
             {() => <Switch label="显示正在播放" checked={set.media} onChange={v => global('media', v)} />}
           </Row>
         </Group>
 
         <Group title="屏幕">
-          <Row title="多显示器" dim={!several} description={`这台电脑有 ${s.env.monitors.length} 块显示器。`}>
+          <Row title="多显示器" dim={!several} description={`此电脑连接了 ${s.env.monitors.length} 台显示器。`}>
             {() => (
               <Select label="多显示器" value={set.monitorMode} disabled={!several} onChange={v => global('monitorMode', v)}
-                options={choices([['duplicate', '每块屏幕相同'], ['span', '横跨所有屏幕'], ['per-monitor', '每块屏幕各自']])} />
+                options={choices([['duplicate', '所有屏幕相同'], ['span', '跨屏显示'], ['per-monitor', '每个屏幕单独设置']])} />
             )}
           </Row>
           {perMonitor() && s.env.monitors.map(m => (
@@ -143,18 +143,18 @@ export function SettingsPage() {
           ))}
           {/* Only a choice where there is more than one display to choose from. */}
           {several && (
-            <Row title="组件显示在" description="壁纸显示在每块屏幕上，组件只显示在这里。">
+            <Row title="组件显示位置" description="壁纸显示在所有屏幕上，组件仅显示在所选屏幕。">
               {() => (
-                <Select label="组件显示在" value={set.componentDisplays} onChange={v => global('componentDisplays', v)}
-                  options={choices([['auto', '密码框所在的屏幕'], ['primary', '主屏幕'], ['all', '所有屏幕']])} />
+                <Select label="组件显示位置" value={set.componentDisplays} onChange={v => global('componentDisplays', v)}
+                  options={choices([['auto', '显示登录界面的屏幕'], ['primary', '主屏幕'], ['all', '所有屏幕']])} />
               )}
             </Row>
           )}
           {several && (
-            <Row title="唤醒后其他屏幕" description="输入密码时 Windows 只用一块屏幕，其他屏幕显示这里选的内容，直到登录。">
+            <Row title="其他屏幕的登录背景" description="输入密码时，Windows 仅在一个屏幕上显示登录界面。此项设置其他屏幕在登录完成前显示的内容。">
               {() => (
-                <Select label="唤醒后其他屏幕" value={set.otherDisplays} onChange={v => global('otherDisplays', v)}
-                  options={choices([['blur', '模糊的壁纸'], ['picture', '壁纸'], ['black', '黑屏']])} />
+                <Select label="其他屏幕的登录背景" value={set.otherDisplays} onChange={v => global('otherDisplays', v)}
+                  options={choices([['blur', '模糊壁纸'], ['picture', '壁纸'], ['black', '黑屏']])} />
               )}
             </Row>
           )}
@@ -173,11 +173,11 @@ export function SettingsPage() {
                 )}
               </Row>
               <Row sub title="总音量">{id => <Volume labelledBy={id} value={set.audio.volume} onDone={v => global('audio.volume', v)} />}</Row>
-              <Row sub title="视频的声音" description="播放视频壁纸自带的声音。">
-            {() => <Switch label="视频的声音" checked={set.audio.video} onChange={v => global('audio.video', v)} />}
+              <Row sub title="视频声音" description="播放视频壁纸的音轨。">
+            {() => <Switch label="视频声音" checked={set.audio.video} onChange={v => global('audio.video', v)} />}
               </Row>
               {set.audio.video && (
-                <Row sub title="视频声音的音量">{id => <Volume labelledBy={id} value={set.audio.videoVolume} onDone={v => global('audio.videoVolume', v)} />}</Row>
+                <Row sub title="视频音量">{id => <Volume labelledBy={id} value={set.audio.videoVolume} onDone={v => global('audio.videoVolume', v)} />}</Row>
               )}
             </>
           )}
@@ -195,7 +195,7 @@ export function SettingsPage() {
         </Group>
 
         <Group title="系统">
-          <Row title="日志" description="反馈问题时附上。">{() => <Button size="sm" onClick={() => send('logs')}>打开</Button>}</Row>
+          <Row title="日志" description="反馈问题时请附上日志文件。">{() => <Button size="sm" onClick={() => send('logs')}>打开</Button>}</Row>
           <Row title="卸载 AnimeLogon" description="移除本程序并还原所有系统更改。">
             {() => <Button size="sm" shield danger onClick={() => send('uninstall')}>卸载</Button>}
           </Row>

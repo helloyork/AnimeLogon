@@ -42,6 +42,7 @@ animelogon_add_executable(app WIN32
         src/resources.cpp
         src/tray.cpp
         src/traymenu.cpp
+        src/workshop.cpp
         ${CMAKE_CURRENT_BINARY_DIR}/web.rc
         ${config_src}/commit.cpp
         ${config_src}/store.cpp

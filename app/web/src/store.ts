@@ -5,7 +5,7 @@ import { useSyncExternalStore } from 'react';
 import { onCalmChange } from './motion';
 import { listen, send } from './native';
 import { onPreview, pv, requestPreviewAgain, resetPreview } from './preview';
-import type { Environment, FromNative, Instance, Library, OpenTheme, SceneControls } from './types';
+import type { Environment, FromNative, Instance, Library, OpenTheme, SceneControls, Workshop } from './types';
 
 export type Tab = 'mine' | 'settings';
 
@@ -22,6 +22,7 @@ export type Dialog = { id: number } & (
   | { kind: 'newTheme' }
   | { kind: 'wallpaper' }
   | { kind: 'addComponent' }
+  | { kind: 'workshop'; wallpaper: boolean }  // with `wallpaper`, one, for the open theme
 );
 
 export interface State {
@@ -39,13 +40,14 @@ export interface State {
   tick: number;                     // the minute, so pictures with a clock are fetched again
   dialogs: Dialog[];
   lock: { theme: string; ratio?: number } | null;
+  workshop: Workshop | null;        // Wallpaper Engine's wallpapers, as last looked for
   // A setting to point out, because the icon in the system tray opened the app at it. A new object
   // each time it is asked for; the settings page clears it once it has.
   reveal: { what: 'switch' } | null;
 }
 
 let state: State = {
-  env: { on: false, installed: false, version: '', user: '', accountPicture: false, monitors: [], fonts: [], devices: [] },
+  env: { on: false, installed: false, version: '', user: '', accountPicture: false, wallpaperEngine: false, monitors: [], fonts: [], devices: [] },
   lib: null,
   open: null,
   clock: '',
@@ -59,6 +61,7 @@ let state: State = {
   tick: 0,
   dialogs: [],
   lock: null,
+  workshop: null,
   reveal: null,
 };
 const listeners = new Set<() => void>();
@@ -184,7 +187,7 @@ export function resetFlow(id: string) {
   if (!t) return;
   openDialog({
     kind: 'confirm', title: '恢复默认', action: '恢复默认',
-    body: [`清除对「${t.name}」的 ${t.modifications} 项修改，包括换过的壁纸和添加的组件。`],
+    body: [`清除对「${t.name}」的 ${t.modifications} 项修改，包括更换的壁纸和添加的组件。`],
     run: () => {
       if (state.open?.id === id) send('reset', { seq: ++pv.seq });
       else { send('open', { theme: id }); send('reset'); send('close'); }
@@ -196,7 +199,7 @@ export function deleteFlow(id: string) {
   if (!t) return;
   openDialog({
     kind: 'confirm', title: `删除「${t.name}」`, action: '删除', elevated: true,
-    body: ['主题会从这台电脑上删除，只有它在用的壁纸和组件也一起删除。', ...(usedOn(id).length ? ['它正在使用，删除后锁屏改用「默认」主题。'] : [])],
+    body: ['将从此电脑删除该主题，以及仅由该主题使用的壁纸和组件。', ...(usedOn(id).length ? ['该主题正在使用，删除后锁屏将改用「默认」主题。'] : [])],
     run: () => {
       if (state.view === 'theme' && state.open?.id === id) setState({ view: 'library' });
       send('remove', { theme: id });
@@ -204,6 +207,12 @@ export function deleteFlow(id: string) {
   });
 }
 export const global = (key: string, value: string | number | boolean) => send('global', { key, value: String(value) });
+// Wallpaper Engine's video wallpapers, looked for afresh each time they are shown: as new themes,
+// or with `wallpaper` one as the open theme's wallpaper.
+export function workshopFlow(wallpaper: boolean) {
+  send('workshop');
+  openDialog({ kind: 'workshop', wallpaper });
+}
 
 /* --- what the native side says --- */
 function receive(m: FromNative) {
@@ -229,6 +238,11 @@ function receive(m: FromNative) {
     case 'added': setState({ sel: { inst: m.instance, part: null } }); break;
     case 'navigate': resetPreview(); setState({ view: 'theme', tab: 'mine', sel: { inst: null, part: null } }); break;
     case 'show': show(m.what); break;
+    case 'workshop': {
+      const { type: _type, ...found } = m;
+      setState({ workshop: found });
+      break;
+    }
   }
 }
 

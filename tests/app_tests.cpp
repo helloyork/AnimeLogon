@@ -414,7 +414,7 @@ TEST(AppTrayMenuMarksWhatTheLogonScreenShows) {
     CHECK(m.displays[0].themes.size() == 2 && m.displays[0].themes[0].id == kThemeU && m.displays[0].themes[0].checked &&
           m.displays[0].themes[0].monitor == a.key);
     CHECK(m.displays[1].themes[1].id == kThemeT && m.displays[1].themes[1].checked && m.displays[1].themes[1].monitor == b.key);
-    CHECK(app::ShowingNow(each, {a, b}) == L"每块屏幕各自使用主题");
+    CHECK(app::ShowingNow(each, {a, b}) == L"每个屏幕单独设置主题");
     // With one display left, one list, and the choice goes on that display.
     m = app::MenuFor(each, {a});
     CHECK(m.displays.empty() && m.themes[0].id == kThemeU && m.themes[0].checked && m.themes[0].monitor == a.key);
