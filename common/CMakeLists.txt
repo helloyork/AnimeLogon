@@ -21,6 +21,7 @@ add_library(animelogon_common STATIC
     src/settings.cpp
     src/sha256.cpp
     src/skin.cpp
+    src/spectrum.cpp
     src/text.cpp
     src/theme.cpp
     src/wallpaper.cpp

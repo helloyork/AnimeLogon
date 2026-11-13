@@ -112,11 +112,54 @@ std::string CountdownText() {
 )");
 }
 
+// The sound the output device is playing, as a wide band of bars at the bottom of the screen:
+// what is playing in the signed-in person's session while their screen is locked, and the
+// wallpaper's own sound track when it has one. At rest, while nothing is heard, the bars lie low.
+std::string SpectrumText() {
+    return ToUtf8(std::wstring(LR"(<?xml version="1.0" encoding="utf-8"?>
+<component format="1" name="音频频谱" author="AnimeLogon">
+  <settings>
+    <choice id="position" label="位置" detail="边距随分辨率自动调整。" default="bottom">)") + kPositions + LR"(</choice>
+    <number id="size" label="大小" detail="频谱的高度，以屏幕高度的百分比计。" default="6" min="2" max="30" step="0.1"/>
+    <number id="width" label="宽度" detail="以频谱高度的倍数计。" default="13" min="2" max="40" step="0.1"/>
+    <choice id="mode" label="样式" default="bars">
+      <option value="bars" label="柱形"/>
+      <option value="line" label="曲线"/>
+      <option value="area" label="填充曲线"/>
+    </choice>
+    <choice id="direction" label="方向" detail="频段自基线伸展的方向；双向时自中线向两侧伸展。" default="up">
+      <option value="up" label="向上"/>
+      <option value="down" label="向下"/>
+      <option value="both" label="双向"/>
+    </choice>
+    <number id="bands" label="频段数量" default="64" min="8" max="128" step="1"/>
+    <choice id="gradient" label="渐变方向" detail="水平渐变自左向右；垂直渐变自基线向频段顶端。" default="horizontal">
+      <option value="none" label="无"/>
+      <option value="horizontal" label="水平"/>
+      <option value="vertical" label="垂直"/>
+    </choice>
+    <color id="color" label="起始颜色" default="#8FD3FF"/>
+    <color id="end-color" label="结束颜色" default="#F3A6FF"/>
+    <number id="sensitivity" label="灵敏度" detail="数值越大，较轻的声音也会使频段升得越高。" default="1" min="0.1" max="5" step="0.05"/>
+    <number id="smoothing" label="平滑度" detail="数值越大，频段的升降越平缓。" default="0.5" min="0" max="0.95" step="0.01"/>
+    <toggle id="hide" label="无声音时隐藏" detail="没有声音播放时，频谱淡出。" default="off" on="0" off="1"/>
+  </settings>
+  <panel anchor="$position" size="$size" margin="5">
+    <line>
+      <spectrum label="频谱" length="$width" bands="$bands" mode="$mode" direction="$direction" gradient="$gradient" color="$color" end-color="$end-color" sensitivity="$sensitivity" smoothing="$smoothing" idle-opacity="$hide" gap="0.35" radius="0.5" floor="0.05"/>
+    </line>
+    <shadow label="阴影" blur="0.06" opacity="0.25" y="0.02"/>
+  </panel>
+</component>
+)");
+}
+
 struct BuiltIn {
     const wchar_t *id;
     std::string (*text)();
 };
-const BuiltIn kBuiltIns[] = {{L"battery", BatteryText}, {L"media", MediaText}, {L"countdown", CountdownText}};
+const BuiltIn kBuiltIns[] = {
+    {L"battery", BatteryText}, {L"media", MediaText}, {L"countdown", CountdownText}, {L"spectrum", SpectrumText}};
 
 bool IsHexId(const std::wstring &id) {
     if (id.size() != 16) return false;

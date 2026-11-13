@@ -5,7 +5,8 @@
 //
 // Built-in components have lowercase word ids: "clock" is the clock that comes with AnimeLogon
 // (skin::Default()); "battery", "media" and "countdown" show the battery, what is playing and
-// the days to a date. Imported ones have 16 lowercase hex digits.
+// the days to a date; "spectrum" the sound the output device plays. Imported ones have 16
+// lowercase hex digits.
 #pragma once
 
 #include <string>

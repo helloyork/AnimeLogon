@@ -381,6 +381,11 @@ void AudioSystem::Tick() {
     }
 }
 
+std::wstring AudioSystem::ListeningDevice() {
+    const std::wstring id = ConsoleUserDefault();
+    return id.empty() ? ReadRemembered() : id;
+}
+
 void AudioSystem::RememberConsoleDefault() {
     ComPtr<IMMDeviceEnumerator> en;
     if (FAILED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, IID_PPV_ARGS(&en)))) return;

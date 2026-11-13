@@ -260,7 +260,7 @@ TEST(ComponentsDrawBarsAndTestConditions) {
 }
 
 TEST(BuiltInComponentsComeWithTheProgram) {
-    CHECK(BuiltInComponents().size() == 4 && BuiltInComponents()[0] == kClockComponent);
+    CHECK(BuiltInComponents().size() == 5 && BuiltInComponents()[0] == kClockComponent);
     for (const std::wstring &id : BuiltInComponents()) {
         skin::Skin s;
         std::wstring why;
@@ -276,7 +276,8 @@ TEST(BuiltInComponentsComeWithTheProgram) {
     CHECK(!IsBuiltInComponent(L"weather") && !IsComponentId(L"weather"));
     // They come first in the list, before anything imported.
     const auto list = ListComponents();
-    CHECK(list.size() >= 4 && list[1].id == L"battery" && list[1].builtIn && list[3].id == L"countdown");
+    CHECK(list.size() >= 5 && list[1].id == L"battery" && list[1].builtIn && list[3].id == L"countdown" &&
+          list[4].id == L"spectrum" && list[4].builtIn);
 }
 
 // Where the power comes from, and what the battery and media components show when there is no

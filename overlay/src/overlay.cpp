@@ -29,8 +29,10 @@
 #include "animelogon/resolve.h"
 #include "animelogon/secure.h"
 #include "animelogon/settings.h"
+#include "animelogon/spectrum.h"
 
 #include "audio.h"
+#include "audiocapture.h"
 #include "bake.h"
 #include "clocktext.h"
 #include "componentlayer.h"
@@ -613,6 +615,15 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
     AudioSystem audio;
     audio.Open(settings.audio);
     std::wstring track;  // the wallpaper whose sound track plays, if any
+
+    // A spectrum listens to the output device while the screen is up, and is drawn every frame
+    // while its bands move (audiocapture.h).
+    const bool listening = withComponents && layer.Listens();
+    AudioCapture capture;
+    animelogon::spectrum::Analyzer analyzer;
+    animelogon::spectrum::Frame heard;
+    std::vector<float> samples;
+    if (listening) capture.Start();
     const double refresh = RefreshSeconds();
     if (!opt.windowed && !done) {
         AudioSystem::RememberConsoleDefault();
@@ -730,6 +741,8 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
         for (auto &[id, player] : players) period = std::min(period, player->frameSeconds());
         period = std::max(period, 1.0 / 120.0);
         if (g_overlay.woke) period = std::min(period, refresh);
+        // A spectrum moves at the display's rate, up to 60 frames a second.
+        if (listening && !emergency) period = std::min(period, std::max(refresh, 1.0 / 60.0));
         // Wake just after the compositor's next frame, so the picture drawn then is ready for
         // the one after; a fixed period drifts against the display and drops frames.
         double wait = period;
@@ -778,6 +791,16 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
         audio.Tick();
         if (!emergency && feed.Poll(&snapshot) && withComponents) layer.SetData(snapshot);
         const bool componentsChanged = withComponents && !emergency && layer.Tick();
+        // The spectra take the latest sound once a tick while the screen is lit; until the device
+        // is open they hear silence. Drawn again only while their bands move.
+        bool listened = false;
+        if (listening && draw && !emergency) {
+            float rate = 0.0f;
+            if (capture.Latest(&samples, &rate)) analyzer.Run(samples.data(), samples.size(), rate, now / 1000.0, &heard);
+            else heard = {{}, 0.0f, false, now / 1000.0};
+            layer.SetAudio(heard);
+            listened = layer.Moving();
+        }
 
         double t = 0.0;
         if (!audio.TrackClock(&t)) {
@@ -823,7 +846,7 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
         } else if (draw) {
             // Drawn only when something on it changed: a still wallpaper costs nothing between
             // the minutes, and a high refresh rate need not cost a full-screen draw per tick.
-            bool fresh = lit || componentsChanged || g_overlay.woke || componentsFading;
+            bool fresh = lit || componentsChanged || g_overlay.woke || componentsFading || listened;
             animelogon::scene::Inputs sceneInputs; sceneInputs.time = (float)t;
             SYSTEMTIME local{}; GetLocalTime(&local);
             sceneInputs.day = (local.wHour*3600.f+local.wMinute*60.f+local.wSecond)/86400.f;
@@ -927,6 +950,7 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
     }
     UnregisterHotKey(g_overlay.inputWindow, kRescueHotkeyId);
     inputsink::Unregister();
+    capture.Stop();
     audio.FadeOut(0.2f);
     for (int i = 0; i < 12; ++i) {
         audio.Tick();

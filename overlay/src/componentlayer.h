@@ -27,6 +27,11 @@ public:
 
     // The battery and what is playing, for every instance.
     void SetData(const animelogon::data::Snapshot &snapshot);
+    // What the output device plays, for every instance's spectra, once a frame; whether any
+    // instance has one, and whether one is still moving.
+    void SetAudio(const animelogon::spectrum::Frame &frame);
+    bool Listens() const;
+    bool Moving() const;
     // Reads the time; returns true when the words of any instance changed.
     bool Tick();
 
