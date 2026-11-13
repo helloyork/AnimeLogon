@@ -142,13 +142,13 @@ function Overview() {
             <span className="nm ellipsis">{wp.name}</span>
             <span className="t-cap3 ellipsis num">{wp.meta}</span>
           </div>
-          {wp.modified && <ResetButton label="换回主题自带的壁纸" onClick={() => edit('wallpaper', { ref: t.ownWallpaper })} />}
+          {wp.modified && <ResetButton label="恢复主题默认壁纸" onClick={() => edit('wallpaper', { ref: t.ownWallpaper })} />}
           <Button size="sm" onClick={() => openDialog({ kind: 'wallpaper' })}>更换…</Button>
         </div>
         {((wp.kind === 'video' || wp.kind === 'image') || (scene && scene.settings.length > 0)) && (
           <div className="props">
             {(wp.kind === 'video' || wp.kind === 'image') && (
-              <ChoiceField id="wp-fit" label="契合度" detail="画面比例与屏幕不同时怎样显示。" value={t.fit} modified={t.fitModified}
+              <ChoiceField id="wp-fit" label="契合度" detail="图像宽高比与屏幕不一致时的显示方式。" value={t.fit} modified={t.fitModified}
                 options={[{ value: 'fill', label: '填充' }, { value: 'fit', label: '适应' }, { value: 'stretch', label: '拉伸' }]}
                 write={v => edit('fit', { value: v })} onReset={() => edit('fit', { value: t.ownFit })} />
             )}
@@ -156,9 +156,9 @@ function Overview() {
           </div>
         )}
         {wp.audio && (
-          <p className="inote">视频的声音在<button type="button" className="link" onClick={() => setTab('settings')}>设置</button>里开关。</p>
+          <p className="inote">视频声音可在<button type="button" className="link" onClick={() => setTab('settings')}>设置</button>中开启或关闭。</p>
         )}
-        {scene && scene.static && <p className="inote">此场景在这台设备上使用静止画面。调整会保留在导出的主题中。</p>}
+        {scene && scene.static && <p className="inote">此场景在本设备上以静态画面显示。调整会保留在导出的主题中。</p>}
         {scene && scene.parts.length > 0 && (
           <div className="list">
             {scene.parts.map(p => (
@@ -192,14 +192,14 @@ function Overview() {
           ))}
         </div>
         <Button size="sm" variant="ghost" className="add" icon={<Add16Regular />} disabled={full} onClick={() => openDialog({ kind: 'addComponent' })}>添加组件</Button>
-        {full && <p className="inote">已有 8 个组件，隐藏的也算在内。</p>}
+        {full && <p className="inote">已达到 8 个组件的上限（含已隐藏的组件）。</p>}
       </Section>
       {/* How the lock screen gives way to the sign-in screen when a key or a click wakes it. The
           lock-screen preview plays it. */}
-      <Section value="wake" title="唤醒" sections={sections}>
+      <Section value="wake" title="唤醒过渡" sections={sections}>
         <div className="props">
-          <ChoiceField id="wake-style" label="过渡" detail="按键或单击后，锁屏怎样让出登录界面。" value={t.wake} modified={t.wakeModified}
-            options={[{ value: 'fade', label: '淡出' }, { value: 'zoom', label: '放大' }, { value: 'slide', label: '上滑' }, { value: 'cut', label: '直接' }]}
+          <ChoiceField id="wake-style" label="过渡效果" detail="唤醒后，锁屏切换到登录界面的过渡效果。" value={t.wake} modified={t.wakeModified}
+            options={[{ value: 'fade', label: '淡出' }, { value: 'zoom', label: '缩放淡出' }, { value: 'slide', label: '上滑' }, { value: 'cut', label: '无' }]}
             write={v => edit('wake', { value: v })} onReset={() => edit('wake', { value: t.ownWake })} />
           {t.wake !== 'cut' && (
             <NumberField id="wake-seconds" label="时长" min={0.1} max={2} step={0.05} value={String(t.wakeSeconds)} modified={t.wakeSecondsModified}
@@ -231,7 +231,7 @@ function InstanceView({ inst }: { inst: Instance }) {
             </MenuTrigger>
             <MenuPopover className="menu">
               <MenuList>
-                <MenuItem disabled={!inst.modified} onClick={() => clearValues(inst.id, keys)}>恢复这个组件</MenuItem>
+                <MenuItem disabled={!inst.modified} onClick={() => clearValues(inst.id, keys)}>恢复此组件</MenuItem>
                 {!inst.base && <MenuItem onClick={() => { select(null); edit('removeInstance', { instance: inst.id }); }}>删除</MenuItem>}
               </MenuList>
             </MenuPopover>
@@ -244,11 +244,11 @@ function InstanceView({ inst }: { inst: Instance }) {
             <Switch checked={inst.visible} onChange={on => edit('visible', { instance: inst.id, on })} />
           </label>
         </div>
-        {!inst.visible && <p className="inote">{inst.base ? '主题自带的组件只能隐藏，不能删除。' : '锁屏上不显示。'}</p>}
+        {!inst.visible && <p className="inote">{inst.base ? '主题内置的组件只能隐藏，无法删除。' : '锁屏上不显示。'}</p>}
       </div>
       {inst.missing ? (
         <div className="ibody">
-          <div className="notice"><Warning16Regular /><span>找不到这个组件的文件。</span></div>
+          <div className="notice"><Warning16Regular /><span>找不到此组件的文件。</span></div>
         </div>
       ) : (
         // What a component looks like comes first; where it is, mostly set by dragging it on the
@@ -273,14 +273,14 @@ function InstanceView({ inst }: { inst: Instance }) {
             </Section>
           )}
           {single && (
-            <Section value="enter" title="出现" sections={sections}>
+            <Section value="enter" title="入场动画" sections={sections}>
               <EnterFields instId={inst.id} pk="p1" />
             </Section>
           )}
           {parts.length > 0 && (
             <Section value="parts" title="逐项调整" sections={sections}>
               <div className="list">
-                {parts.map(p => <OpenRow key={p.key} title={p.label} detail={p.modified ? '已单独设置' : undefined} onOpen={() => select(inst.id, p.key)} />)}
+                {parts.map(p => <OpenRow key={p.key} title={p.label} detail={p.modified ? '已自定义' : undefined} onOpen={() => select(inst.id, p.key)} />)}
               </div>
             </Section>
           )}
@@ -330,7 +330,7 @@ function PartView({ inst, partKey }: { inst: Instance | SceneControls; partKey: 
         )}
         <Section value="place" title="位置" sections={sections}><PlaceFields instId={inst.id} pk={pt.key} /></Section>
         {inst.id !== 'wallpaper' && (
-          <Section value="enter" title="出现" sections={sections}><EnterFields instId={inst.id} pk={pt.key} /></Section>
+          <Section value="enter" title="入场动画" sections={sections}><EnterFields instId={inst.id} pk={pt.key} /></Section>
         )}
       </>
     );
@@ -440,10 +440,10 @@ function PlaceFields({ instId, pk }: { instId: string; pk: string }) {
       )}
       {c && (
         <>
-          <NumberField id={`pos-${instId}-${pk}-x`} label="水平位置" detail="组件中心离屏幕左边多远。" min={c.x0} max={c.x1} step={0.1}
+          <NumberField id={`pos-${instId}-${pk}-x`} label="水平位置" detail="组件中心到屏幕左边缘的距离。" min={c.x0} max={c.x1} step={0.1}
             value={draft?.['#x'] ?? String(clamp(c.x, c.x0, c.x1))} modified={false} view={POSITION_VIEW('% 屏宽')}
             write={(v, gesture) => put(v, null, gesture)} onReset={reset} />
-          <NumberField id={`pos-${instId}-${pk}-y`} label="垂直位置" detail="组件中心离屏幕上边多远。" min={c.y0} max={c.y1} step={0.1}
+          <NumberField id={`pos-${instId}-${pk}-y`} label="垂直位置" detail="组件中心到屏幕上边缘的距离。" min={c.y0} max={c.y1} step={0.1}
             value={draft?.['#y'] ?? String(clamp(c.y, c.y0, c.y1))} modified={false} view={POSITION_VIEW('% 屏高')}
             write={(v, gesture) => put(null, v, gesture)} onReset={reset} />
         </>

@@ -33,10 +33,10 @@ std::string BatteryText() {
 <component format="1" name="电量" author="AnimeLogon">
   <settings>
     <choice id="position" label="位置" detail="边距随分辨率自动调整。" default="top-right">)") + kPositions + LR"(</choice>
-    <number id="size" label="大小" detail="占屏幕高度的百分比。" default="2.8" min="1.5" max="8" step="0.1"/>
+    <number id="size" label="大小" detail="以屏幕高度的百分比计。" default="2.8" min="1.5" max="8" step="0.1"/>
     <font id="font" label="字体" detail="仅列出为所有用户安装的字体。" default=""/>
     <color id="color" label="颜色" default="#FFFFFF"/>
-    <toggle id="remaining" label="剩余时间" detail="用电池时，显示大约还能用多久。" default="on" on="0.8" off="0"/>
+    <toggle id="remaining" label="剩余时间" detail="使用电池供电时，显示预计剩余使用时间。" default="on" on="0.8" off="0"/>
   </settings>
   <panel anchor="$position" size="$size" margin="4" when="battery.percent">
     <line>
@@ -56,7 +56,7 @@ std::string MediaText() {
 <component format="1" name="正在播放" author="AnimeLogon">
   <settings>
     <choice id="position" label="位置" detail="边距随分辨率自动调整。" default="bottom-left">)") + kPositions + LR"(</choice>
-    <number id="size" label="大小" detail="歌名的字号，占屏幕高度的百分比。" default="2.6" min="1.5" max="8" step="0.1"/>
+    <number id="size" label="大小" detail="标题文字的字号，以屏幕高度的百分比计。" default="2.6" min="1.5" max="8" step="0.1"/>
     <font id="font" label="字体" detail="仅列出为所有用户安装的字体。" default=""/>
     <color id="color" label="颜色" default="#FFFFFF"/>
   </settings>
@@ -83,20 +83,20 @@ std::string CountdownText() {
     return ToUtf8(std::wstring(LR"(<?xml version="1.0" encoding="utf-8"?>
 <component format="1" name="倒计时" author="AnimeLogon">
   <settings>
-    <date id="target" label="日期" detail="倒数到这一天；过了这一天就不再显示。" default="2027-01-01"/>
+    <date id="target" label="日期" detail="倒计时的目标日期，过期后不再显示。" default="2027-01-01"/>
     <choice id="position" label="位置" detail="边距随分辨率自动调整。" default="bottom-right">)") + kPositions + LR"(</choice>
-    <number id="size" label="大小" detail="天数的字号，占屏幕高度的百分比。" default="5" min="2" max="15" step="0.1"/>
+    <number id="size" label="大小" detail="天数文字的字号，以屏幕高度的百分比计。" default="5" min="2" max="15" step="0.1"/>
     <font id="font" label="字体" detail="仅列出为所有用户安装的字体。" default=""/>
     <color id="color" label="颜色" default="#FFFFFF"/>
   </settings>
   <panel anchor="$position" size="$size" margin="5" until="$target" when="until.state!=past">
     <line when="until.state=ahead">
-      <text label="「还有」" value="还有" font="$font" color="$color" opacity="0.85" size="0.35"/>
+      <text label="前缀「还有」" value="还有" font="$font" color="$color" opacity="0.85" size="0.35"/>
       <text value="{until.days}" font="$font" weight="semibold" color="$color" space="0.15"/>
-      <text label="「天」" value="天" font="$font" color="$color" opacity="0.85" size="0.35" space="0.15"/>
+      <text label="单位「天」" value="天" font="$font" color="$color" opacity="0.85" size="0.35" space="0.15"/>
     </line>
     <line when="until.state=today">
-      <text label="当天的「就是今天」" value="就是今天" font="$font" weight="semibold" color="$color" size="0.5"/>
+      <text label="当日文字「今天」" value="今天" font="$font" weight="semibold" color="$color" size="0.5"/>
     </line>
     <shadow label="阴影" blur="0.08" opacity="0.3" y="0.03"/>
   </panel>

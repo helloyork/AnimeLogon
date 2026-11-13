@@ -338,7 +338,7 @@ void Host::Fit() {
 void Host::StartWebView() {
     // Delay-loaded, so the elevated helper runs without it; it ships beside the program.
     if (!LoadLibraryExW(L"WebView2Loader.dll", nullptr, LOAD_LIBRARY_SEARCH_APPLICATION_DIR)) {
-        MessageBoxW(hwnd_, L"AnimeLogon 的设置缺少 WebView2Loader.dll。请重新安装 AnimeLogon。", L"AnimeLogon",
+        MessageBoxW(hwnd_, L"AnimeLogon 设置缺少 WebView2Loader.dll，请重新安装 AnimeLogon。", L"AnimeLogon",
                     MB_OK | MB_ICONWARNING);
         DestroyWindow(hwnd_);
         return;
@@ -346,8 +346,8 @@ void Host::StartWebView() {
     LPWSTR version = nullptr;
     if (FAILED(GetAvailableCoreWebView2BrowserVersionString(nullptr, &version)) || !version) {
         MessageBoxW(hwnd_,
-                    L"AnimeLogon 的设置需要 Microsoft Edge WebView2 运行时，这台电脑上没有找到。\n\n"
-                    L"请从 Microsoft 网站安装「WebView2 运行时」后再打开。",
+                    L"AnimeLogon 设置需要 Microsoft Edge WebView2 运行时，但此电脑上未找到。\n\n"
+                    L"请从 Microsoft 网站安装 WebView2 运行时后重试。",
                     L"AnimeLogon", MB_OK | MB_ICONWARNING);
         DestroyWindow(hwnd_);
         return;
@@ -567,7 +567,7 @@ bool Host::Save() {
         saveFailed_ = false;
         return true;
     }
-    if (!saveFailed_) Problem(L"无法写入设置。改动只在这次打开期间有效。请确认 AnimeLogon 已经安装。");
+    if (!saveFailed_) Problem(L"无法写入设置，更改仅在本次运行期间有效。请确认已安装 AnimeLogon。");
     saveFailed_ = true;
     return false;
 }
@@ -960,7 +960,7 @@ void Host::OnMessage(const json::Value &m) {
         ShellExecuteW(hwnd_, L"open", paths::LogDir().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
     } else if (op == L"uninstall") {
         if (!paths::Sandbox().empty()) {
-            Problem(L"这是沙盒里的设置，不能卸载这台电脑上的 AnimeLogon。");
+            Problem(L"当前为沙盒模式，无法卸载此电脑上的 AnimeLogon。");
             return;
         }
         const std::wstring dir = machine::InstallDir();
@@ -1018,7 +1018,7 @@ void Host::Import(bool wallpaper) {
                             : staging::Media(source, dir, cancel_, progressed);
             CoUninitialize();
         } else {
-            r.error = L"无法初始化 COM，无法导入。";
+            r.error = L"无法初始化 COM，导入已中止。";
         }
         importResult_ = r;
         PostMessageW(hwnd_, kImportDone, 0, 0);
@@ -1041,9 +1041,9 @@ void Host::FinishImport() {
             edited = !library_.open().empty() && library_.SetWallpaper(id);
             Toast(L"已导入壁纸「" + r.name + L"」");
         } else if (code == commit::kDeclined) {
-            Toast(L"已取消，没有导入");
+            Toast(L"已取消导入");
         } else {
-            Problem(L"导入失败：无法把壁纸写入受保护的目录。详细原因记录在 " + paths::LogPath(L"config.log") + L"。");
+            Problem(L"导入失败：无法将壁纸写入受保护的目录。详细信息见 " + paths::LogPath(L"config.log") + L"。");
         }
     } else if (r.ok) {
         const std::set<std::wstring> before = InstalledThemeIds();
@@ -1059,9 +1059,9 @@ void Host::FinishImport() {
             if (!added.empty() && library_.Apply(added, L"all")) Save();
             Toast(L"已导入「" + r.name + (added.empty() ? L"」" : L"」并设为当前主题"));
         } else if (code == commit::kDeclined) {
-            Toast(L"已取消，没有导入");
+            Toast(L"已取消导入");
         } else {
-            Problem(L"导入失败：无法把主题写入受保护的目录。详细原因记录在 " + paths::LogPath(L"config.log") + L"。");
+            Problem(L"导入失败：无法将主题写入受保护的目录。详细信息见 " + paths::LogPath(L"config.log") + L"。");
         }
     } else if (!cancel_.load()) {
         Problem(r.error.empty() ? std::wstring(L"导入失败。") : r.error);
@@ -1082,7 +1082,7 @@ void Host::ImportComponent(bool add) {
     const staging::Result r = staging::Component(path, dir);
     if (!r.ok) {
         secure::RemoveTree(dir);
-        Problem(L"无法导入这个组件：" + r.error);
+        Problem(L"无法导入此组件：" + r.error);
         return;
     }
     const std::wstring id = NewComponentId();
@@ -1102,9 +1102,9 @@ void Host::ImportComponent(bool add) {
             return;
         }
     } else if (code == commit::kDeclined) {
-        Toast(L"已取消，没有导入");
+        Toast(L"已取消导入");
     } else {
-        Problem(L"导入失败：无法把组件写入受保护的目录。");
+        Problem(L"导入失败：无法将组件写入受保护的目录。");
     }
     SendState();
 }
@@ -1115,7 +1115,7 @@ std::wstring Host::CommitTheme(const theme::Theme &t, const std::wstring &then) 
     theme::Theme check;
     std::wstring error;
     if (!theme::Parse(text, theme::Form::Installed, &check, &error)) {
-        Problem(L"无法保存这个主题：" + error);
+        Problem(L"无法保存此主题：" + error);
         return L"";
     }
     const std::wstring dir = staging::NewImportDir();
@@ -1198,8 +1198,8 @@ void Host::RemoveTheme(const std::wstring &id) {
     pictures_.Forget();
     if (code == commit::kOk) Toast(L"已删除「" + name + L"」");
     else if (code == commit::kDeclined) Toast(L"已取消");
-    else if (gone) Problem(L"已删除「" + name + L"」，但它的壁纸或组件暂时删不掉，可能正被登录界面使用。");
-    else Problem(L"无法删除这个主题，它的文件可能正被登录界面使用。请稍后再试。");
+    else if (gone) Problem(L"已删除「" + name + L"」，但其壁纸或组件可能正被登录界面占用，暂时无法删除。");
+    else Problem(L"无法删除此主题，其文件可能正被登录界面占用。请稍后重试。");
     SendState();
 }
 
@@ -1219,14 +1219,14 @@ void Host::ExportTheme(const std::wstring &id) {
 
 void Host::Switch(bool on) {
     if (!paths::Sandbox().empty()) {
-        Problem(L"这是沙盒里的设置，不能启用或关闭这台电脑上的 AnimeLogon。");
+        Problem(L"当前为沙盒模式，无法启用或关闭此电脑上的 AnimeLogon。");
         SendEnvironment();
         return;
     }
     const int code = commit::RunElevated(hwnd_, on ? L"--switch-on" : L"--switch-off");
-    if (code == commit::kOk) Toast(on ? L"已启用，下次锁屏生效" : L"已关闭，锁屏恢复 Windows 默认");
+    if (code == commit::kOk) Toast(on ? L"已启用，下次锁屏生效" : L"已关闭，锁屏已恢复为 Windows 默认界面");
     else if (code == commit::kDeclined) Toast(L"已取消");
-    else Problem(L"操作失败。请确认 AnimeLogon 已经安装，并且有管理员权限。");
+    else Problem(L"操作失败。请确认已安装 AnimeLogon 并具有管理员权限。");
     SendEnvironment();
 }
 

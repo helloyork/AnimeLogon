@@ -184,7 +184,7 @@ export function LockPreview({ theme: id, ratio }: { theme: string; ratio?: numbe
           {parts?.map(p => <EnteringPart key={p.part} p={p} go={go} woke={false} leave={0} />)}
         </div>
       </div>
-      <div className="lock-hint">{woke ? '这里是 Windows 的登录界面（示意）' : '按任意键或单击，模拟唤醒'}</div>
+      <div className="lock-hint">{woke ? 'Windows 登录界面（示意）' : '按任意键或单击以模拟唤醒'}</div>
       <Button size="sm" className="lock-exit" onPointerDown={e => e.stopPropagation()} onClick={close}>退出预览 (Esc)</Button>
     </div>
   );

@@ -37,7 +37,7 @@ function One({ d }: { d: DialogState }) {
   switch (d.kind) {
     case 'problem':
       return (
-        <Frame d={d} title="出现问题" actions={<Button variant="primary" onClick={close}>确定</Button>}>
+        <Frame d={d} title="发生错误" actions={<Button variant="primary" onClick={close}>确定</Button>}>
           <p className="selectable">{d.text}</p>
         </Frame>
       );
@@ -111,12 +111,12 @@ function MonitorDialog({ d }: { d: Extract<DialogState, { kind: 'monitor' }> }) 
         {s.env.monitors.map(m => (
           <button key={m.key} type="button" className="choice" onClick={() => pick(m.key)}>
             <span className="ellipsis">{m.name + (m.primary ? '（主）' : '')}</span>
-            <span className="t-cap3 ellipsis">{`${m.width}×${m.height} · 现在是「${themeOf(screenTheme(m.key))?.name ?? ''}」`}</span>
+            <span className="t-cap3 ellipsis">{`${m.width}×${m.height} · 当前为「${themeOf(screenTheme(m.key))?.name ?? ''}」`}</span>
           </button>
         ))}
         <button type="button" className="choice" onClick={() => pick('all')}>
           <span>所有屏幕</span>
-          <span className="t-cap3">每块屏幕都用这个主题</span>
+          <span className="t-cap3">所有屏幕使用此主题</span>
         </button>
       </div>
     </Frame>
@@ -169,7 +169,7 @@ function NewThemeDialog({ d }: { d: Extract<DialogState, { kind: 'newTheme' }> }
         <Labelled label="名称" htmlFor="dlg-new-name">
           <TextInput id="dlg-new-name" value="新主题" maxLength={40} autoFocus live={setName} />
         </Labelled>
-        <Labelled label="壁纸" hint="新主题带一个时钟。">
+        <Labelled label="壁纸" hint="新主题默认包含一个时钟组件。">
           <WallpaperGrid current={wallpaper} onPick={setWallpaper} importLabel="导入为新主题…" onImport={() => { closeDialog(d.id); send('import'); }} />
         </Labelled>
       </div>
@@ -205,10 +205,10 @@ function AddComponentDialog({ d }: { d: Extract<DialogState, { kind: 'addCompone
           ))}
           <button type="button" className="choice" onClick={() => { closeDialog(d.id); send('importComponent', { add: true }); }}>
             <span>从文件导入…</span>
-            <span className="t-cap3">一个 .xml 组件文件</span>
+            <span className="t-cap3">.xml 组件文件</span>
           </button>
         </div>
-        <p className="t-cap3">{`这个主题还能添加 ${s.open?.room ?? 0} 个组件。`}</p>
+        <p className="t-cap3">{`此主题还可添加 ${s.open?.room ?? 0} 个组件。`}</p>
       </div>
     </Frame>
   );

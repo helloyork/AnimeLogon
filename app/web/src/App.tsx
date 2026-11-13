@@ -21,7 +21,7 @@ class Fallback extends Component<{ children: ReactNode }, { failed: string | nul
     if (!this.state.failed) return this.props.children;
     return (
       <div className="fallback">
-        <h1 className="t-h">页面出现问题</h1>
+        <h1 className="t-h">页面发生错误</h1>
         <p className="t-cap selectable">{this.state.failed}</p>
         <Button variant="primary" onClick={() => location.reload()}>重新载入</Button>
       </div>
