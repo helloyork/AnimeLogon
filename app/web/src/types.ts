@@ -17,6 +17,7 @@ export interface Environment {
   version: string;     // this program's version, as its version resource gives it
   user: string;        // the name Windows' sign-in screen greets this person by
   accountPicture: boolean;  // they have an account picture, served as `account`
+  wallpaperEngine: boolean; // Wallpaper Engine keeps wallpapers on this computer (app/src/workshop.h)
   monitors: Monitor[];
   fonts: { name: string; stored: string }[];
   devices: { id: string; name: string }[];
@@ -205,7 +206,28 @@ export type FromNative =
   | { type: 'busy'; label: string | null; percent?: number }
   | { type: 'added'; instance: string }
   | { type: 'navigate'; theme: string }
+  | ({ type: 'workshop' } & Workshop)
   | ({ type: 'frame' } & WindowFrame);
+
+// A video wallpaper in Wallpaper Engine. Its files are under `base`, a host name the native side
+// maps to the folder it is in, in the directory `dir`.
+export interface WorkshopItem {
+  id: string;
+  title: string;
+  base: string;
+  dir: string;
+  video: string;
+  preview: string;  // a picture, or empty
+  bytes: number;
+  source: 'workshop' | 'mine';  // downloaded from the Steam Workshop, or made in Wallpaper Engine
+}
+
+// What a look for Wallpaper Engine's wallpapers found.
+export interface Workshop {
+  folders: number;  // folders of wallpapers found; 0: no Wallpaper Engine
+  others: number;   // wallpapers of other types, which cannot be imported
+  items: WorkshopItem[];
+}
 
 // The window the page is the title bar of (app/src/frame.cpp): its title, whether it is maximised
 // and active, and how its maximise button is, which the native side takes the pointer over.

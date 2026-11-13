@@ -301,8 +301,8 @@ TEST(BuiltInComponentsShowSomethingFittingWhenThereIsNothingToShow) {
         return !when || Holds(*when, us, style, today, &context);
     };
 
-    // The battery: its charge where there is a battery; a plug and 交流电源 where there is none,
-    // unless switched off; nothing where Windows cannot tell. In the same line, after the
+    // The battery: its charge where there is a battery; where there is none, nothing unless a
+    // plug and 交流电源 are switched on; nothing where Windows cannot tell. In the same line, after the
     // battery's own texts, so that their adjustments (p1.l1.t1..t3) are where they were.
     skin::Skin battery;
     CHECK(BuiltInComponent(L"battery", &battery));
@@ -316,9 +316,10 @@ TEST(BuiltInComponentsShowSomethingFittingWhenThereIsNothingToShow) {
     CHECK(holds(bt[1].when, laptop) && !holds(bt[3].when, laptop) && !holds(bt[4].when, laptop) && !holds(bt[4].when, plugged));
     CHECK(!holds(bt[1].when, desktop) && holds(bt[3].when, desktop) && holds(bt[4].when, desktop));
     CHECK(bt[3].value == std::wstring(1, (wchar_t)0xE95F) && bt[4].value == L"交流电源");
-    CHECK(bt[3].opacity == 1.0f && bt[4].opacity == 1.0f);
-    r = skin::Resolve(battery, {{L"mains", L"off"}});
-    CHECK(r.panels.size() == 1 && r.panels[0].lines[0].texts.size() == 5 && r.panels[0].lines[0].texts[4].opacity == 0.0f);
+    CHECK(bt[3].opacity == 0.0f && bt[4].opacity == 0.0f);
+    r = skin::Resolve(battery, {{L"mains", L"on"}});
+    CHECK(r.panels.size() == 1 && r.panels[0].lines[0].texts.size() == 5 && r.panels[0].lines[0].texts[3].opacity == 1.0f &&
+          r.panels[0].lines[0].texts[4].opacity == 1.0f);
 
     // What is playing: nothing when nothing is, unless 未在播放 is switched on. Also after the
     // title in its line, so that the lines and texts keep their adjustment keys.

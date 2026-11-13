@@ -27,8 +27,8 @@ const wchar_t *const kPositions = LR"(
     )";
 
 // The battery: its icon and charge, and while on battery roughly how long it will last. On a
-// machine with no battery, a plug and 交流电源 instead, unless that is switched off; nothing when
-// Windows cannot tell where the power comes from.
+// machine with no battery, nothing -- or a plug and 交流电源, when that is switched on; nothing
+// when Windows cannot tell where the power comes from.
 std::string BatteryText() {
     return ToUtf8(std::wstring(LR"(<?xml version="1.0" encoding="utf-8"?>
 <component format="1" name="电量" author="AnimeLogon">
@@ -38,7 +38,7 @@ std::string BatteryText() {
     <font id="font" label="字体" detail="仅列出为所有用户安装的字体。" default=""/>
     <color id="color" label="颜色" default="#FFFFFF"/>
     <toggle id="remaining" label="剩余时间" detail="使用电池供电时，显示预计剩余使用时间。" default="on" on="0.8" off="0"/>
-    <toggle id="mains" label="无电池时显示电源状态" detail="在没有电池的设备上显示「交流电源」。" default="on" on="1" off="0"/>
+    <toggle id="mains" label="无电池时显示电源状态" detail="在没有电池的设备上显示「交流电源」。" default="off" on="1" off="0"/>
   </settings>
   <panel anchor="$position" size="$size" margin="4" when="power.source">
     <line>
