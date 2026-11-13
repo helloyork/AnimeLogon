@@ -936,6 +936,6 @@ TEST(SandboxKeepsTheWindowToItsOwnCopy) {
     CHECK(commit::RunElevated(nullptr, L"--remove-theme 0123456789abcdef") == commit::kOk);
     CHECK(GetFileAttributesW(theme.c_str()) == INVALID_FILE_ATTRIBUTES);
     paths::UseSandbox(L"");
-    CHECK(paths::DataDir() != box + L"\ProgramData\AnimeLogon");
+    CHECK(paths::DataDir() != box + L"\\ProgramData\\AnimeLogon");
     secure::RemoveTree(scratch);
 }
