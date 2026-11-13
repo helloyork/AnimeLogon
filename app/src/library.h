@@ -99,6 +99,13 @@ public:
     std::wstring AddInstance(const std::wstring &component);
     // Only instances that were added can be removed; the theme's own can be hidden.
     bool RemoveInstance(const std::wstring &instance);
+    // Gives each theme of `targets` the open theme's components as they are now: the same
+    // components, shown or hidden alike, with the same values. A target keeps its wallpaper, its fit
+    // and its wake transition; the components and adjustments it had are replaced. The targets do
+    // not follow later edits, and this is no step to undo on the open theme's page. Returns how
+    // many themes changed, or -1, changing nothing, when settings.ini would grow past
+    // kMaxSettingsBytes.
+    int CopyComponents(const std::vector<std::wstring> &targets);
     bool SetWallpaper(const std::wstring &ref);
     bool SetFit(animelogon::Scaling fit);
     // How the open theme gives way to the sign-in screen when woken, and over how long.
@@ -127,6 +134,9 @@ private:
     void Step(int gesture);
     void Tidy();
     void Touched(const std::wstring &id);
+    // The overrides that give theme `target` the instances `want`, keeping the rest of its own.
+    animelogon::ThemeOverrides ComponentsFor(const std::wstring &target,
+                                             const std::vector<animelogon::theme::Instance> &want) const;
     std::wstring InstanceLabel(const animelogon::theme::Theme &edited, const animelogon::theme::Instance &i) const;
     std::wstring WallpaperName(const std::wstring &ref) const;
     std::wstring WallpaperMeta(const std::wstring &ref) const;

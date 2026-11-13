@@ -444,6 +444,102 @@ bool Library::RemoveInstance(const std::wstring &instance) {
     return true;
 }
 
+// A target's own instances (its theme.xml) cannot be removed, only hidden, and hidden ones still
+// count towards the 8. So each wanted instance takes the place of one of the target's own where one
+// is left -- the same instance id and component first, then the same component, then any -- and
+// only the rest are added; the target's own that are left over are hidden. That never needs more
+// than 8, as neither side has more. An instance given another component starts without its
+// theme's values. One that keeps its component keeps them under the overrides, so a value the
+// target's theme sets and the source does not is overridden with the value the source shows.
+// Added instances come after the target's own (theme::Edited): where components overlap, the
+// order they are drawn in may differ from the source's.
+ThemeOverrides Library::ComponentsFor(const std::wstring &target, const std::vector<theme::Instance> &want) const {
+    ThemeOverrides o = set_.OverridesFor(target);
+    o.instances.clear();
+    const theme::Theme own = Own(target);
+    const size_t count = own.components.size();
+    std::vector<int> placed(want.size(), -1);
+    std::vector<bool> taken(count, false);
+    auto place = [&](auto fits) {
+        for (size_t w = 0; w < want.size(); ++w) {
+            if (placed[w] >= 0) continue;
+            for (size_t i = 0; i < count; ++i) {
+                if (taken[i] || !fits(want[w], own.components[i])) continue;
+                placed[w] = (int)i;
+                taken[i] = true;
+                break;
+            }
+        }
+    };
+    place([](const theme::Instance &w, const theme::Instance &i) { return w.id == i.id && w.ref == i.ref; });
+    place([](const theme::Instance &w, const theme::Instance &i) { return w.ref == i.ref; });
+    place([](const theme::Instance &, const theme::Instance &) { return true; });
+
+    std::set<std::wstring> ids;
+    for (const theme::Instance &i : own.components) ids.insert(i.id);
+    for (size_t w = 0; w < want.size(); ++w) {
+        const theme::Instance &source = want[w];
+        InstanceOverrides io;
+        if (placed[w] < 0) {
+            // Added under the source's instance id where the target has no such instance.
+            std::wstring id = source.id;
+            for (int n = 2; ids.count(id) && n < 100; ++n) id = source.id.substr(0, 13) + L"-" + std::to_wstring(n);
+            ids.insert(id);
+            io.ref = source.ref;
+            if (!source.visible) io.visible = false;
+            io.values = source.sets;
+            o.instances[id] = std::move(io);
+            continue;
+        }
+        const theme::Instance &mine = own.components[placed[w]];
+        const bool swapped = source.ref != mine.ref;
+        if (swapped) io.ref = source.ref;
+        if (source.visible != mine.visible) io.visible = source.visible;
+        const skin::Values none;
+        const skin::Values &base = swapped ? none : mine.sets;
+        for (const auto &[key, value] : source.sets) {
+            const auto it = base.find(key);
+            if (it == base.end() || !SameValue(it->second, value)) io.values[key] = value;
+        }
+        skin::Skin skin;
+        if (!base.empty() && LoadSkin(source.ref, &skin)) {
+            for (const auto &[key, value] : base) {
+                if (source.sets.count(key)) continue;
+                const std::wstring shown = ValueFor(skin, source.sets, key);
+                if (!shown.empty() && !SameValue(shown, value)) io.values[key] = shown;
+            }
+        }
+        if (!Empty(io)) o.instances[mine.id] = std::move(io);
+    }
+    for (size_t i = 0; i < count; ++i)
+        if (!taken[i] && own.components[i].visible) o.instances[own.components[i].id].visible = false;
+    return o;
+}
+
+int Library::CopyComponents(const std::vector<std::wstring> &targets) {
+    if (open_.empty()) return 0;
+    // An instance whose component is missing is drawn nowhere, so it is not spread to others.
+    std::vector<theme::Instance> want;
+    skin::Skin skin;
+    for (const theme::Instance &i : Edited(open_).components)
+        if (LoadSkin(i.ref, &skin)) want.push_back(i);
+    const std::map<std::wstring, ThemeOverrides> before = set_.themeOverrides;
+    std::set<std::wstring> changed;
+    for (const std::wstring &target : targets) {
+        if (target == open_ || !Entry(target) || changed.count(target)) continue;
+        ThemeOverrides o = ComponentsFor(target, want);
+        if (Empty(o)) set_.themeOverrides.erase(target);
+        else set_.themeOverrides[target] = std::move(o);
+        changed.insert(target);
+    }
+    if (ToUtf8(SerializeSettings(set_)).size() > kMaxSettingsBytes) {
+        set_.themeOverrides = before;
+        return -1;
+    }
+    for (const std::wstring &target : changed) Touched(target);
+    return (int)changed.size();
+}
+
 bool Library::SetWallpaper(const std::wstring &ref) {
     if (open_.empty() || !IsWallpaperRef(ref) || (IsWallpaperId(ref) && !Wallpaper(ref))) return false;
     Step(0);

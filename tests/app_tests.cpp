@@ -265,6 +265,86 @@ TEST(AppLibraryAddsHidesAndRemovesInstances) {
     CHECK(l.AddInstance(kClockComponent).empty());
 }
 
+TEST(AppLibraryCopiesComponentsToOtherThemes) {
+    FakeStores s = Stores();
+    // Theme V has components of its own: a clock in green, and two batteries.
+    const std::wstring kThemeV = L"cccccccccccccccc";
+    s.store.themes[kThemeV] = "<theme format=\"1\" name=\"V\"><wallpaper ref=\"default\" fit=\"fill\"/>"
+                              "<component id=\"clock\" ref=\"clock\"><set key=\"color\" value=\"#00FF00\"/></component>"
+                              "<component id=\"b1\" ref=\"0a7b0a7b0a7b0a7b\"/><component id=\"b2\" ref=\"0a7b0a7b0a7b0a7b\"/>"
+                              "</theme>";
+    // U has its own wallpaper and clock edits already.
+    s.settings += L"theme." + kThemeU + L".wallpaper = " + kWallpaperX + L"\r\ntheme." + kThemeU + L".clock.size = 14\r\n";
+    app::Library l(s);
+    CHECK(l.CopyComponents({kThemeU}) == 0);  // nothing open
+    CHECK(l.Open(kThemeT));
+    CHECK(l.SetValue(L"clock", L"p1.offset-x", L"3"));
+    const std::wstring battery = l.AddInstance(kBattery);
+    CHECK(l.SetValue(battery, L"accent", L"#FF0000"));
+    const unsigned revision = l.Revision(kThemeU);
+    // The open theme itself, one not installed and one named twice count once or not at all.
+    CHECK(l.CopyComponents({kThemeU, kThemeV, kThemeT, L"dddddddddddddddd", kThemeU}) == 2);
+    CHECK(l.Revision(kThemeU) > revision);
+
+    // U shows T's components; its wallpaper stays, its own clock edit is gone.
+    const theme::Theme u = l.Edited(kThemeU);
+    CHECK(u.wallpaper == kWallpaperX);
+    CHECK(u.components.size() == 2);
+    const theme::Instance *uc = u.Find(L"clock");
+    CHECK(uc && uc->sets == (skin::Values{{L"p1.anchor", L"bottom-left"}, {L"p1.offset-x", L"3"}}));
+    const theme::Instance *ub = u.Find(battery);
+    CHECK(ub && ub->ref == kBattery && ub->visible && ub->sets == (skin::Values{{L"accent", L"#FF0000"}}));
+
+    // V's own instances take T's: its clock loses the green it was given, a battery takes T's, and
+    // the battery left over is hidden, as the theme's own cannot be removed.
+    const theme::Theme v = l.Edited(kThemeV);
+    CHECK(v.components.size() == 3);
+    const theme::Instance *vc = v.Find(L"clock");
+    const skin::Skin clock = skin::Default();
+    CHECK(vc && vc->sets.at(L"color") == skin::ValueOf(*clock.Find(L"color"), {}));
+    CHECK(vc && vc->sets.at(L"p1.anchor") == L"bottom-left" && vc->sets.at(L"p1.offset-x") == L"3");
+    const theme::Instance *b1 = v.Find(L"b1"), *b2 = v.Find(L"b2");
+    CHECK(b1 && b1->visible && b1->sets == (skin::Values{{L"accent", L"#FF0000"}}));
+    CHECK(b2 && !b2->visible);
+
+    // T and its undo are as they were; the copies are saved with everything else.
+    CHECK(l.Edited(kThemeT).components.size() == 2 && l.CanUndo());
+    CHECK(l.Save());
+    const Settings saved = ParseSettings(s.written);
+    CHECK(saved.OverridesFor(kThemeU).wallpaper == kWallpaperX);
+    theme::Theme ownV;
+    CHECK(s.store.LoadTheme(kThemeV, &ownV, nullptr));
+    const theme::Theme savedV = theme::Edited(ownV, saved.OverridesFor(kThemeV));
+    CHECK(savedV.components.size() == 3 && savedV.Find(L"b2") && !savedV.Find(L"b2")->visible);
+}
+
+TEST(AppLibraryKeepsSettingsWithinTheirLimitWhenCopyingComponents) {
+    FakeStores s = Stores();
+    // A theme of 8 clocks with 100 values each: as overrides, about 60 KB for each theme given them.
+    std::string big = "<theme format=\"1\" name=\"W\"><wallpaper ref=\"default\" fit=\"fill\"/>";
+    for (int i = 1; i <= 8; ++i) {
+        big += "<component id=\"i" + std::to_string(i) + "\" ref=\"clock\">";
+        for (int k = 100; k < 200; ++k) big += "<set key=\"s" + std::to_string(k) + "\" value=\"" + std::string(40, 'a') + "\"/>";
+        big += "</component>";
+    }
+    big += "</theme>";
+    const std::wstring kThemeW = L"eeeeeeeeeeeeeeee";
+    s.store.themes[kThemeW] = big;
+    std::vector<std::wstring> targets;
+    for (int i = 1; i <= 5; ++i) {
+        const std::wstring id = L"f00000000000000" + std::to_wstring(i);
+        s.store.themes[id] = "<theme format=\"1\" name=\"E\"><wallpaper ref=\"default\" fit=\"fill\"/></theme>";
+        targets.push_back(id);
+    }
+    app::Library l(s);
+    CHECK(l.Open(kThemeW) && l.Edited(kThemeW).components.size() == 8);
+    CHECK(l.CopyComponents(targets) == -1);
+    for (const std::wstring &id : targets) CHECK(!l.settings().themeOverrides.count(id));
+    CHECK(l.CopyComponents({targets[0]}) == 1);
+    CHECK(l.Edited(targets[0]).components.size() == 8);
+    CHECK(ToUtf8(SerializeSettings(l.settings())).size() <= kMaxSettingsBytes);
+}
+
 TEST(AppLibraryWallpaperAndFit) {
     FakeStores s = Stores();
     app::Library l(s);
