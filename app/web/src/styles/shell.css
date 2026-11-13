@@ -43,10 +43,12 @@
 .busy { margin-left: auto; display: flex; align-items: center; gap: var(--s3); min-width: 0; max-width: 50%; }
 
 /* The window's buttons, as Windows 11 draws its own: 46 px wide, the bar's full height, 10 px
-   glyphs. They stay above everything the page opens, the lock screen preview included, because
-   they belong to the window. Over the maximise button the native side takes the pointer (for Snap
-   Layouts) and says how to draw it with .hover and .press. */
+   glyphs. They belong to the window, so they stay usable over the lock screen preview and over a
+   dialog's scrim; menus and tooltips still open over them. Over the maximise button the native
+   side takes the pointer (for Snap Layouts) and says how to draw it with .hover and .press. */
 .winctl { display: flex; align-self: stretch; margin-left: auto; position: relative; z-index: 1001; }
+/* Fluent lifts every popup to z-index 1000000; a dialog, with its scrim, goes back under the buttons. */
+[data-portal-node]:has(.fui-DialogSurface) { z-index: 1000; }
 .busy + .winctl { margin-left: 0; }
 .winctl button {
   display: grid;
