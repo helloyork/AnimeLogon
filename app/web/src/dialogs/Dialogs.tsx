@@ -2,13 +2,14 @@
 // the focus inside, closes on Esc and animates itself in and out; what is in it is the page's own.
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { t as tr, tn } from '../i18n';
-import { Dialog, DialogActions, DialogBody, DialogContent, DialogSurface, DialogTitle } from '@fluentui/react-components';
+import { Dialog, DialogActions, DialogBody, DialogContent, DialogSurface, DialogTitle, useRestoreFocusTarget } from '@fluentui/react-components';
 import { Checkmark12Filled, FolderOpen16Regular, Video16Regular } from '@fluentui/react-icons';
 import { UacShield } from '../icons';
 import { send, thumbUrl, wallpaperUrl } from '../native';
 import { edit } from '../preview';
-import { apply, closeDialog, screenTheme, themeOf, useStore, workshopFlow, type Dialog as DialogState } from '../store';
+import { apply, closeDialog, importFlow, screenTheme, themeOf, useStore, workshopFlow, type Dialog as DialogState } from '../store';
 import { Button, cx, TextInput } from '../ui/controls';
+import { ImportDialog } from './Import';
 import { WorkshopDialog } from './Workshop';
 
 export function Dialogs() {
@@ -68,6 +69,8 @@ function One({ d }: { d: DialogState }) {
       return <CopyComponentsDialog d={d} />;
     case 'workshop':
       return <WorkshopDialog d={d} />;
+    case 'import':
+      return <ImportDialog d={d} />;
   }
 }
 
@@ -130,9 +133,22 @@ function MonitorDialog({ d }: { d: Extract<DialogState, { kind: 'monitor' }> }) 
 }
 
 // The wallpapers already here, the chosen one outlined and focused first; the last cells bring in
-// a new one from a file or, where there is Wallpaper Engine, from its videos.
-function WallpaperGrid({ current, onPick, onImport, importLabel, onWorkshop, focusCurrent }: { current: string; onPick: (id: string) => void; onImport: () => void; importLabel: string; onWorkshop: () => void; focusCurrent?: boolean }) {
+// a new one. The import cell goes straight to a file dialog and the administrator's approval when
+// it carries the `shield`, and otherwise first asks what to import; where there is Wallpaper
+// Engine and `onWorkshop` is given, a last cell offers its videos.
+function WallpaperGrid({ current, onPick, onImport, importLabel, importDetail, shield, onWorkshop, focusCurrent }: {
+  current: string;
+  onPick: (id: string) => void;
+  onImport: () => void;
+  importLabel: string;
+  importDetail: string;
+  shield?: boolean;
+  onWorkshop?: () => void;
+  focusCurrent?: boolean;
+}) {
   const s = useStore();
+  // Closing what the import cell opened over this dialog puts the focus back on that cell.
+  const restoreFocus = useRestoreFocusTarget();
   // The dialog puts the focus on its first control as it opens; where the grid is the choice, it
   // goes to the wallpaper chosen now instead, once the dialog has done so.
   const chosen = useRef<HTMLButtonElement>(null);
@@ -150,12 +166,12 @@ function WallpaperGrid({ current, onPick, onImport, importLabel, onWorkshop, foc
           <span className="t-cap3 ellipsis">{w.meta}</span>
         </button>
       ))}
-      <button type="button" className="pick" onClick={onImport}>
+      <button type="button" className="pick" {...restoreFocus} onClick={onImport}>
         <span className="pic browse"><FolderOpen16Regular /></span>
-        <span className="ellipsis shielded"><UacShield />{importLabel}</span>
-        <span className="t-cap3 ellipsis">{tr('dialog.wallpaper.file.detail')}</span>
+        <span className="ellipsis shielded">{shield && <UacShield />}{importLabel}</span>
+        <span className="t-cap3 ellipsis">{importDetail}</span>
       </button>
-      {s.env.wallpaperEngine && (
+      {onWorkshop && s.env.wallpaperEngine && (
         <button type="button" className="pick" onClick={onWorkshop}>
           <span className="pic browse"><Video16Regular /></span>
           <span className="ellipsis">Wallpaper Engine…</span>
@@ -183,8 +199,10 @@ function NewThemeDialog({ d }: { d: Extract<DialogState, { kind: 'newTheme' }> }
           <TextInput id="dlg-new-name" value={tr('dialog.new.default_name')} maxLength={40} autoFocus live={setName} />
         </Labelled>
         <Labelled label={tr('inspector.wallpaper')} hint={tr('dialog.new.hint')}>
-          <WallpaperGrid current={wallpaper} onPick={setWallpaper} importLabel={tr('dialog.new.import')} onImport={() => { closeDialog(d.id); send('import'); }}
-            onWorkshop={() => { closeDialog(d.id); workshopFlow(false); }} />
+          {/* What to import is asked as on the library's Import, Wallpaper Engine included; this
+              dialog stays under that question until a kind is chosen. */}
+          <WallpaperGrid current={wallpaper} onPick={setWallpaper} importLabel={tr('dialog.new.import')} importDetail={tr('dialog.new.import.detail')}
+            onImport={() => importFlow(d.id)} />
         </Labelled>
       </div>
     </Frame>
@@ -196,7 +214,8 @@ function WallpaperDialog({ d }: { d: Extract<DialogState, { kind: 'wallpaper' }>
   return (
     <Frame d={d} title={tr('dialog.wallpaper.title')} wide actions={<Button onClick={() => closeDialog(d.id)}>{tr('button.cancel')}</Button>}>
       <WallpaperGrid current={s.open?.wallpaper.ref ?? ''} focusCurrent onPick={ref => { closeDialog(d.id); edit('wallpaper', { ref }); }} importLabel={tr('dialog.import_file')}
-        onImport={() => { closeDialog(d.id); send('importWallpaper'); }} onWorkshop={() => { closeDialog(d.id); workshopFlow(true); }} />
+        importDetail={tr('dialog.wallpaper.file.detail')} shield onImport={() => { closeDialog(d.id); send('importWallpaper'); }}
+        onWorkshop={() => { closeDialog(d.id); workshopFlow(true); }} />
     </Frame>
   );
 }
