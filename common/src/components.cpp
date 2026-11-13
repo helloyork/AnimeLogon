@@ -91,12 +91,12 @@ std::string CountdownText() {
   </settings>
   <panel anchor="$position" size="$size" margin="5" until="$target" when="until.state!=past">
     <line when="until.state=ahead">
-      <text value="还有" font="$font" color="$color" opacity="0.85" size="0.35"/>
+      <text label="「还有」" value="还有" font="$font" color="$color" opacity="0.85" size="0.35"/>
       <text value="{until.days}" font="$font" weight="semibold" color="$color" space="0.15"/>
-      <text value="天" font="$font" color="$color" opacity="0.85" size="0.35" space="0.15"/>
+      <text label="「天」" value="天" font="$font" color="$color" opacity="0.85" size="0.35" space="0.15"/>
     </line>
     <line when="until.state=today">
-      <text value="就是今天" font="$font" weight="semibold" color="$color" size="0.5"/>
+      <text label="当天的「就是今天」" value="就是今天" font="$font" weight="semibold" color="$color" size="0.5"/>
     </line>
     <shadow label="阴影" blur="0.08" opacity="0.3" y="0.03"/>
   </panel>
