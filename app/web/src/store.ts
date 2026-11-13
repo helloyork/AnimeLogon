@@ -6,7 +6,7 @@ import { onCalmChange } from './motion';
 import { list, setLang, t } from './i18n';
 import { listen, send } from './native';
 import { onPreview, pv, requestPreviewAgain, resetPreview } from './preview';
-import type { Environment, FromNative, Instance, Library, OpenTheme, SceneControls, Workshop } from './types';
+import type { Environment, FromNative, ImportKind, Instance, Library, OpenTheme, SceneControls, Workshop } from './types';
 
 export type Tab = 'mine' | 'settings';
 
@@ -25,6 +25,7 @@ export type Dialog = { id: number } & (
   | { kind: 'addComponent' }
   | { kind: 'copyComponents' }  // the open theme's components, to other themes
   | { kind: 'workshop'; wallpaper: boolean }  // with `wallpaper`, one, for the open theme
+  | { kind: 'import'; from?: number }  // what to import; `from` is the dialog it was opened from
 );
 
 export interface State {
@@ -49,7 +50,7 @@ export interface State {
 }
 
 let state: State = {
-  env: { on: false, installed: false, others: [], version: '', user: '', accountPicture: false, lang: '', langChoice: '', wallpaperEngine: false, monitors: [], fonts: [], devices: [] },
+  env: { on: false, installed: false, others: [], version: '', user: '', accountPicture: false, lang: '', langChoice: '', wallpaperEngine: false, importable: { video: [], picture: [], package: [] }, monitors: [], fonts: [], devices: [] },
   lib: null,
   open: null,
   clock: '',
@@ -234,6 +235,17 @@ export const openLink = (to: 'home' | 'issues' | 'releases' | 'license' | 'notic
 export function workshopFlow(wallpaper: boolean) {
   send('workshop');
   openDialog({ kind: 'workshop', wallpaper });
+}
+// Bringing something in as a new theme: first what it is, then the file dialog for that kind
+// (app/src/importable.h) or Wallpaper Engine's wallpapers. Opened from another dialog, that one
+// stays under it until a kind is chosen, so Cancel goes back to it.
+export const importFlow = (from?: number) => openDialog({ kind: 'import', from });
+// The kind chosen: the dialog it was asked from closes, and the file dialog or Wallpaper Engine's
+// wallpapers follow.
+export function importKind(kind: ImportKind | 'workshop', from?: number) {
+  if (from !== undefined) closeDialog(from);
+  if (kind === 'workshop') workshopFlow(false);
+  else send('import', { kind });
 }
 
 /* --- the switch --- */

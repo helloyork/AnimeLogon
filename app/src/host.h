@@ -18,6 +18,7 @@
 #include "staging.h"
 
 #include "frame.h"
+#include "importable.h"
 #include "json.h"
 #include "library.h"
 #include "pictures.h"
@@ -70,9 +71,10 @@ private:
     struct ImportJob {
         std::wstring source, name, dir;
     };
-    // A theme from a picture, video or .altheme the person picks; with `wallpaper`, a picture or
-    // video as a wallpaper alone, for the open theme.
-    void Import(bool wallpaper);
+    // A theme from a picture, video or .altheme the person picks, the file dialog listing the
+    // types of `kind` (importable.h); with `wallpaper`, a picture or video as a wallpaper alone,
+    // for the open theme.
+    void Import(bool wallpaper, importable::Kind kind = importable::Kind::Any);
     // Stages each file on `worker_`, then installs all of them on one prompt (FinishImport).
     // With `wallpaper` there is one file, a wallpaper alone for the open theme.
     void StartImport(std::vector<ImportJob> jobs, bool wallpaper);

@@ -27,6 +27,46 @@
 .choice:active { background: var(--surface-hover); }
 .choice > span { max-width: 100%; }
 
+/* What to import: a row for each kind with its icon, its name, what it makes and the file types
+   it takes. One that is unavailable is faded but for the line that says why. */
+.kinds { display: flex; flex-direction: column; gap: var(--s2); }
+.kind {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  width: 100%;
+  padding: var(--s3) var(--s4);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color .12s;
+}
+.kind:hover { background: var(--surface-3); }
+.kind:active { background: var(--surface-hover); }
+.kind-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: var(--h-md);
+  height: var(--h-md);
+  border-radius: var(--r-sm);
+  background: var(--surface-3);
+  color: var(--text-2);
+}
+.kind-icon svg { width: 20px; height: 20px; }
+.kind:hover .kind-icon { background: var(--surface-hover); }
+.kind-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.kind-name { display: flex; align-items: center; gap: 6px; font-size: 14px; line-height: 20px; }
+.kind.off { cursor: default; }
+.kind.off:hover,
+.kind.off:active { background: var(--surface-2); }
+.kind.off:hover .kind-icon { background: var(--surface-3); }
+.kind.off .kind-icon,
+.kind.off .kind-name,
+.kind.off .t-cap3 { opacity: .4; }
+
 /* Wallpapers to choose from. */
 .pictures { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 148px), 1fr)); gap: var(--s4) var(--s3); }
 .pick {
