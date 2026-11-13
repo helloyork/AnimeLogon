@@ -52,13 +52,20 @@ interface Entering {
   delay: number;
   duration: number;
   size: number;  // the panel's em, in percent of the display's height
+  live: boolean; // it shows what is playing: drawn again every second
   url: string;
   box: number[];
 }
 
+type Panel = Omit<Entering, 'url' | 'box'>;
+const wait = (ms: number) => new Promise(ok => setTimeout(ok, ms));
+
 // Each visible panel's picture and entrance, fetched and decoded before anything comes in, so that
-// none of them is late. Null until then. Fetched again as the clock turns (the query changes):
-// the pictures shown stay until the new ones are decoded, so nothing blinks.
+// none of them is late. Null until then. The pictures show the battery and what is playing as
+// they are now, as this person's own lock screen would (host.cpp): what is playing is read once
+// the preview opens, so the panels wait for it, for at most three seconds. Panels that show what
+// is playing are drawn again every second; all are again as the clock turns (the query changes).
+// The pictures shown stay until the new ones are decoded, so nothing blinks.
 function useEntering(id: string, query: string) {
   const [parts, setParts] = useState<Entering[] | null>(null);
   const shownFor = useRef(id);
@@ -69,22 +76,51 @@ function useEntering(id: string, query: string) {
       shownFor.current = id;
       setParts(null);
     }
-    (async () => {
-      const list: Omit<Entering, 'url' | 'box'>[] = await fetch(`${ORIGIN}lock/${id}/entrance.json?${query}`).then(r => r.json()).catch(() => []);
-      const out: Entering[] = [];
-      for (const e of list) {
-        try {
-          const r = await fetch(`${ORIGIN}lock/${id}/part/${e.part}.png?${query}`);
-          if (!r.ok) continue;
-          const url = URL.createObjectURL(await r.blob());
-          urls.push(url);
-          const img = new Image();
-          img.src = url;
-          await img.decode();
-          out.push({ ...e, url, box: (r.headers.get('X-Part-Box') || '0,0,1,1').split(',').map(Number) });
-        } catch { /* a panel that cannot be drawn is left out, as the logon screen leaves it out */ }
+    const draw = async (e: Panel, q: string): Promise<Entering | null> => {
+      try {
+        const r = await fetch(`${ORIGIN}lock/${id}/part/${e.part}.png?${q}`);
+        if (!r.ok) return null;
+        const url = URL.createObjectURL(await r.blob());
+        urls.push(url);
+        const img = new Image();
+        img.src = url;
+        await img.decode();
+        return { ...e, url, box: (r.headers.get('X-Part-Box') || '0,0,1,1').split(',').map(Number) };
+      } catch {
+        return null;  // a panel that cannot be drawn is left out, as the logon screen leaves it out
       }
-      if (alive) setParts(out);
+    };
+    (async () => {
+      let list: { ready: boolean; parts: Panel[] } = { ready: false, parts: [] };
+      for (let tries = 0; alive && tries < 20; ++tries) {
+        list = await fetch(`${ORIGIN}lock/${id}/entrance.json?${query}`).then(r => r.json()).catch(() => ({ ready: true, parts: [] }));
+        if (list.ready) break;
+        await wait(150);
+      }
+      const out: Entering[] = [];
+      for (const e of list.parts) {
+        const d = await draw(e, query);
+        if (d) out.push(d);
+      }
+      if (!alive) return;
+      setParts(out);
+      const live = list.parts.filter(p => p.live);
+      for (let n = 1; alive && live.length; ++n) {
+        await wait(1000);
+        const fresh = new Map<string, Entering>();
+        for (const e of live) {
+          const d = alive ? await draw(e, `${query}&live=${n}`) : null;
+          if (d) fresh.set(e.part, d);
+        }
+        if (!alive) return;
+        setParts(shown => {
+          if (!shown) return shown;
+          // The pictures replaced are let go a frame after the new ones are in.
+          const gone = shown.filter(p => fresh.has(p.part)).map(p => p.url);
+          requestAnimationFrame(() => requestAnimationFrame(() => gone.forEach(u => URL.revokeObjectURL(u))));
+          return shown.map(p => fresh.get(p.part) ?? p);
+        });
+      }
     })();
     return () => {
       alive = false;
@@ -184,7 +220,7 @@ export function LockPreview({ theme: id, ratio }: { theme: string; ratio?: numbe
           {parts?.map(p => <EnteringPart key={p.part} p={p} go={go} woke={false} leave={0} />)}
         </div>
       </div>
-      <div className="lock-hint">{woke ? '这里是 Windows 的登录界面（示意）' : '按任意键或单击，模拟唤醒'}</div>
+      <div className="lock-hint">{woke ? 'Windows 登录界面（示意）' : '按任意键或单击以模拟唤醒'}</div>
       <Button size="sm" className="lock-exit" onPointerDown={e => e.stopPropagation()} onClick={close}>退出预览 (Esc)</Button>
     </div>
   );

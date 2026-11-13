@@ -550,17 +550,17 @@ std::wstring Library::WallpaperName(const std::wstring &ref) const {
 }
 
 std::wstring Library::WallpaperMeta(const std::wstring &ref) const {
-    if (ref == kDefaultWallpaper) return L"内置的深色背景";
+    if (ref == kDefaultWallpaper) return L"内置深色背景";
     if (ref == kNoWallpaper) return L"纯黑";
     const WallpaperInfo *w = Wallpaper(ref);
-    if (!w) return L"这个壁纸已经不在了";
+    if (!w) return L"壁纸文件已丢失";
     if (w->kind == WallpaperKind::Image) return Format(L"图片 · %d×%d", w->width, w->height);
     if (w->kind == WallpaperKind::Scene) return Format(L"场景 · %d×%d",w->width,w->height)+
-        (w->sceneFps == 0 ? L" · 静止画面" : L"")+(w->hasAudio ? L" · 有声音" : L"");
+        (w->sceneFps == 0 ? L" · 静止画面" : L"")+(w->hasAudio ? L" · 含音频" : L"");
     const double fps = w->frameRateDen ? (double)w->frameRateNum / w->frameRateDen : 0.0;
     const long long seconds = (w->durationMs + 500) / 1000;
     std::wstring text = Format(L"视频 · %d×%d · %.0f fps · %lld:%02lld", w->width, w->height, fps, seconds / 60, seconds % 60);
-    if (w->hasAudio) text += L" · 有声音";
+    if (w->hasAudio) text += L" · 含音频";
     return text;
 }
 
@@ -622,7 +622,7 @@ void Library::WriteLibrary(json::Writer &w) const {
         w.Member(L"wake", ToString(edited.wake)).Member(L"wakeSeconds", (double)edited.wakeSeconds);
         const auto *wallpaper=Wallpaper(edited.wallpaper);
         w.Member(L"sceneStatic",wallpaper && wallpaper->kind == WallpaperKind::Scene && wallpaper->sceneFps == 0);
-        w.Member(L"summary", summary.empty() ? std::wstring(L"只有壁纸") : summary);
+        w.Member(L"summary", summary.empty() ? std::wstring(L"仅壁纸") : summary);
         w.Member(L"modifications", Modifications(e.id)).Key(L"revision").Int(Revision(e.id));
         w.EndObject();
     }

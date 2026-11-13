@@ -351,7 +351,7 @@ void Host::Fit() {
 void Host::StartWebView() {
     // Delay-loaded, so the elevated helper runs without it; it ships beside the program.
     if (!LoadLibraryExW(L"WebView2Loader.dll", nullptr, LOAD_LIBRARY_SEARCH_APPLICATION_DIR)) {
-        MessageBoxW(hwnd_, L"AnimeLogon 的设置缺少 WebView2Loader.dll。请重新安装 AnimeLogon。", L"AnimeLogon",
+        MessageBoxW(hwnd_, L"AnimeLogon 设置缺少 WebView2Loader.dll，请重新安装 AnimeLogon。", L"AnimeLogon",
                     MB_OK | MB_ICONWARNING);
         DestroyWindow(hwnd_);
         return;
@@ -359,8 +359,8 @@ void Host::StartWebView() {
     LPWSTR version = nullptr;
     if (FAILED(GetAvailableCoreWebView2BrowserVersionString(nullptr, &version)) || !version) {
         MessageBoxW(hwnd_,
-                    L"AnimeLogon 的设置需要 Microsoft Edge WebView2 运行时，这台电脑上没有找到。\n\n"
-                    L"请从 Microsoft 网站安装「WebView2 运行时」后再打开。",
+                    L"AnimeLogon 设置需要 Microsoft Edge WebView2 运行时，但此电脑上未找到。\n\n"
+                    L"请从 Microsoft 网站安装 WebView2 运行时后重试。",
                     L"AnimeLogon", MB_OK | MB_ICONWARNING);
         DestroyWindow(hwnd_);
         return;
@@ -592,7 +592,7 @@ bool Host::Save() {
         saveFailed_ = false;
         return true;
     }
-    if (!saveFailed_) Problem(L"无法写入设置。改动只在这次打开期间有效。请确认 AnimeLogon 已经安装。");
+    if (!saveFailed_) Problem(L"无法写入设置，更改仅在本次运行期间有效。请确认已安装 AnimeLogon。");
     saveFailed_ = true;
     return false;
 }
@@ -698,6 +698,13 @@ bool Host::SceneFrame(const std::wstring &id, UINT width, UINT height, double ti
     w.EndArray(); *bounds=w.text(); return true;
 }
 
+data::Snapshot Host::LockData(bool *ready) {
+    data::Snapshot s;
+    s.battery = data::ReadBattery();
+    s.media = previewMedia_.Get(library_.settings().media, ready);
+    return s;
+}
+
 void Host::OnResource(ICoreWebView2WebResourceRequestedEventArgs *args) {
     ComPtr<ICoreWebView2WebResourceRequest> request;
     LPWSTR raw = nullptr;
@@ -784,9 +791,15 @@ void Host::OnResource(ICoreWebView2WebResourceRequestedEventArgs *args) {
     } else if (path.rfind(L"lock/", 0) == 0 && EndsWith(path, L"/entrance.json")) {
         // How each panel of a theme's visible components comes in, for the lock-screen preview
         // to play with one picture per panel (below): the same values the logon screen reads.
+        // `ready` is false until what is playing has been read, and the pictures would not yet
+        // show it: the page asks again. A panel of a component that shows what is playing is
+        // `live`: the page draws it again every second, as the logon screen moves its progress
+        // bar and follows a song starting, changing or stopping.
         const std::wstring id = path.substr(5, path.size() - 5 - 14);
+        bool ready = false;
+        LockData(&ready);
         json::Writer w;
-        w.BeginArray();
+        w.BeginObject().Member(L"ready", ready).Key(L"parts").BeginArray();
         if (library_.Entry(id) && library_.settings().components) {
             const theme::Theme t = library_.Edited(id);
             for (const theme::Instance &i : t.components) {
@@ -796,19 +809,21 @@ void Host::OnResource(ICoreWebView2WebResourceRequestedEventArgs *args) {
                 for (const auto &[key, value] : i.sets)
                     if (skin::Accepts(skin, key, value)) values[key] = value;
                 const skin::Resolved r = skin::Resolve(skin, values);
+                const std::vector<data::Source> sources = skin::SourcesOf(skin);
+                const bool live = std::find(sources.begin(), sources.end(), data::Source::Media) != sources.end();
                 for (size_t k = 0; k < r.panels.size(); ++k) {
-                    const skin::Panel &p = r.panels[k];
-                    const wchar_t *how = p.enter == skin::Enter::Rise   ? L"rise"
-                                         : p.enter == skin::Enter::Zoom ? L"zoom"
-                                         : p.enter == skin::Enter::None ? L"none"
+                    const skin::Panel &panel = r.panels[k];
+                    const wchar_t *how = panel.enter == skin::Enter::Rise   ? L"rise"
+                                         : panel.enter == skin::Enter::Zoom ? L"zoom"
+                                         : panel.enter == skin::Enter::None ? L"none"
                                                                         : L"fade";
                     w.BeginObject().Member(L"part", i.id + L".p" + std::to_wstring(k + 1)).Member(L"enter", how);
-                    w.Member(L"delay", (double)p.enterDelay).Member(L"duration", (double)p.enterDuration);
-                    w.Member(L"size", (double)p.size).EndObject();
+                    w.Member(L"delay", (double)panel.enterDelay).Member(L"duration", (double)panel.enterDuration);
+                    w.Member(L"size", (double)panel.size).Member(L"live", live).EndObject();
                 }
             }
         }
-        w.EndArray();
+        w.EndArray().EndObject();
         const std::string text = ToUtf8(w.text());
         body.assign(text.begin(), text.end());
         type = L"application/json";
@@ -823,7 +838,8 @@ void Host::OnResource(ICoreWebView2WebResourceRequestedEventArgs *args) {
             if (shaped) Shape(id, w, &h);
             const std::vector<Screen> wall = shaped ? Wall(w, h) : std::vector<Screen>();
             std::vector<Bound> placed;
-            if (pictures_.Theme(library_.Edited(id), w, h, Draw::ComponentsOnly, &p, &placed, &wall, part)) {
+            const data::Snapshot now = LockData(nullptr);
+            if (pictures_.Theme(library_.Edited(id), w, h, Draw::ComponentsOnly, &p, &placed, &wall, part, &now)) {
                 body = Png(p);
                 for (const Bound &b : placed)
                     if (b.holds) {
@@ -856,8 +872,9 @@ void Host::OnResource(ICoreWebView2WebResourceRequestedEventArgs *args) {
             if (shaped) Shape(id, w, &h);
             const std::vector<Screen> wall = shaped ? Wall(w, h) : std::vector<Screen>();
             const theme::Theme t = library_.Edited(id);
+            const data::Snapshot now = LockData(nullptr);
             if (pictures_.Theme(t, w, h, full && library_.settings().components ? Draw::Everything : Draw::WallpaperOnly, &p,
-                                nullptr, &wall))
+                                nullptr, &wall, L"", &now))
                 body = Bmp(p);
         }
         type = L"image/bmp";
@@ -991,7 +1008,7 @@ void Host::OnMessage(const json::Value &m) {
         ShellExecuteW(hwnd_, L"open", paths::LogDir().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
     } else if (op == L"uninstall") {
         if (!paths::Sandbox().empty()) {
-            Problem(L"这是沙盒里的设置，不能卸载这台电脑上的 AnimeLogon。");
+            Problem(L"当前为沙盒模式，无法卸载此电脑上的 AnimeLogon。");
             return;
         }
         const std::wstring dir = machine::InstallDir();
@@ -1056,7 +1073,7 @@ void Host::StartImport(std::vector<ImportJob> jobs, bool wallpaper) {
             };
             progressed(0);
             if (FAILED(co)) {
-                results[i].error = L"无法初始化 COM，无法导入。";
+                results[i].error = L"无法初始化 COM，导入已中止。";
                 continue;
             }
             const bool scene = EndsWith(j.source, L".alscene");
@@ -1094,7 +1111,7 @@ void Host::FinishImport() {
     bool edited = false;
     if (cancel_.load()) {
         // Stopped from the busy bar: nothing staged so far is installed.
-        Toast(L"已取消，没有导入");
+        Toast(L"已取消导入");
     } else if (importWallpaper_) {
         const staging::Result &r = results[0];
         if (r.ok) {
@@ -1107,9 +1124,9 @@ void Host::FinishImport() {
                 edited = !library_.open().empty() && library_.SetWallpaper(id);
                 Toast(L"已导入壁纸「" + r.name + L"」");
             } else if (code == commit::kDeclined) {
-                Toast(L"已取消，没有导入");
+                Toast(L"已取消导入");
             } else {
-                Problem(L"导入失败：无法把壁纸写入受保护的目录。详细原因记录在 " + paths::LogPath(L"config.log") + L"。");
+                Problem(L"导入失败：无法将壁纸写入受保护的目录。详细信息见 " + paths::LogPath(L"config.log") + L"。");
             }
         } else {
             Problem(r.error.empty() ? std::wstring(L"导入失败。") : r.error);
@@ -1159,9 +1176,9 @@ void Host::FinishImport() {
                 Toast(Format(L"已导入 %zu 个主题", added.size()));
             }
             if (code == commit::kDeclined) {
-                if (added.empty()) Toast(L"已取消，没有导入");
+                if (added.empty()) Toast(L"已取消导入");
             } else if (code != commit::kOk) {
-                Problem(L"导入失败：无法把主题写入受保护的目录。详细原因记录在 " + paths::LogPath(L"config.log") + L"。");
+                Problem(L"导入失败：无法将主题写入受保护的目录。详细信息见 " + paths::LogPath(L"config.log") + L"。");
             }
         }
         if (!problems.empty())
@@ -1229,7 +1246,7 @@ void Host::ImportComponent(bool add) {
     const staging::Result r = staging::Component(path, dir);
     if (!r.ok) {
         secure::RemoveTree(dir);
-        Problem(L"无法导入这个组件：" + r.error);
+        Problem(L"无法导入此组件：" + r.error);
         return;
     }
     const std::wstring id = NewComponentId();
@@ -1249,9 +1266,9 @@ void Host::ImportComponent(bool add) {
             return;
         }
     } else if (code == commit::kDeclined) {
-        Toast(L"已取消，没有导入");
+        Toast(L"已取消导入");
     } else {
-        Problem(L"导入失败：无法把组件写入受保护的目录。");
+        Problem(L"导入失败：无法将组件写入受保护的目录。");
     }
     SendState();
 }
@@ -1262,7 +1279,7 @@ std::wstring Host::CommitTheme(const theme::Theme &t, const std::wstring &then) 
     theme::Theme check;
     std::wstring error;
     if (!theme::Parse(text, theme::Form::Installed, &check, &error)) {
-        Problem(L"无法保存这个主题：" + error);
+        Problem(L"无法保存此主题：" + error);
         return L"";
     }
     const std::wstring dir = staging::NewImportDir();
@@ -1345,8 +1362,8 @@ void Host::RemoveTheme(const std::wstring &id) {
     pictures_.Forget();
     if (code == commit::kOk) Toast(L"已删除「" + name + L"」");
     else if (code == commit::kDeclined) Toast(L"已取消");
-    else if (gone) Problem(L"已删除「" + name + L"」，但它的壁纸或组件暂时删不掉，可能正被登录界面使用。");
-    else Problem(L"无法删除这个主题，它的文件可能正被登录界面使用。请稍后再试。");
+    else if (gone) Problem(L"已删除「" + name + L"」，但其壁纸或组件可能正被登录界面占用，暂时无法删除。");
+    else Problem(L"无法删除此主题，其文件可能正被登录界面占用。请稍后重试。");
     SendState();
 }
 
@@ -1366,14 +1383,14 @@ void Host::ExportTheme(const std::wstring &id) {
 
 void Host::Switch(bool on) {
     if (!paths::Sandbox().empty()) {
-        Problem(L"这是沙盒里的设置，不能启用或关闭这台电脑上的 AnimeLogon。");
+        Problem(L"当前为沙盒模式，无法启用或关闭此电脑上的 AnimeLogon。");
         SendEnvironment();
         return;
     }
     const int code = commit::RunElevated(hwnd_, on ? L"--switch-on" : L"--switch-off");
-    if (code == commit::kOk) Toast(on ? L"已启用，下次锁屏生效" : L"已关闭，锁屏恢复 Windows 默认");
+    if (code == commit::kOk) Toast(on ? L"已启用，下次锁屏生效" : L"已关闭，锁屏已恢复为 Windows 默认界面");
     else if (code == commit::kDeclined) Toast(L"已取消");
-    else Problem(L"操作失败。请确认 AnimeLogon 已经安装，并且有管理员权限。");
+    else Problem(L"操作失败。请确认已安装 AnimeLogon 并具有管理员权限。");
     SendEnvironment();
 }
 

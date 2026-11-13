@@ -183,7 +183,7 @@ export function resetFlow(id: string) {
   if (!t) return;
   openDialog({
     kind: 'confirm', title: '恢复默认', action: '恢复默认',
-    body: [`清除对「${t.name}」的 ${t.modifications} 项修改，包括换过的壁纸和添加的组件。`],
+    body: [`清除对「${t.name}」的 ${t.modifications} 项修改，包括更换的壁纸和添加的组件。`],
     run: () => {
       if (state.open?.id === id) send('reset', { seq: ++pv.seq });
       else { send('open', { theme: id }); send('reset'); send('close'); }
@@ -195,7 +195,7 @@ export function deleteFlow(id: string) {
   if (!t) return;
   openDialog({
     kind: 'confirm', title: `删除「${t.name}」`, action: '删除', elevated: true,
-    body: ['主题会从这台电脑上删除，只有它在用的壁纸和组件也一起删除。', ...(usedOn(id).length ? ['它正在使用，删除后锁屏改用「默认」主题。'] : [])],
+    body: ['将从此电脑删除该主题，以及仅由该主题使用的壁纸和组件。', ...(usedOn(id).length ? ['该主题正在使用，删除后锁屏将改用「默认」主题。'] : [])],
     run: () => {
       if (state.view === 'theme' && state.open?.id === id) setState({ view: 'library' });
       send('remove', { theme: id });

@@ -1,10 +1,11 @@
 // Draws a skin over a still image, for judging its look without a lock screen:
 // skin_preview <background> <out.png> [--skin skin.xml] [--locale ll-CC] [--time HH:MM] [--date YYYY-MM-DD]
 //              [--hours auto|12|24] [--ampm on|off] [--date-style weekday|long|none] [--language ll-CC]
-//              [--component battery|media|countdown] [--data sample|paused|charging]
+//              [--component battery|media|countdown] [--data sample|paused|charging|mains]
 //              [setting=value ...] [p1.l1.t1.weight=300 ...]
 // Without --skin or --component it draws the default clock. --locale stands in for the regional
-// format. Without --data there is no battery and nothing playing.
+// format. Without --data there is no battery and nothing playing; with mains, a machine without a
+// battery, on mains power, playing nothing.
 #include <windows.h>
 
 #include <fcntl.h>
@@ -85,6 +86,7 @@ int wmain(int argc, wchar_t **argv) {
             const std::wstring kind = argv[++i];
             if (kind == L"paused") snapshot.media.state = data::MediaState::Paused;
             if (kind == L"charging") snapshot.battery = {data::BatteryState::Charging, 42, -1};
+            if (kind == L"mains") snapshot = {{data::BatteryState::None, -1, -1, true}, {}};
             withData = true;
         } else if (arg.find(L'=') != std::wstring::npos) {
             const size_t eq = arg.find(L'=');

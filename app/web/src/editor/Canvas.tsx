@@ -420,8 +420,8 @@ export function Canvas() {
       {/* Which display's shape the stage has; other shapes are in the toolbar's lock screen preview. */}
       <div className="stage-foot">
         <Desktop16Regular />
-        <span>{spanning() ? '横跨所有显示器' : `${m.name} · ${ratioLabel(m.width, m.height)}`}</span>
-        {!s.lib!.settings.components && <span>· 组件已在设置里关闭，锁屏上只显示壁纸。</span>}
+        <span>{spanning() ? '跨屏显示' : `${m.name} · ${ratioLabel(m.width, m.height)}`}</span>
+        {!s.lib!.settings.components && <span>· 组件已在设置中关闭，锁屏仅显示壁纸。</span>}
       </div>
     </div>
   );
