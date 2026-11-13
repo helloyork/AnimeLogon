@@ -18,6 +18,12 @@ struct Result {
 
 using Progress = std::function<void(double)>;
 
+// Whether the importer takes scene wallpapers: .alscene files, and theme packages whose wallpaper
+// is a scene. While this is false both are turned away with a message, and the settings app's
+// file dialogs leave .alscene out. Scenes installed before stay, still play and still export;
+// the scene code is built and tested as before.
+inline constexpr bool kTakesScenes = false;
+
 // A new, empty import directory, %LOCALAPPDATA%\AnimeLogon\import\<12 hex digits>; empty if it
 // cannot be made.
 std::wstring NewImportDir();
@@ -27,14 +33,15 @@ bool LooksLikePicture(const std::wstring &path);
 
 // A video or a picture as a new theme, staged for --commit-package: the wallpaper normalised
 // into dir\wallpaper\ (a video transcoded, a picture decoded to image.bmp), and a theme.xml
-// named after the file that places it and the clock. Videos need COM on the calling thread.
+// that places it and the clock, named `name` (cut to a theme name's length) or, without one,
+// after the file. Videos need COM on the calling thread.
 Result Media(const std::wstring &source, const std::wstring &dir, const std::atomic<bool> &cancel,
-             const Progress &progress);
+             const Progress &progress, const std::wstring &name = L"");
 
 // A video or a picture as a wallpaper alone, staged for --commit-wallpaper: normalised as Media
-// does, into dir itself, and named after the file.
+// does, into dir itself, and named as Media names it.
 Result Wallpaper(const std::wstring &source, const std::wstring &dir, const std::atomic<bool> &cancel,
-                 const Progress &progress);
+                 const Progress &progress, const std::wstring &name = L"");
 
 // An .altheme, staged for --commit-package. The archive must pass package::Reader; its
 // theme.xml must parse; the wallpaper file it carries must be the one theme.xml names (or none

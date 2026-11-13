@@ -402,42 +402,42 @@ struct Offer {
 // What the settings app offers for each element, in order. Slider ranges are what is useful
 // to drag through; a skin may still write any value its attribute allows.
 const Offer kOffers[] = {
-    {L"panel", L"anchor", L"位置", L"相对屏幕的哪个位置。", Control::Choice, 0, 0, 0, L"top"},
-    {L"panel", L"offset-x", L"水平偏移", L"屏幕宽度的百分比，向右为正。", Control::Slider, -50, 50, 0.1, L"0"},
-    {L"panel", L"offset-y", L"垂直偏移", L"屏幕高度的百分比，向下为正。", Control::Slider, -50, 50, 0.1, L"0"},
-    {L"panel", L"margin", L"边距", L"离屏幕边缘的距离，短边的百分比。", Control::Slider, 0, 40, 0.5, L"7"},
-    {L"panel", L"size", L"大小", L"屏幕高度的百分比，其余文字按它的比例。", Control::Slider, 1, 50, 0.5, L"10"},
-    {L"panel", L"align", L"文字对齐", L"多行文字之间如何对齐。", Control::Choice, 0, 0, 0, L"auto"},
-    {L"panel", L"enter", L"方式", L"锁屏出现后，它怎样出现。", Control::Choice, 0, 0, 0, L"fade"},
-    {L"panel", L"enter-delay", L"延迟", L"壁纸动起来之后，再等多久开始出现。", Control::Slider, 0, 5, 0.05, L"0"},
-    {L"panel", L"enter-duration", L"时长", L"出现的过程用多久。", Control::Slider, 0, 3, 0.05, L"0.4"},
+    {L"panel", L"anchor", L"锚点", L"组件在屏幕上的对齐位置。", Control::Choice, 0, 0, 0, L"top"},
+    {L"panel", L"offset-x", L"水平偏移", L"以屏幕宽度的百分比计，正值向右。", Control::Slider, -50, 50, 0.1, L"0"},
+    {L"panel", L"offset-y", L"垂直偏移", L"以屏幕高度的百分比计，正值向下。", Control::Slider, -50, 50, 0.1, L"0"},
+    {L"panel", L"margin", L"边距", L"与屏幕边缘的距离，以屏幕短边的百分比计。", Control::Slider, 0, 40, 0.5, L"7"},
+    {L"panel", L"size", L"大小", L"以屏幕高度的百分比计，其他文字按比例缩放。", Control::Slider, 1, 50, 0.5, L"10"},
+    {L"panel", L"align", L"文字对齐", L"多行文字的对齐方式。", Control::Choice, 0, 0, 0, L"auto"},
+    {L"panel", L"enter", L"效果", L"锁屏显示时组件的入场效果。", Control::Choice, 0, 0, 0, L"fade"},
+    {L"panel", L"enter-delay", L"延迟", L"壁纸开始显示后，延迟多久开始入场。", Control::Slider, 0, 5, 0.05, L"0"},
+    {L"panel", L"enter-duration", L"时长", L"入场动画的持续时间。", Control::Slider, 0, 3, 0.05, L"0.4"},
     {L"text", L"font", L"字体", L"仅列出为所有用户安装的字体。", Control::Font, 0, 0, 0, L""},
-    {L"text", L"weight", L"字重", L"字体没有的字重会用最接近的代替。", Control::Slider, 100, 900, 50, L"400"},
-    {L"text", L"size", L"相对大小", L"相对于整体大小。", Control::Slider, 0.05, 2, 0.01, L"1"},
-    {L"text", L"tracking", L"字距", L"相对于这段文字的字号。", Control::Slider, -0.2, 0.5, 0.005, L"0"},
-    {L"text", L"space", L"前方留白", L"与前一段文字的距离，相对于整体大小。", Control::Slider, 0, 2, 0.01, L"0"},
-    {L"line", L"gap", L"与上一行的距离", L"从上一行的基线算起，相对于整体大小。", Control::Slider, -1, 2, 0.01, L"0.2"},
+    {L"text", L"weight", L"字重", L"字体不含所选字重时，使用最接近的字重。", Control::Slider, 100, 900, 50, L"400"},
+    {L"text", L"size", L"相对大小", L"相对于组件大小。", Control::Slider, 0.05, 2, 0.01, L"1"},
+    {L"text", L"tracking", L"字距", L"相对于本段文字的字号。", Control::Slider, -0.2, 0.5, 0.005, L"0"},
+    {L"text", L"space", L"前间距", L"与前一段文字的间距，相对于组件大小。", Control::Slider, 0, 2, 0.01, L"0"},
+    {L"line", L"gap", L"行距", L"到上一行基线的距离，相对于组件大小。", Control::Slider, -1, 2, 0.01, L"0.2"},
     {L"text", L"color", L"颜色", L"", Control::Color, 0, 0, 0, L"#FFFFFF"},
     {L"text", L"opacity", L"不透明度", L"", Control::Slider, 0, 1, 0.01, L"1"},
     {L"text", L"style", L"字形", L"", Control::Choice, 0, 0, 0, L"normal"},
-    {L"text", L"case", L"大小写", L"只影响拉丁字母。", Control::Choice, 0, 0, 0, L"none"},
+    {L"text", L"case", L"大小写", L"仅作用于拉丁字母。", Control::Choice, 0, 0, 0, L"none"},
     // Offered only where the component lets a text hang (Parts).
-    {L"text", L"hang", L"对齐", L"挂在旁边时，这一行和其他行只按其余文字对齐。", Control::Choice, 0, 0, 0, L"false"},
-    {L"shadow", L"opacity", L"浓度", L"0 为不画阴影。", Control::Slider, 0, 1, 0.01, L"0.3"},
-    {L"shadow", L"blur", L"模糊", L"相对于整体大小。", Control::Slider, 0, 0.5, 0.005, L"0.1"},
-    {L"shadow", L"x", L"水平偏移", L"相对于整体大小。", Control::Slider, -0.3, 0.3, 0.005, L"0"},
-    {L"shadow", L"y", L"垂直偏移", L"相对于整体大小。", Control::Slider, -0.3, 0.3, 0.005, L"0"},
+    {L"text", L"hang", L"行内对齐", L"悬挂时，该文字不参与各行之间的对齐，对齐以其余文字为准。", Control::Choice, 0, 0, 0, L"false"},
+    {L"shadow", L"opacity", L"不透明度", L"为 0 时不显示阴影。", Control::Slider, 0, 1, 0.01, L"0.3"},
+    {L"shadow", L"blur", L"模糊", L"相对于组件大小。", Control::Slider, 0, 0.5, 0.005, L"0.1"},
+    {L"shadow", L"x", L"水平偏移", L"相对于组件大小。", Control::Slider, -0.3, 0.3, 0.005, L"0"},
+    {L"shadow", L"y", L"垂直偏移", L"相对于组件大小。", Control::Slider, -0.3, 0.3, 0.005, L"0"},
     {L"shadow", L"color", L"颜色", L"", Control::Color, 0, 0, 0, L"#000000"},
-    {L"backdrop", L"opacity", L"浓度", L"在文字背后压暗画面；0 为不画。", Control::Slider, 0, 1, 0.01, L"0"},
+    {L"backdrop", L"opacity", L"不透明度", L"在文字下方加深背景以提高可读性；为 0 时不显示。", Control::Slider, 0, 1, 0.01, L"0"},
     {L"backdrop", L"color", L"颜色", L"", Control::Color, 0, 0, 0, L"#000000"},
-    {L"bar", L"length", L"长度", L"相对于整体大小。", Control::Slider, 0.5, 20, 0.1, L"6"},
-    {L"bar", L"thickness", L"粗细", L"相对于整体大小。", Control::Slider, 0.02, 0.5, 0.005, L"0.12"},
-    {L"bar", L"radius", L"圆角", L"0 为直角，0.5 为两端全圆。", Control::Slider, 0, 0.5, 0.01, L"0.5"},
-    {L"bar", L"space", L"前方留白", L"与前一段的距离，相对于整体大小。", Control::Slider, 0, 2, 0.01, L"0"},
-    {L"bar", L"color", L"颜色", L"已走过的部分。", Control::Color, 0, 0, 0, L"#FFFFFF"},
+    {L"bar", L"length", L"长度", L"相对于组件大小。", Control::Slider, 0.5, 20, 0.1, L"6"},
+    {L"bar", L"thickness", L"粗细", L"相对于组件大小。", Control::Slider, 0.02, 0.5, 0.005, L"0.12"},
+    {L"bar", L"radius", L"圆角", L"0 为直角，0.5 为半圆形端点。", Control::Slider, 0, 0.5, 0.01, L"0.5"},
+    {L"bar", L"space", L"前间距", L"与前一段内容的间距，相对于组件大小。", Control::Slider, 0, 2, 0.01, L"0"},
+    {L"bar", L"color", L"颜色", L"已完成部分。", Control::Color, 0, 0, 0, L"#FFFFFF"},
     {L"bar", L"opacity", L"不透明度", L"", Control::Slider, 0, 1, 0.01, L"1"},
-    {L"bar", L"track", L"底色", L"还没走到的部分。", Control::Color, 0, 0, 0, L"#FFFFFF"},
-    {L"bar", L"track-opacity", L"底色浓度", L"0 为不画底。", Control::Slider, 0, 1, 0.01, L"0.25"},
+    {L"bar", L"track", L"轨道颜色", L"未完成部分。", Control::Color, 0, 0, 0, L"#FFFFFF"},
+    {L"bar", L"track-opacity", L"轨道不透明度", L"为 0 时不显示轨道。", Control::Slider, 0, 1, 0.01, L"0.25"},
 };
 
 std::vector<Option> OptionsOf(const std::wstring &attribute) {
@@ -446,11 +446,11 @@ std::vector<Option> OptionsOf(const std::wstring &attribute) {
                 {L"left", L"左侧居中"},    {L"center", L"居中"},        {L"right", L"右侧居中"},
                 {L"bottom-left", L"左下"}, {L"bottom", L"下方居中"},    {L"bottom-right", L"右下"}};
     if (attribute == L"align")
-        return {{L"auto", L"自动"}, {L"left", L"左"}, {L"center", L"中"}, {L"right", L"右"}};
+        return {{L"auto", L"自动"}, {L"left", L"左对齐"}, {L"center", L"居中"}, {L"right", L"右对齐"}};
     if (attribute == L"style") return {{L"normal", L"常规"}, {L"italic", L"斜体"}};
-    if (attribute == L"case") return {{L"none", L"原样"}, {L"upper", L"大写"}, {L"lower", L"小写"}};
-    if (attribute == L"hang") return {{L"true", L"挂在旁边"}, {L"false", L"一起对齐"}};
-    if (attribute == L"enter") return {{L"fade", L"淡入"}, {L"rise", L"上浮"}, {L"zoom", L"放大"}, {L"none", L"直接"}};
+    if (attribute == L"case") return {{L"none", L"不转换"}, {L"upper", L"全部大写"}, {L"lower", L"全部小写"}};
+    if (attribute == L"hang") return {{L"true", L"悬挂"}, {L"false", L"参与对齐"}};
+    if (attribute == L"enter") return {{L"fade", L"淡入"}, {L"rise", L"上移淡入"}, {L"zoom", L"缩放淡入"}, {L"none", L"无"}};
     return {};
 }
 
@@ -691,7 +691,7 @@ std::vector<Part> Parts(const Skin &skin) {
                 parts.push_back(std::move(shadow));
             } else if (e.name == L"backdrop") {
                 const std::wstring *own = e.Find(L"label");
-                Part backdrop{pk + L".b", own ? *own : L"暗晕", {}};
+                Part backdrop{pk + L".b", own ? *own : L"背景遮罩", {}};
                 offer(backdrop, L"backdrop", pk + L".b");
                 parts.push_back(std::move(backdrop));
             }
@@ -868,10 +868,10 @@ std::string DefaultText() {
       <option value="bottom" label="下方居中"/>
       <option value="bottom-right" label="右下"/>
     </choice>
-    <number id="size" label="大小" detail="时间的字号，占屏幕高度的百分比。" default="10" min="5" max="20" step="0.5"/>
+    <number id="size" label="大小" detail="时间文字的字号，以屏幕高度的百分比计。" default="10" min="5" max="20" step="0.5"/>
     <font id="font" label="字体" detail="仅列出为所有用户安装的字体。" default=""/>
     <color id="color" label="颜色" default="#FFFFFF"/>
-    <toggle id="shade" label="背景暗晕" detail="在时钟背后稍微压暗画面，亮色壁纸上也能看清。" default="on" on="0.22" off="0"/>
+    <toggle id="shade" label="背景遮罩" detail="在时钟下方加深背景，提高在浅色壁纸上的可读性。" default="on" on="0.22" off="0"/>
   </settings>
   <panel anchor="$position" size="$size" margin="7">
     <line>

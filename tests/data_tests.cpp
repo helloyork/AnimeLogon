@@ -279,6 +279,66 @@ TEST(BuiltInComponentsComeWithTheProgram) {
     CHECK(list.size() >= 4 && list[1].id == L"battery" && list[1].builtIn && list[3].id == L"countdown");
 }
 
+// Where the power comes from, and what the battery and media components show when there is no
+// battery or nothing is playing.
+TEST(BuiltInComponentsShowSomethingFittingWhenThereIsNothingToShow) {
+    const SYSTEMTIME today = Day(2026, 12, 20);
+    const RegionalFormat us = StandardFormat(L"en-US");
+    const ClockStyle style;
+    data::Snapshot desktop;  // no battery, so on mains power
+    desktop.battery.mains = true;
+    data::Snapshot laptop = Playing();  // on the battery
+    data::Snapshot plugged = Playing();
+    plugged.battery = {data::BatteryState::Charging, 50, -1, true};
+    const data::Snapshot unknown;  // Windows could not tell
+    auto source = [&](const data::Snapshot &s) { return data::StateOf(L"power.source", {&s, {}, 0}, today); };
+    CHECK(source(desktop) == L"mains" && source(laptop) == L"battery" && source(plugged) == L"mains" && source(unknown) == L"none");
+    data::Condition c;
+    CHECK(data::ParseCondition(L"power.source=mains", &c) && !data::ParseCondition(L"power.source=ac", &c));
+
+    auto holds = [&](const std::optional<data::Condition> &when, const data::Snapshot &s) {
+        const data::Context context{&s, {}, 1030 * kSecond};
+        return !when || Holds(*when, us, style, today, &context);
+    };
+
+    // The battery: its charge where there is a battery; where there is none, nothing unless a
+    // plug and 交流电源 are switched on; nothing where Windows cannot tell. In the same line, after the
+    // battery's own texts, so that their adjustments (p1.l1.t1..t3) are where they were.
+    skin::Skin battery;
+    CHECK(BuiltInComponent(L"battery", &battery));
+    skin::Resolved r = skin::Resolve(battery, {});
+    CHECK(r.panels.size() == 1 && r.panels[0].lines.size() == 1 && r.panels[0].lines[0].texts.size() == 5);
+    if (r.panels.size() != 1 || r.panels[0].lines.size() != 1 || r.panels[0].lines[0].texts.size() != 5) return;
+    const skin::Panel &bp = r.panels[0];
+    const auto &bt = bp.lines[0].texts;
+    CHECK(holds(bp.when, desktop) && holds(bp.when, laptop) && holds(bp.when, plugged) && !holds(bp.when, unknown));
+    CHECK(bt[0].value == L"{battery.glyph}" && bt[1].value == L"{battery.percent}%");
+    CHECK(holds(bt[1].when, laptop) && !holds(bt[3].when, laptop) && !holds(bt[4].when, laptop) && !holds(bt[4].when, plugged));
+    CHECK(!holds(bt[1].when, desktop) && holds(bt[3].when, desktop) && holds(bt[4].when, desktop));
+    CHECK(bt[3].value == std::wstring(1, (wchar_t)0xE95F) && bt[4].value == L"交流电源");
+    CHECK(bt[3].opacity == 0.0f && bt[4].opacity == 0.0f);
+    r = skin::Resolve(battery, {{L"mains", L"on"}});
+    CHECK(r.panels.size() == 1 && r.panels[0].lines[0].texts.size() == 5 && r.panels[0].lines[0].texts[3].opacity == 1.0f &&
+          r.panels[0].lines[0].texts[4].opacity == 1.0f);
+
+    // What is playing: nothing when nothing is, unless 未在播放 is switched on. Also after the
+    // title in its line, so that the lines and texts keep their adjustment keys.
+    skin::Skin media;
+    CHECK(BuiltInComponent(L"media", &media));
+    r = skin::Resolve(media, {});
+    CHECK(r.panels.size() == 1 && r.panels[0].lines.size() == 3 && r.panels[0].lines[0].texts.size() == 4);
+    if (r.panels.size() != 1 || r.panels[0].lines.size() != 3 || r.panels[0].lines[0].texts.size() != 4) return;
+    data::Snapshot quiet = laptop;
+    quiet.media = {};
+    const skin::Panel &mp = r.panels[0];
+    const auto &mt = mp.lines[0].texts;
+    CHECK(holds(mp.when, quiet) && holds(mt[3].when, quiet) && !holds(mp.lines[1].when, quiet) && !holds(mp.lines[2].when, quiet));
+    CHECK(!holds(mt[3].when, laptop) && mt[1].value == L"{media.title}");
+    CHECK(mt[3].value == L"未在播放" && mt[2].opacity == 0.0f && mt[3].opacity == 0.0f);
+    r = skin::Resolve(media, {{L"idle", L"on"}});
+    CHECK(r.panels.size() == 1 && r.panels[0].lines[0].texts.size() == 4 && r.panels[0].lines[0].texts[3].opacity == 0.7f);
+}
+
 TEST(SettingsKeepWhetherWhatIsPlayingIsShown) {
     Settings s;
     CHECK(s.media);

@@ -41,7 +41,7 @@ export function IconButton({ label, tip, ...rest }: Omit<ButtonProps, 'children'
 }
 
 // Puts a modified value back as the theme has it.
-export function ResetButton({ onClick, label = '恢复这一项' }: { onClick: () => void; label?: string }) {
+export function ResetButton({ onClick, label = '恢复默认值' }: { onClick: () => void; label?: string }) {
   return <IconButton size="xs" quiet label={label} icon={<ArrowCounterclockwise16Regular />} onClick={onClick} />;
 }
 

@@ -233,7 +233,8 @@ bool Pictures::Wallpaper(const std::wstring &ref, Scaling fit, UINT width, UINT 
 }
 
 bool Pictures::Theme(const theme::Theme &theme, UINT width, UINT height, Draw draw, Picture *out,
-                     std::vector<Bound> *bounds, const std::vector<Screen> *screens, const std::wstring &only) {
+                     std::vector<Bound> *bounds, const std::vector<Screen> *screens, const std::wstring &only,
+                     const data::Snapshot *data) {
     const size_t dot = only.find(L'.');
     const std::wstring onlyInstance = only.substr(0, dot);
     const size_t onlyPanel = dot == std::wstring::npos ? 0 : (size_t)_wtoi(only.c_str() + dot + 2);
@@ -248,11 +249,10 @@ bool Pictures::Theme(const theme::Theme &theme, UINT width, UINT height, Draw dr
         SYSTEMTIME now{};
         GetLocalTime(&now);
         const RegionalFormat format = UserFormat();
-        // Components that show the battery or what is playing show it with made-up values, so
-        // that they can be seen and placed on any machine.
+        // The battery and what is playing as given, or made up (pictures.h).
         FILETIME utc{};
         GetSystemTimeAsFileTime(&utc);
-        const data::Snapshot sample = data::Sample((uint64_t)utc.dwHighDateTime << 32 | utc.dwLowDateTime);
+        const data::Snapshot sample = data ? *data : data::Sample((uint64_t)utc.dwHighDateTime << 32 | utc.dwLowDateTime);
         for (size_t s = 0; s < where.size(); ++s) {
             if (!where[s].components) continue;
             RECT r{};

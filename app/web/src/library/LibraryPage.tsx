@@ -23,6 +23,7 @@ import {
   themeOf,
   usedOn,
   useStore,
+  workshopFlow,
 } from '../store';
 import type { ThemeEntry } from '../types';
 import { Button, cx, IconButton } from '../ui/controls';
@@ -46,13 +47,14 @@ export function LibraryPage() {
           <span className="t-cap num">{`${lib.themes.length} 个主题`}</span>
           <div className="actions">
             <Button shield onClick={() => send('import')}>导入…</Button>
+            {s.env.wallpaperEngine && <Button onClick={() => workshopFlow(false)}>从 Wallpaper Engine 导入…</Button>}
             <Button icon={<Add16Regular />} onClick={() => openDialog({ kind: 'newTheme' })}>新建主题</Button>
           </div>
         </div>
         {!s.env.installed && (
           <div className="notice" role="status">
             <Warning16Regular />
-            <span>这台电脑上没有安装 AnimeLogon，改动无法保存。</span>
+            <span>此电脑未安装 AnimeLogon，更改无法保存。</span>
           </div>
         )}
         {s.env.installed && !s.env.on && (
@@ -117,11 +119,11 @@ function Current() {
             {meta && <div className="t-cap ellipsis num">{meta}</div>}
           </dd>
           <dt>组件</dt>
-          <dd className="ellipsis">{showComponents ? t.summary || '无' : '已在设置里关闭'}</dd>
+          <dd className="ellipsis">{showComponents ? t.summary || '无' : '已在设置中关闭'}</dd>
           {t.modifications > 0 && (
             <>
               <dt>修改</dt>
-              <dd className="num">{`改过 ${t.modifications} 项`}</dd>
+              <dd className="num">{`已修改 ${t.modifications} 项`}</dd>
             </>
           )}
           {t.author && !t.builtIn && (
@@ -148,7 +150,7 @@ function Screens() {
     <section aria-label="当前主题">
       <div className="sechead first">
         <h2 className="t-h">当前主题</h2>
-        <span className="t-cap">每块屏幕各自使用主题</span>
+        <span className="t-cap">每个屏幕单独设置主题</span>
       </div>
       <div className="screens">
         {s.env.monitors.map(m => {

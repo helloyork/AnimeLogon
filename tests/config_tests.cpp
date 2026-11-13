@@ -29,6 +29,7 @@
 
 #include "commit.h"
 #include "exporter.h"
+#include "sceneimport.h"
 #include "scratch.h"
 #include "staging.h"
 #include "store.h"
@@ -622,6 +623,14 @@ TEST(ImportPictureStagesATheme) {
     WriteAll(longSource, png);
     const std::wstring dir2 = ImportDir(scratch);
     CHECK(staging::Media(longSource, dir2, cancel, nullptr).name == std::wstring(40, L'a'));
+    // A name given with the file (a Wallpaper Engine title) is the theme's, cut and on one line
+    // as a file's would be.
+    const std::wstring dir3 = ImportDir(scratch);
+    const staging::Result named = staging::Media(source, dir3, cancel, nullptr, L"【4K60】阿罗娜\n& 普拉娜");
+    CHECK(named.ok && named.name == L"【4K60】阿罗娜 & 普拉娜");
+    CHECK(theme::Parse(Text(ReadAll(dir3 + L"\\theme.xml")), theme::Form::Package, &th, nullptr) && th.name == named.name);
+    CHECK(staging::Media(source, ImportDir(scratch), cancel, nullptr, std::wstring(50, L'b')).name == std::wstring(40, L'b'));
+    CHECK(staging::Wallpaper(source, ImportDir(scratch), cancel, nullptr, L"Harbour").name == L"Harbour");
     // Not a picture, by its extension and by its bytes.
     WriteAll(scratch + L"\\notes.png", std::string("hello"));
     const staging::Result bad = staging::Media(scratch + L"\\notes.png", ImportDir(scratch), cancel, nullptr);
@@ -738,6 +747,33 @@ TEST(ImportPackageChecksAndStages) {
     package::WriteToMemory(newer, &newerZip, nullptr);
     CHECK(error(newerZip).find(L"新版") != std::wstring::npos);
     secure::RemoveTree(scratch);
+}
+
+// While the importer does not take scenes, an .alscene file and a theme package whose wallpaper
+// is a scene are both turned away with a message naming scenes, and nothing is staged.
+TEST(ImportTurnsAwayScenesWhileTheyAreNotTaken) {
+    if constexpr (!staging::kTakesScenes) {
+        const std::wstring scratch = ScratchDir();
+        std::atomic<bool> cancel{false};
+        std::vector<uint8_t> scene;
+        CHECK(package::WriteToMemory(
+            {{"scene.xml", L"", Bytes("<scene format=\"1\" name=\"Sky\"><base shader=\"sky.hlsl\"/></scene>")},
+             {"sky.hlsl", L"", Bytes("float4 main(float2 uv : TEXCOORD0) : SV_Target { return float4(uv, 1, 1); }")}},
+            &scene, nullptr));
+        const std::wstring alscene = scratch + L"\\sky.alscene";
+        CHECK(WriteAll(alscene, scene));
+        const std::wstring dir = ImportDir(scratch);
+        const staging::Result s = staging::Scene(alscene, dir, cancel, nullptr);
+        CHECK(!s.ok && s.error.find(L"场景") != std::wstring::npos && CountEntries(dir) == 0);
+
+        const std::wstring altheme = scratch + L"\\sky.altheme";
+        CHECK(WriteAll(altheme, Package(PackageTheme(L"wallpaper.alscene", {{L"clock", L"clock"}}),
+                                        {{"wallpaper.alscene", L"", scene}})));
+        const std::wstring dir2 = ImportDir(scratch);
+        const staging::Result p = staging::Package(altheme, dir2, cancel, nullptr);
+        CHECK(!p.ok && p.error.find(L"场景") != std::wstring::npos && CountEntries(dir2) == 0);
+        secure::RemoveTree(scratch);
+    }
 }
 
 // --- the exporter -------------------------------------------------------------------------------
@@ -900,6 +936,6 @@ TEST(SandboxKeepsTheWindowToItsOwnCopy) {
     CHECK(commit::RunElevated(nullptr, L"--remove-theme 0123456789abcdef") == commit::kOk);
     CHECK(GetFileAttributesW(theme.c_str()) == INVALID_FILE_ATTRIBUTES);
     paths::UseSandbox(L"");
-    CHECK(paths::DataDir() != box + L"\ProgramData\AnimeLogon");
+    CHECK(paths::DataDir() != box + L"\\ProgramData\\AnimeLogon");
     secure::RemoveTree(scratch);
 }

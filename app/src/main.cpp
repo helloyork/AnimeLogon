@@ -31,7 +31,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, wchar_t *, int show) {
     const bool sandbox = argv && argc == 3 && std::wstring(argv[1]) == L"--sandbox";
     if (sandbox) {
         if (!paths::IsPlainAbsolute(argv[2]) || !paths::CreateDirectories(argv[2])) {
-            MessageBoxW(nullptr, L"--sandbox 后面要跟一个本机目录的完整路径。", L"AnimeLogon", MB_OK | MB_ICONWARNING);
+            MessageBoxW(nullptr, L"--sandbox 参数需要指定本地目录的完整路径。", L"AnimeLogon", MB_OK | MB_ICONWARNING);
             LocalFree(argv);
             return 2;
         }

@@ -21,6 +21,7 @@
 #include "json.h"
 #include "library.h"
 #include "pictures.h"
+#include "workshop.h"
 #include "agent.h"
 #include "animelogon/scenepreview.h"
 
@@ -59,10 +60,24 @@ private:
     bool Save();
 
     // --- what needs the elevated helper
-    // A theme from a picture, video or .altheme; with `wallpaper`, a picture or video as a
-    // wallpaper alone, for the open theme.
+    // One file being brought in: where it is, the name it will have (empty: the file's), and
+    // the import directory it is staged in.
+    struct ImportJob {
+        std::wstring source, name, dir;
+    };
+    // A theme from a picture, video or .altheme the person picks; with `wallpaper`, a picture or
+    // video as a wallpaper alone, for the open theme.
     void Import(bool wallpaper);
+    // Stages each file on `worker_`, then installs all of them on one prompt (FinishImport).
+    // With `wallpaper` there is one file, a wallpaper alone for the open theme.
+    void StartImport(std::vector<ImportJob> jobs, bool wallpaper);
+    std::wstring ImportLabel() const;
     void FinishImport();
+    // Wallpaper Engine's video wallpapers (workshop.h): found on `scanner_`, then shown to the
+    // page, which plays them from a host name per folder of them.
+    void FindWorkshop();
+    void FoundWorkshop();
+    void ImportWorkshop(const json::Value &ids, bool wallpaper);
     void ImportComponent(bool add);
     void NewTheme(const std::wstring &name, const std::wstring &wallpaper);
     void CopyTheme(const std::wstring &id, const std::wstring &name);
@@ -79,6 +94,10 @@ private:
     void Shape(const std::wstring &themeId, UINT width, UINT *height) const;
     bool SceneFrame(const std::wstring &id, UINT width, UINT height, double time, bool motion,
                     std::vector<uint8_t> *bytes, std::wstring *bounds);
+    // What the lock-screen preview draws components with, as this person's own lock screen would:
+    // the battery now, and what is playing in this session if settings.ini's `media` allows it.
+    // `ready` is false until what is playing has been read once (it is read on a thread of its own).
+    animelogon::data::Snapshot LockData(bool *ready);
     // Where the displays are in a picture `width` x `height` when spanning; empty otherwise.
     std::vector<Screen> Wall(UINT width, UINT height) const { return app::Wall(library_.settings(), monitors_, width, height); }
 
@@ -120,14 +139,24 @@ private:
     std::map<std::wstring,SceneEntry> scenePreviews_;
     PreviewMedia previewMedia_;
 
-    // An import: staged on `worker_`, installed by the elevated helper afterwards.
+    // An import: staged on `worker_`, installed by the elevated helper afterwards. The worker
+    // writes only the atomics and, before it says it is done, importResults_.
     std::thread worker_;
     std::atomic<bool> cancel_{false};
     std::atomic<bool> importing_{false};
     std::atomic<int> importPermille_{0};
-    std::wstring importDir_, importLabel_;
+    std::atomic<int> importIndex_{0};
+    std::vector<ImportJob> importJobs_;
+    std::vector<staging::Result> importResults_;
     bool importWallpaper_ = false;
-    staging::Result importResult_;
+
+    // Wallpaper Engine's folders, each mapped to a host name before the page loads (WebView2
+    // applies a mapping only to pages loaded after it is made), and the last look in them; the
+    // page names wallpapers by that look's ids.
+    std::vector<workshop::Folder> workshopFolders_;
+    std::thread scanner_;
+    bool scanning_ = false;
+    workshop::Found workshop_, scanned_;
 };
 
 }  // namespace app
