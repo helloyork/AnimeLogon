@@ -130,6 +130,10 @@ std::wstring SerializeSettings(const Settings &settings);
 // the installer replaces such a file with the defaults.
 bool NamesATheme(const std::wstring &text);
 
+// The most settings.ini may hold, in bytes as written (UTF-8). A larger file is not read at all,
+// so the logon screen would show the built-in theme: whoever writes it keeps within this.
+constexpr size_t kMaxSettingsBytes = 256 * 1024;
+
 // Reads settings.ini. Returns defaults if it is missing, and refuses a file that is not
 // administrators-only when `requireTrusted` is set.
 Settings LoadSettings(bool requireTrusted, std::wstring *why = nullptr);

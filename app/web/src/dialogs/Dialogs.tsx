@@ -3,9 +3,9 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { t as tr, tn } from '../i18n';
 import { Dialog, DialogActions, DialogBody, DialogContent, DialogSurface, DialogTitle } from '@fluentui/react-components';
-import { FolderOpen16Regular, Video16Regular } from '@fluentui/react-icons';
+import { Checkmark12Filled, FolderOpen16Regular, Video16Regular } from '@fluentui/react-icons';
 import { UacShield } from '../icons';
-import { send, wallpaperUrl } from '../native';
+import { send, thumbUrl, wallpaperUrl } from '../native';
 import { edit } from '../preview';
 import { apply, closeDialog, screenTheme, themeOf, useStore, workshopFlow, type Dialog as DialogState } from '../store';
 import { Button, cx, TextInput } from '../ui/controls';
@@ -64,6 +64,8 @@ function One({ d }: { d: DialogState }) {
       return <WallpaperDialog d={d} />;
     case 'addComponent':
       return <AddComponentDialog d={d} />;
+    case 'copyComponents':
+      return <CopyComponentsDialog d={d} />;
     case 'workshop':
       return <WorkshopDialog d={d} />;
   }
@@ -221,6 +223,57 @@ function AddComponentDialog({ d }: { d: Extract<DialogState, { kind: 'addCompone
           </button>
         </div>
         <p className="t-cap3">{tn('dialog.add.room', s.open?.room ?? 0)}</p>
+      </div>
+    </Frame>
+  );
+}
+
+// The open theme's components, given to other themes chosen by their pictures, any number at once.
+// The components the chosen themes had are replaced; their wallpapers stay.
+function CopyComponentsDialog({ d }: { d: Extract<DialogState, { kind: 'copyComponents' }> }) {
+  const s = useStore();
+  const [chosen, setChosen] = useState<string[]>([]);
+  const open = s.open;
+  const others = s.lib!.themes.filter(t => t.id !== open?.id);
+  // A theme removed while the dialog is open no longer counts.
+  const picked = chosen.filter(id => others.some(t => t.id === id));
+  const all = others.length > 0 && picked.length === others.length;
+  const toggle = (id: string) => setChosen(c => (c.includes(id) ? c.filter(x => x !== id) : [...c, id]));
+  const run = () => {
+    if (!picked.length) return;
+    closeDialog(d.id);
+    send('copyComponents', { themes: picked });
+  };
+  if (!open) return null;
+  return (
+    <Frame d={d} title={tr('dialog.copy_components.title')} wide actions={<>
+      <Button onClick={() => closeDialog(d.id)}>{tr('button.cancel')}</Button>
+      <Button variant="primary" disabled={!picked.length} onClick={run}>{tr('dialog.copy_components.action')}</Button>
+    </>}>
+      <div className="dlg-stack">
+        <div className="dlg-text">
+          <p>{tr('dialog.copy_components.body', { name: open.name })}</p>
+          <p className="quiet">{tr('dialog.copy_components.later', { name: open.name })}</p>
+        </div>
+        <div className="pictures" role="listbox" aria-multiselectable="true" aria-label={tr('dialog.copy_components.title')}>
+          {others.map(t => {
+            const on = picked.includes(t.id);
+            return (
+              <button key={t.id} type="button" className={cx('pick', on && 'on')} role="option" aria-selected={on} onClick={() => toggle(t.id)}>
+                <span className="picbox">
+                  <img className="pic" src={thumbUrl(t.id, t.revision, 296, s.tick)} alt="" draggable={false} />
+                  <span className="tick" aria-hidden="true">{on && <Checkmark12Filled />}</span>
+                </span>
+                <span className="ellipsis">{t.name}</span>
+                <span className="t-cap3 ellipsis">{t.summary}</span>
+              </button>
+            );
+          })}
+        </div>
+        <div className="dlg-foot">
+          <span className="t-cap3">{picked.length ? tn('dialog.copy_components.picked', picked.length) : tr('dialog.copy_components.none')}</span>
+          <Button size="sm" onClick={() => setChosen(all ? [] : others.map(t => t.id))}>{tr(all ? 'we.pick_none' : 'we.pick_all')}</Button>
+        </div>
       </div>
     </Frame>
   );

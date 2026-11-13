@@ -1113,6 +1113,21 @@ void Host::OnMessage(const json::Value &m) {
         Edited(!id.empty(), false, seq);
     } else if (op == L"removeInstance") {
         Edited(library_.RemoveInstance(instance), false, seq);
+    } else if (op == L"copyComponents") {
+        // The open theme is unchanged, so its picture stays; the targets' pictures follow their
+        // revisions in the state.
+        std::vector<std::wstring> targets;
+        for (const json::Value &t : m[L"themes"].Items()) targets.push_back(t.Str());
+        const int copied = library_.CopyComponents(targets);
+        if (copied < 0) Problem(i18n::Tr("msg.components_too_large"));
+        else if (copied > 0 && Save()) {
+            const ThemeEntry *one = nullptr;
+            for (const std::wstring &t : targets)
+                if (copied == 1 && t != library_.open() && (one = library_.Entry(t))) break;
+            Toast(one ? i18n::Tr("msg.components_copied_one", {{L"name", one->name}})
+                      : i18n::Tr("msg.components_copied", {{L"n", std::to_wstring(copied)}}));
+        }
+        SendState();
     } else if (op == L"wallpaper") {
         Edited(library_.SetWallpaper(m[L"ref"].Str()), false, seq);
     } else if (op == L"wake") {
