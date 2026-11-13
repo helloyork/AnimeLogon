@@ -25,6 +25,12 @@ export function exposeForTests() {
     selectSel: (inst: string | null, part?: string | null) => select(inst, part ?? null),
     pickWallpaper: () => openDialog({ kind: 'wallpaper' }),
     lockPreview: (theme: string, ratio?: number) => setState({ lock: { theme, ratio } }),
+    // The setup wizard, as an install that left switching on to the person shows it: for looking
+    // at it in a sandbox, which otherwise stands for an AnimeLogon that is on. The next environment
+    // message from the native side puts `on` back. `others` names other programs drawing the logon
+    // screen as on, which a sandbox never lists.
+    setupWizard: (on = false, others: string[] = []) =>
+      setState({ setup: true, env: { ...getState().env, on, setupPending: !on, others: others.map(name => ({ name, on: true })) } }),
     // Whether a drag of this component would move its own pixels (preview.ts).
     liftReady: (inst: string) => !!liftFor(inst),
     // The old page rebuilt itself on render(); this one follows its state, so there is nothing to do.

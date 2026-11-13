@@ -38,13 +38,8 @@ struct Found {
     int others = 0;            // wallpapers of other types, which cannot be imported
 };
 
-// The Steam library folders named in the text of Steam's libraryfolders.vdf, in either layout
-// Steam has written: a "path" value in a block per library, or (before 2021) the path as the
-// value of a numbered key.
-std::vector<std::wstring> LibraryFolders(std::string_view vdf);
-
-// The folders Wallpaper Engine keeps wallpapers in under each of these Steam library folders,
-// the ones that exist, each once.
+// The folders Wallpaper Engine keeps wallpapers in under each of these Steam library folders
+// (steam_library.h finds them), the ones that exist, each once.
 std::vector<Folder> FoldersUnder(const std::vector<std::wstring> &libraries);
 
 // What the project.json of the directory `dir` says, when it is a video wallpaper: its title
@@ -55,8 +50,8 @@ bool ReadProject(std::string_view json, const std::wstring &dir, Item *item, boo
 // Every video wallpaper in `folders` whose video is there.
 Found Scan(const std::vector<Folder> &folders);
 
-// The folders on this computer, from where Steam is installed (the registry) and the libraries
-// it lists. Empty when Steam or Wallpaper Engine is not installed.
+// The folders on this computer, under every Steam library (steam_library::Libraries). Empty when
+// Steam or Wallpaper Engine is not installed.
 std::vector<Folder> Folders();
 
 }  // namespace app::workshop

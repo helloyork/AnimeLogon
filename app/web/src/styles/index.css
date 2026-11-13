@@ -7,7 +7,9 @@
 @import "./shell.css";
 @import "./library.css";
 @import "./settings.css";
+@import "./setup.css";
 @import "./dialogs.css";
 @import "./workshop.css";
+@import "./discover.css";
 @import "./editor.css";
 @import "./lock.css";

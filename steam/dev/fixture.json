@@ -1,0 +1,163 @@
+{
+  "running": true,
+  "loggedOn": true,
+  "owns": true,
+  "needsLegalAgreement": false,
+  "uploadMs": 3000,
+  "downloadMs": 2500,
+  "nextItemId": "3100000100",
+  "fail": {},
+  "items": [
+    {
+      "id": "3100000001",
+      "title": "夜樱 Night Sakura",
+      "description": "[b]Cherry blossoms[/b] falling over a lantern-lit street.\nLoops seamlessly; with rain sound.",
+      "owner": "76561198000000101",
+      "preview": "https://steam-fixture.animelogon.invalid/previews/3100000001.jpg",
+      "tags": ["Video", "4K", "Sound"],
+      "descriptors": [],
+      "votesUp": 1840, "votesDown": 32, "score": 0.97,
+      "subscriptions": 25300, "favorites": 4100, "fileSize": 182000000,
+      "trend": 900, "timeCreated": 1760000000, "timeUpdated": 1762000000,
+      "subscribed": true, "installed": true, "folder": "content\\3100000001", "sizeOnDisk": 182000000,
+      "previews": [
+        {"url": "", "type": 0, "name": "street.jpg"},
+        {"url": "dQw4w9WgXcQ", "type": 1}
+      ]
+    },
+    {
+      "id": "3100000002",
+      "title": "Quiet Library",
+      "description": "A still picture of a reading room at dusk, with a clock and the date.",
+      "owner": "76561198000000102",
+      "preview": "https://steam-fixture.animelogon.invalid/previews/3100000002.jpg",
+      "tags": ["Picture", "1440p", "Components"],
+      "descriptors": [],
+      "votesUp": 620, "votesDown": 15, "score": 0.93,
+      "subscriptions": 8800, "favorites": 900, "fileSize": 4200000,
+      "trend": 300, "timeCreated": 1755000000, "timeUpdated": 1755000000
+    },
+    {
+      "id": "3100000003",
+      "title": "海辺の駅",
+      "description": "海沿いの小さな駅、夕方の光。",
+      "owner": "76561198000000103",
+      "preview": "https://steam-fixture.animelogon.invalid/previews/3100000003.jpg",
+      "tags": ["Video", "1080p"],
+      "descriptors": [],
+      "votesUp": 410, "votesDown": 40, "score": 0.88,
+      "subscriptions": 12100, "favorites": 1500, "fileSize": 96000000,
+      "trend": 700, "timeCreated": 1762500000, "timeUpdated": 1762600000,
+      "subscribed": true, "installed": true, "needsUpdate": true, "folder": "content\\3100000003", "sizeOnDisk": 90000000
+    },
+    {
+      "id": "3100000004",
+      "title": "Neon Rooftop",
+      "description": "Night city from a rooftop, light rain, synth ambience.",
+      "owner": "76561198000000104",
+      "preview": "https://steam-fixture.animelogon.invalid/previews/3100000004.jpg",
+      "tags": ["Video", "4K", "Sound", "Components"],
+      "descriptors": ["violenceGore"],
+      "votesUp": 990, "votesDown": 120, "score": 0.85,
+      "subscriptions": 15400, "favorites": 2200, "fileSize": 240000000,
+      "trend": 650, "timeCreated": 1758000000, "timeUpdated": 1761000000
+    },
+    {
+      "id": "3100000005",
+      "title": "Swimsuit Summer",
+      "description": "Beach scene. Marked by its author as suggestive.",
+      "owner": "76561198000000105",
+      "preview": "https://steam-fixture.animelogon.invalid/previews/3100000005.jpg",
+      "tags": ["Picture", "4K"],
+      "descriptors": ["nuditySexual"],
+      "votesUp": 2300, "votesDown": 400, "score": 0.81,
+      "subscriptions": 30100, "favorites": 5200, "fileSize": 9100000,
+      "trend": 850, "timeCreated": 1759000000, "timeUpdated": 1759000000
+    },
+    {
+      "id": "3100000006",
+      "title": "Adults Only Sample",
+      "description": "A placeholder for an item with adult-only content: hidden unless the viewer asks for mature content.",
+      "owner": "76561198000000106",
+      "preview": "https://steam-fixture.animelogon.invalid/previews/3100000006.jpg",
+      "tags": ["Video", "1080p"],
+      "descriptors": ["adultOnlySexual", "gratuitousSexual"],
+      "votesUp": 150, "votesDown": 90, "score": 0.6,
+      "subscriptions": 2100, "favorites": 100, "fileSize": 70000000,
+      "trend": 100, "timeCreated": 1761500000, "timeUpdated": 1761500000
+    },
+    {
+      "id": "3100000007",
+      "title": "Rainy Window",
+      "description": "Raindrops on glass with a soft piano loop.",
+      "owner": "76561198000000107",
+      "preview": "https://steam-fixture.animelogon.invalid/previews/3100000007.jpg",
+      "tags": ["Video", "1440p", "Sound"],
+      "descriptors": [],
+      "votesUp": 300, "votesDown": 8, "score": 0.95,
+      "subscriptions": 5400, "favorites": 700, "fileSize": 120000000,
+      "trend": 400, "timeCreated": 1762900000, "timeUpdated": 1762900000
+    },
+    {
+      "id": "3100000008",
+      "title": "Minimal Gradient",
+      "description": "",
+      "owner": "76561198000000108",
+      "preview": "https://steam-fixture.animelogon.invalid/previews/3100000008.jpg",
+      "tags": ["Picture", "1080p", "Ultrawide"],
+      "descriptors": [],
+      "votesUp": 40, "votesDown": 12, "score": 0.7,
+      "subscriptions": 600, "favorites": 30, "fileSize": 800000,
+      "trend": 50, "timeCreated": 1740000000, "timeUpdated": 1740000000
+    },
+    {
+      "id": "3100000009",
+      "title": "Battle Arena",
+      "description": "Two fighters clash; fast cuts and flashes.",
+      "owner": "76561198000000109",
+      "preview": "https://steam-fixture.animelogon.invalid/previews/3100000009.jpg",
+      "tags": ["Video", "4K", "Sound"],
+      "descriptors": ["generalMature"],
+      "votesUp": 720, "votesDown": 60, "score": 0.89,
+      "subscriptions": 9900, "favorites": 1200, "fileSize": 310000000,
+      "trend": 500, "timeCreated": 1757000000, "timeUpdated": 1760000000
+    },
+    {
+      "id": "3100000010",
+      "title": "Starry Lake 星空湖",
+      "description": "Long exposure stars over a mountain lake, with a countdown component.",
+      "owner": "76561198000000101",
+      "preview": "https://steam-fixture.animelogon.invalid/previews/3100000010.jpg",
+      "tags": ["Picture", "4K", "Components"],
+      "descriptors": [],
+      "votesUp": 1500, "votesDown": 20, "score": 0.98,
+      "subscriptions": 18700, "favorites": 3900, "fileSize": 12000000,
+      "trend": 600, "timeCreated": 1750000000, "timeUpdated": 1763000000,
+      "subscribed": true
+    },
+    {
+      "id": "3100000011",
+      "title": "Old Train Platform",
+      "description": "Steam locomotive arriving; ambient station sound.",
+      "owner": "76561198000000110",
+      "preview": "https://steam-fixture.animelogon.invalid/previews/3100000011.jpg",
+      "tags": ["Video", "1080p", "Sound"],
+      "descriptors": [],
+      "votesUp": 85, "votesDown": 5, "score": 0.9,
+      "subscriptions": 1300, "favorites": 140, "fileSize": 88000000,
+      "trend": 150, "timeCreated": 1763000000, "timeUpdated": 1763000000
+    },
+    {
+      "id": "3100000012",
+      "title": "Aurora",
+      "description": "Northern lights timelapse.",
+      "owner": "76561198000000111",
+      "preview": "https://steam-fixture.animelogon.invalid/previews/3100000012.jpg",
+      "tags": ["Video", "1440p"],
+      "descriptors": [],
+      "votesUp": 260, "votesDown": 30, "score": 0.86,
+      "subscriptions": 4300, "favorites": 610, "fileSize": 150000000,
+      "trend": 250, "timeCreated": 1748000000, "timeUpdated": 1748000000
+    }
+  ]
+}

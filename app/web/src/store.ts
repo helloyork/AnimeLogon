@@ -8,7 +8,7 @@ import { listen, send } from './native';
 import { onPreview, pv, requestPreviewAgain, resetPreview } from './preview';
 import type { Environment, FromNative, ImportKind, Instance, Library, OpenTheme, SceneControls, Workshop } from './types';
 
-export type Tab = 'mine' | 'settings';
+export type Tab = 'mine' | 'discover' | 'settings';
 
 export interface Selection {
   inst: string | null;  // an instance id, or 'wallpaper' for a scene's layers
@@ -47,10 +47,13 @@ export interface State {
   // A setting to point out, because the icon in the system tray opened the app at it. A new object
   // each time it is asked for; the settings page clears it once it has.
   reveal: { what: 'switch' } | null;
+  // The setup wizard fills the window: from when the native side says setup is pending until the
+  // person, AnimeLogon switched on, goes on to the library from its last page.
+  setup: boolean;
 }
 
 let state: State = {
-  env: { on: false, installed: false, others: [], version: '', user: '', accountPicture: false, lang: '', langChoice: '', wallpaperEngine: false, importable: { video: [], picture: [], package: [] }, monitors: [], fonts: [], devices: [] },
+  env: { on: false, installed: false, setupPending: false, others: [], version: '', user: '', accountPicture: false, lang: '', langChoice: '', wallpaperEngine: false, steam: false, importable: { video: [], picture: [], package: [] }, monitors: [], fonts: [], devices: [] },
   lib: null,
   open: null,
   clock: '',
@@ -66,6 +69,7 @@ let state: State = {
   lock: null,
   workshop: null,
   reveal: null,
+  setup: false,
 };
 const listeners = new Set<() => void>();
 
@@ -174,11 +178,11 @@ export function select(inst: string | null, part: string | null = null) {
 }
 // Back, as a window's back button, Alt+Left or the mouse's back button go: up one level of where one
 // is (a part to its component, a component to the theme's list), out of a theme's page to the
-// library, and from the settings back to the page left for them. Nothing while a dialog or the
+// library, and from the settings or the discover page back to the page left for them. Nothing while a dialog or the
 // lock-screen preview is over the page: Esc closes those.
 export function goBack() {
-  if (state.dialogs.length || state.lock) return;
-  if (state.tab === 'settings') return setTab('mine');
+  if (state.dialogs.length || state.lock || state.setup) return;
+  if (state.tab === 'settings' || state.tab === 'discover') return setTab('mine');
   if (state.view !== 'theme') return;
   const { inst, part } = state.sel;
   if (part) return select(inst === 'wallpaper' ? null : inst, null);
@@ -271,7 +275,9 @@ function receive(m: FromNative) {
       // are drawn again too: what a component shows when nothing is there (a sample song) is in it.
       const relanguaged = !!state.env.lang && env.lang !== state.env.lang;
       setLang(env.lang);
-      setState(relanguaged ? { env, tick: state.tick + 1 } : { env });
+      // Once shown, the wizard stays until it is left from its last page, which needs AnimeLogon on.
+      const setup = state.setup || env.setupPending;
+      setState(relanguaged ? { env, setup, tick: state.tick + 1 } : { env, setup });
       if (relanguaged && state.view === 'theme' && state.open) requestPreviewAgain();
       break;
     }
@@ -302,7 +308,9 @@ function receive(m: FromNative) {
 // The icon in the system tray asked for something that needs this window (app/src/tray.h): the
 // switch that turns AnimeLogon on and off, which needs an administrator, pointed out on the
 // settings page; or the lock-screen preview of what the main display shows.
+// While the setup wizard is up, the window coming forward is all: switching on is what it is for.
 function show(what: 'switch' | 'lock') {
+  if (state.setup) return;
   if (what === 'switch') {
     setState({ tab: 'settings', lock: null, hover: null, reveal: { what } });
   } else if (what === 'lock' && state.lib) {

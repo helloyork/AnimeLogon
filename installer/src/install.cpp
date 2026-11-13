@@ -7,6 +7,10 @@
 // program, so a script waits for it with `start /wait` or Start-Process -Wait.
 //   --dir <path>   where to install (inside Program Files); an update goes where it was
 //   --lang <tag>   zh-Hans, zh-Hant, en or ja: the wizard's language, and the machine's
+//   --setup-in-app with --quiet: installs without switching AnimeLogon on. Windows' lock screen
+//                  and other programs drawing the logon screen are left as they are, and the
+//                  settings app opens on a wizard that says what switching on changes and does it.
+//                  An update keeps AnimeLogon on or off as it was. Steam's install script runs this.
 // Exit codes: 0 installed, 1 failed, 1223 (ERROR_CANCELLED) cancelled.
 
 #include <windows.h>
@@ -81,6 +85,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     if (quiet) {
         engine::InstallOptions options;
         if (langGiven) options.language = i18n::Tag(lang);
+        options.setupInApp = HasArg(argc, argv, L"--setup-in-app");
         const engine::Report report = engine::Install(target, options);
         Print(report.message);
         code = report.ok ? 0 : 1;

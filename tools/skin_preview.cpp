@@ -2,10 +2,12 @@
 // skin_preview <background> <out.png> [--skin skin.xml] [--locale ll-CC] [--time HH:MM] [--date YYYY-MM-DD]
 //              [--hours auto|12|24] [--ampm on|off] [--date-style weekday|long|none] [--language ll-CC]
 //              [--component battery|media|countdown] [--data sample|paused|charging|mains]
+//              [--media "title|artist|position|duration"]
 //              [setting=value ...] [p1.l1.t1.weight=300 ...]
 // Without --skin or --component it draws the default clock. --locale stands in for the regional
 // format. Without --data there is no battery and nothing playing; with mains, a machine without a
-// battery, on mains power, playing nothing.
+// battery, on mains power, playing nothing. --media says what is playing instead of the sample:
+// its title, artist, and how far in and how long it is, in seconds (the last three may be left out).
 #include <windows.h>
 
 #include <fcntl.h>
@@ -46,6 +48,8 @@ int wmain(int argc, wchar_t **argv) {
     ClockStyle style;
     bool withData = false;
     data::Snapshot snapshot;
+    std::wstring media;
+    bool withMedia = false;
     for (int i = 3; i < argc; ++i) {
         const std::wstring arg = argv[i];
         const bool more = i + 1 < argc;
@@ -88,6 +92,9 @@ int wmain(int argc, wchar_t **argv) {
             if (kind == L"charging") snapshot.battery = {data::BatteryState::Charging, 42, -1};
             if (kind == L"mains") snapshot = {{data::BatteryState::None, -1, -1, true}, {}};
             withData = true;
+        } else if (arg == L"--media" && more) {
+            media = argv[++i];
+            withMedia = true;
         } else if (arg.find(L'=') != std::wstring::npos) {
             const size_t eq = arg.find(L'=');
             values[arg.substr(0, eq)] = arg.substr(eq + 1);
@@ -95,6 +102,30 @@ int wmain(int argc, wchar_t **argv) {
             std::fwprintf(stderr, L"unknown argument %s\n", arg.c_str());
             return 2;
         }
+    }
+    // What is playing, given on the command line: the sample's battery and app, this title and artist,
+    // playing at this position. Applied after --data so the order of the two does not matter.
+    if (withMedia) {
+        if (!withData) {
+            FILETIME ft;
+            GetSystemTimeAsFileTime(&ft);
+            snapshot = data::Sample((uint64_t)ft.dwHighDateTime << 32 | ft.dwLowDateTime);
+            withData = true;
+        }
+        std::wstring parts[4];
+        size_t start = 0;
+        for (int k = 0; k < 4; ++k) {
+            const size_t bar = media.find(L'|', start);
+            parts[k] = media.substr(start, bar == std::wstring::npos ? std::wstring::npos : bar - start);
+            if (bar == std::wstring::npos) break;
+            start = bar + 1;
+        }
+        snapshot.media.state = data::MediaState::Playing;
+        snapshot.media.title = parts[0];
+        snapshot.media.artist = parts[1];
+        snapshot.media.album.clear();
+        snapshot.media.position = parts[2].empty() ? 0.0 : std::wcstod(parts[2].c_str(), nullptr);
+        snapshot.media.duration = parts[3].empty() ? 0.0 : std::wcstod(parts[3].c_str(), nullptr);
     }
     for (const auto &[id, value] : values) {
         const skin::Setting *setting = s.Find(id);

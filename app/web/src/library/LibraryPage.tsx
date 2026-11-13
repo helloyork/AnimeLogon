@@ -1,5 +1,5 @@
 // The theme library: the theme in use, large, then every theme. A click on a theme puts it in use (D41).
-import { useState, type CSSProperties } from 'react';
+import { useState, type CSSProperties, type ReactNode } from 'react';
 import { Menu, MenuDivider, MenuItem, MenuList, MenuPopover, MenuTrigger, useRestoreFocusTarget } from '@fluentui/react-components';
 import { Add16Regular, Edit16Regular, MoreHorizontal16Regular, Play16Regular, Warning16Regular } from '@fluentui/react-icons';
 import { UacShield } from '../icons';
@@ -28,6 +28,8 @@ import {
 import { list, t as tr } from '../i18n';
 import type { ThemeEntry } from '../types';
 import { Button, cx, IconButton } from '../ui/controls';
+import { setLibraryTab, useSteam } from '../steam/state';
+import { WorkshopShelf } from '../steam/WorkshopShelf';
 
 const shapeVars = (id: string) => {
   const s = shapeOf(id);
@@ -74,20 +76,60 @@ export function LibraryPage() {
           </div>
         )}
         {perMonitor() ? <Screens /> : <Current />}
-        <div className="sechead">
-          <h2 className="t-h">{tr('library.mine')}</h2>
-        </div>
-        <div className="grid">
-          {lib.themes.map(t => <ThemeCard key={t.id} theme={t} />)}
-        </div>
+        {s.env.steam ? <WithWorkshop /> : (
+          <>
+            <div className="sechead">
+              <h2 className="t-h">{tr('library.mine')}</h2>
+            </div>
+            <div className="grid">
+              {lib.themes.map(t => <ThemeCard key={t.id} theme={t} />)}
+            </div>
+          </>
+        )}
       </div>
     </main>
   );
 }
 
+// In the Steam edition the themes share the section with the Workshop's items subscribed to:
+// two tabs, the themes first.
+function WithWorkshop() {
+  const s = useStore();
+  const steam = useSteam();
+  const tabs: ['themes' | 'workshop', string][] = [['themes', tr('library.mine')], ['workshop', tr('library.tab.workshop')]];
+  return (
+    <>
+      <div className="sechead">
+        <div className="subtabs" role="tablist" aria-label={tr('library.sections')}>
+          {tabs.map(([tab, name]) => (
+            <button key={tab} type="button" role="tab" id={'lib-tab-' + tab} aria-selected={steam.libraryTab === tab} aria-controls={'lib-panel-' + tab}
+              tabIndex={steam.libraryTab === tab ? 0 : -1} className={cx(steam.libraryTab === tab && 'on')} onClick={() => setLibraryTab(tab)}
+              onKeyDown={e => {
+                if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+                e.preventDefault();
+                const other = tab === 'themes' ? 'workshop' : 'themes';
+                setLibraryTab(other);
+                document.getElementById('lib-tab-' + other)?.focus();
+              }}>
+              {name}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div role="tabpanel" id={'lib-panel-' + steam.libraryTab} aria-labelledby={'lib-tab-' + steam.libraryTab}>
+        {steam.libraryTab === 'workshop' ? <WorkshopShelf /> : (
+          <div className="grid">
+            {s.lib!.themes.map(t => <ThemeCard key={t.id} theme={t} />)}
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
 // What the shown picture is made of: the still, then over it the wallpaper playing and the
 // components drawn alone, when the wallpaper moves and motion is wanted.
-function Picture({ t, width, playing }: { t: ThemeEntry; width: number; playing: boolean }) {
+export function ThemePicture({ t, width, playing }: { t: ThemeEntry; width: number; playing: boolean }) {
   const s = useStore();
   const play = playing && motion() && moving(t);
   return (
@@ -109,7 +151,7 @@ function Current() {
   return (
     <section className="hero" aria-label={tr('library.current')}>
       <div className="shot" style={shapeVars(t.id)}>
-        <Picture t={t} width={1280} playing />
+        <ThemePicture t={t} width={1280} playing />
       </div>
       <div className="info">
         <span className="t-cap3">{tr('library.current')}</span>
@@ -170,8 +212,8 @@ function Screens() {
 }
 
 // Copy, Rename and Delete carry the shield of an administrator's action; `hasIcons` keeps that
-// column on every item, so all the names start at the same place.
-export function ThemeMenuItems({ theme, onPage }: { theme: ThemeEntry; onPage?: boolean }) {
+// column on every item, so all the names start at the same place. `extra` comes last.
+export function ThemeMenuItems({ theme, onPage, extra }: { theme: ThemeEntry; onPage?: boolean; extra?: ReactNode }) {
   return (
     <MenuList hasIcons>
       {!onPage && <MenuItem onClick={() => openTheme(theme.id)}>{tr('theme.customize')}</MenuItem>}
@@ -183,6 +225,7 @@ export function ThemeMenuItems({ theme, onPage }: { theme: ThemeEntry; onPage?: 
       {theme.modifications > 0 && <MenuItem onClick={() => resetFlow(theme.id)}>{tr('theme.reset')}</MenuItem>}
       {!theme.builtIn && <MenuDivider />}
       {!theme.builtIn && <MenuItem icon={<UacShield />} onClick={() => deleteFlow(theme.id)}>{tr('theme.delete')}</MenuItem>}
+      {extra}
     </MenuList>
   );
 }
@@ -206,7 +249,7 @@ function ThemeCard({ theme: t }: { theme: ThemeEntry }) {
           applyFlow(t.id);
         }}>
         <div className="thumb">
-          <Picture t={t} width={480} playing={hover} />
+          <ThemePicture t={t} width={480} playing={hover} />
         </div>
         <div className="meta">
           <div className="nm ellipsis">{t.name}</div>

@@ -14,12 +14,15 @@ export interface Monitor {
 export interface Environment {
   on: boolean;         // AnimeLogon is turned on (service and Windows' lock screen off)
   installed: boolean;
+  // Installed without being switched on: the page is its setup wizard until it is (setup/SetupPage.tsx).
+  setupPending: boolean;
   // Other programs that draw the logon screen; switching AnimeLogon on switches them off.
   others: { name: string; on: boolean }[];
   version: string;     // this program's version, as its version resource gives it
   user: string;        // the name Windows' sign-in screen greets this person by
   accountPicture: boolean;  // they have an account picture, served as `account`
   wallpaperEngine: boolean; // Wallpaper Engine keeps wallpapers on this computer (app/src/workshop.h)
+  steam: boolean;           // the Steam edition, with the Steam Workshop (app/src/host_steam.cpp)
   // The file types each kind of import takes, as extensions without the dot: the ones the file
   // dialog for that kind lists (app/src/importable.h).
   importable: Record<ImportKind, string[]>;
