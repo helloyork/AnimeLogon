@@ -109,10 +109,14 @@ std::vector<uint8_t> ImagePixels() {
     return bgra;
 }
 
+// The image, in a fresh directory under %TEMP% named in its long form: the image is opened as the
+// overlay opens wallpapers, which refuses a path whose final form differs (a short 8.3 name, as
+// %TEMP% is on some machines, would read as a link).
 std::wstring WriteImage() {
-    wchar_t temp[MAX_PATH + 1];
+    wchar_t temp[MAX_PATH + 1], longer[32768];
     GetTempPathW(ARRAYSIZE(temp), temp);
-    std::wstring dir = temp;
+    const DWORD n = GetLongPathNameW(temp, longer, ARRAYSIZE(longer));
+    std::wstring dir = n && n < ARRAYSIZE(longer) ? longer : temp;
     while (!dir.empty() && dir.back() == L'\\') dir.pop_back();
     dir += L"\\animelogon-stills-" + RandomHex(6);
     CreateDirectoryW(dir.c_str(), nullptr);
