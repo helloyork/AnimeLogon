@@ -363,14 +363,17 @@ DWORD WriteOver(const std::wstring &to, const std::function<DWORD()> &write) {
 }
 
 // Writes one program or document into the install directory: from inside install.exe, or from
-// beside it when this build carries none.
+// beside it when this build carries none. A copy loses the mark of a download (Zone.Identifier) that
+// CopyFileW carries over from files unpacked from a downloaded zip.
 DWORD Place(const wchar_t *name, const std::wstring &to, bool required) {
     const bool carried = payload::Has(name);
     const std::wstring from = SourceDir() + L"\\" + name;
     if (!carried && GetFileAttributesW(from.c_str()) == INVALID_FILE_ATTRIBUTES) return required ? ERROR_FILE_NOT_FOUND : ERROR_SUCCESS;
     return WriteOver(to, [&]() -> DWORD {
         if (carried) return payload::Write(name, to);
-        return CopyFileW(from.c_str(), to.c_str(), FALSE) ? ERROR_SUCCESS : GetLastError();
+        if (!CopyFileW(from.c_str(), to.c_str(), FALSE)) return GetLastError();
+        DeleteFileW((to + L":Zone.Identifier").c_str());
+        return ERROR_SUCCESS;
     });
 }
 
