@@ -21,7 +21,7 @@ can place videos, widgets and other content on it.
 
 - Windows 10 or Windows 11, x64 or ARM64
 - Administrator rights for installation
-- The Microsoft Edge WebView2 runtime for the AnimeLogon settings. Windows 11 includes it;
+- The Microsoft Edge WebView2 runtime for the AnimeLogon window. Windows 11 includes it;
   on Windows 10 the installer says so if it is missing.
 
 Windows N and KN editions are not supported.
@@ -30,20 +30,25 @@ Windows N and KN editions are not supported.
 
 > The current version is a preview (alpha) and may have problems. The programs are not code-signed.
 
-1. Download the zip for your computer's architecture (`x64` or `arm64`) from [Releases](https://github.com/helloyork/AnimeLogon/releases).
-2. Right-click the zip, select **Properties**, check **Unblock**, and extract it.
-3. Run `install.exe` and follow the prompts.
-4. Open AnimeLogon settings from the Start menu and select **Import…** to add a video or picture.
+1. Download the setup program for your computer's architecture (`AnimeLogon-<version>-x64-setup.exe` or `AnimeLogon-<version>-arm64-setup.exe`) from [Releases](https://github.com/helloyork/AnimeLogon/releases).
+2. Run it and follow the wizard. Its first page lets you choose the language. If Windows says "Windows protected your PC", select **More info > Run anyway**.
+3. Open AnimeLogon from the Start menu and select **Import…** to add a video or picture.
+
+Run with `--quiet`, the setup program shows no wizard and writes its result to the console; in a
+script, wait for it with `start /wait`.
 
 ## Usage
 
 Lock the computer (<kbd>Win</kbd>+<kbd>L</kbd>) or restart it. The lock screen shows the theme in use
 until you press a key or click, and the Windows sign-in screen appears.
 
-To change it, click a theme in the settings' theme library. Videos, pictures and theme packages
+To change it, click a theme in the theme library. Videos, pictures and theme packages
 (.altheme), along with scenes (.alscene), are added with **Import…**, and an imported theme is put in use at once. Select
 **Customize** on a theme to change its wallpaper and widgets. Themes can be exported as .altheme
 files to share.
+
+Choose the display language in **Settings > General > Display language**: 简体中文, 繁體中文, English or
+日本語. It follows Windows unless you choose one.
 
 Scene controls appear under **Wallpaper** on the theme page and do not need elevation.
 Hover a scene card to play it. See the [scene author guide](tools/SCENES.md) for the format
@@ -63,7 +68,7 @@ The installer describes the first two changes and asks before it makes them. Tur
 
 ## Uninstallation
 
-Open **Settings > Apps > Installed apps**, find AnimeLogon and select **Uninstall**.
+Open **Settings > Apps > Installed apps**, find AnimeLogon and select **Uninstall**, or select **Uninstall** in AnimeLogon's Settings. You can choose whether to delete your themes, wallpapers and settings as well.
 
 ## Building from source
 

@@ -1,7 +1,7 @@
 name: Release
 
-# Pushing a tag such as v0.1.0 or v0.1.0-alpha builds x64 and ARM64 and attaches a zip of each
-# to a draft GitHub release. The draft is published by hand once its files have been checked.
+# Pushing a tag such as v0.1.0 or v0.1.0-alpha builds x64 and ARM64 and attaches the setup program
+# of each to a draft GitHub release. The draft is published by hand once its files have been checked.
 on:
   push:
     tags: ['v*']
@@ -54,40 +54,17 @@ jobs:
             if ($LASTEXITCODE) { exit $LASTEXITCODE }
           }
 
-      # Each zip holds one folder: install.exe, the files it copies from its own folder
-      # (kComponents in installer/src/engine.cpp), and the licences of the code they carry.
-      # The log lists every file with its SHA-256, and what each zip holds.
+      # One setup program per architecture: install.exe carries every file it installs, the
+      # licences included (installer/CMakeLists.txt), so it is the whole release. The log lists
+      # each one's SHA-256, as SHA256SUMS.txt does.
       - name: Package
         shell: pwsh
         run: |
-          Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
-          $programs = 'install.exe', 'uninstall.exe', 'overlay.exe', 'launcher.exe', 'animelogon.exe', 'scene.exe', 'WebView2Loader.dll'
-          # Full paths: .NET resolves relative ones against its own current directory, not PowerShell's.
-          $stage = (New-Item -ItemType Directory -Force stage).FullName
           $dist = (New-Item -ItemType Directory -Force dist).FullName
           foreach ($arch in 'x64', 'arm64') {
-            $name = "AnimeLogon-$env:VERSION-$arch"
-            $dir = Join-Path $stage $name
-            New-Item -ItemType Directory -Force (Join-Path $dir licenses) | Out-Null
-            foreach ($program in $programs) { Copy-Item "build/$arch/bin/Release/$program" $dir -ErrorAction Stop }
-            Copy-Item LICENSE (Join-Path $dir LICENSE.txt)
-            Copy-Item vendor/webview2/LICENSE (Join-Path $dir licenses/WebView2.txt)
-            Copy-Item vendor/thorvg/LICENSE (Join-Path $dir licenses/ThorVG.txt)
-            Copy-Item vendor/thorvg/src/loaders/lottie/rapidjson/LICENSE (Join-Path $dir licenses/RapidJSON.txt)
-            $zip = Join-Path $dist "$name.zip"
-            $archive = [System.IO.Compression.ZipFile]::Open($zip, 'Create')
-            Get-ChildItem $dir -Recurse -File | ForEach-Object {
-              # Entry names are written with forward slashes, whichever .NET this runs on.
-              $entry = $_.FullName.Substring($stage.Length + 1).Replace('\', '/')
-              [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, $_.FullName, $entry, 'Optimal') | Out-Null
-              '{0}  {1}' -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(), $entry
-            }
-            $archive.Dispose()
-            $archive = [System.IO.Compression.ZipFile]::OpenRead($zip)
-            "$($archive.Entries.Count) entries in $name.zip"
-            $archive.Dispose()
+            Copy-Item "build/$arch/bin/Release/install.exe" (Join-Path $dist "AnimeLogon-$env:VERSION-$arch-setup.exe") -ErrorAction Stop
           }
-          Get-ChildItem $dist -Filter *.zip | ForEach-Object {
+          Get-ChildItem $dist -Filter *.exe | ForEach-Object {
             '{0}  {1}' -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(), $_.Name
           } | Set-Content (Join-Path $dist SHA256SUMS.txt)
           Get-Content (Join-Path $dist SHA256SUMS.txt)
