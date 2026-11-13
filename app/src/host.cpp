@@ -3,6 +3,9 @@
 
 #include <commdlg.h>
 #include <dwmapi.h>
+#include <sddl.h>
+#define SECURITY_WIN32
+#include <security.h>
 #include <shellapi.h>
 #include <shlwapi.h>
 #include <wrl.h>
@@ -142,6 +145,41 @@ std::wstring ClockNow(const ClockStyle &style) {
     if (!ampm.empty()) text += L" " + ampm;
     if (!date.empty()) text += L" · " + date;
     return text;
+}
+
+// The name Windows' sign-in screen shows for the person running this window: their full name
+// when the account has one, else the account name.
+std::wstring AccountName() {
+    wchar_t name[256];
+    ULONG size = ARRAYSIZE(name);
+    if (GetUserNameExW(NameDisplay, name, &size) && name[0]) return name;
+    DWORD plain = ARRAYSIZE(name);
+    return GetUserNameW(name, &plain) ? name : L"";
+}
+
+// The file of their account picture as the sign-in screen draws it (192 px), or empty when they
+// have none and Windows draws its default one.
+std::wstring AccountPicture() {
+    HANDLE token = nullptr;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) return L"";
+    BYTE buffer[256];
+    DWORD size = 0;
+    std::wstring sid;
+    if (GetTokenInformation(token, TokenUser, buffer, sizeof(buffer), &size)) {
+        wchar_t *text = nullptr;
+        if (ConvertSidToStringSidW(reinterpret_cast<TOKEN_USER *>(buffer)->User.Sid, &text)) {
+            sid = text;
+            LocalFree(text);
+        }
+    }
+    CloseHandle(token);
+    if (sid.empty()) return L"";
+    wchar_t file[MAX_PATH];
+    DWORD bytes = sizeof(file);
+    const std::wstring key = L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\AccountPicture\\Users\\" + sid;
+    if (RegGetValueW(HKEY_LOCAL_MACHINE, key.c_str(), L"Image192", RRF_RT_REG_SZ, nullptr, file, &bytes) != ERROR_SUCCESS)
+        return L"";
+    return GetFileAttributesW(file) == INVALID_FILE_ATTRIBUTES ? L"" : file;
 }
 
 }  // namespace
@@ -428,6 +466,8 @@ void Host::SendEnvironment() {
     const bool sandbox = !paths::Sandbox().empty();
     w.Member(L"on", sandbox || machine::IsOn()).Member(L"installed", sandbox || !machine::InstallDir().empty());
     w.Member(L"version", L"" ANIMELOGON_VERSION);
+    // Who the sign-in screen would greet, for the lock-screen preview.
+    w.Member(L"user", AccountName()).Member(L"accountPicture", !AccountPicture().empty());
     w.Key(L"monitors").BeginArray();
     int n = 0;
     for (const MonitorInfo &m : monitors_) {
@@ -692,6 +732,13 @@ void Host::OnResource(ICoreWebView2WebResourceRequestedEventArgs *args) {
         const std::wstring ref = path.substr(10, path.size() - 14);
         if (IsWallpaperRef(ref) && pictures_.Wallpaper(ref, Scaling::Fill, 256, 144, &p)) body = Bmp(p);
         type = L"image/bmp";
+    } else if (path == L"account") {
+        // The person's account picture, for the lock-screen preview's sketch of the sign-in screen.
+        const std::wstring file = AccountPicture();
+        if (!file.empty() && secure::ReadFileBytes(file, &body, 8 * 1024 * 1024))
+            type = EndsWith(file, L".png") || EndsWith(file, L".PNG") ? L"image/png" : L"image/jpeg";
+        else
+            body.clear();
     } else if (path.rfind(L"lock/", 0) == 0 && (EndsWith(path, L"/still.bmp") || EndsWith(path, L"/full.bmp"))) {
         // The lock-screen preview: the wallpaper first, then the components over it.
         const bool full = EndsWith(path, L"/full.bmp");

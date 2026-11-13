@@ -15,6 +15,8 @@ export interface Environment {
   on: boolean;         // AnimeLogon is turned on (service and Windows' lock screen off)
   installed: boolean;
   version: string;     // this program's version, as its version resource gives it
+  user: string;        // the name Windows' sign-in screen greets this person by
+  accountPicture: boolean;  // they have an account picture, served as `account`
   monitors: Monitor[];
   fonts: { name: string; stored: string }[];
   devices: { id: string; name: string }[];
