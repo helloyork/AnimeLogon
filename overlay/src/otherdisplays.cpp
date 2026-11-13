@@ -333,6 +333,9 @@ void OtherDisplays::Live(bool woken, float progress) {
         // The wake: what is ready goes in whole, under the windows that are about to uncover it.
         woken_ = true;
         for (Window &w : windows_) Show(w, 255);
+        if (!windows_.empty() || job_)
+            ALOG(L"other displays: %zu still(s) under the screen for the wake, %zu still being made", windows_.size(),
+                 job_ ? job_->made.size() - adopted_ : (size_t)0);
         return;
     }
     // Made since: in step with the transition, so it is whole when the transition is over.
@@ -340,6 +343,8 @@ void OtherDisplays::Live(bool woken, float progress) {
         if (!w.shown) {
             w.follows = true;
             Show(w, AlphaOf(progress));
+            ALOG(L"other displays: display %s's still came late -- fading in with the rest of the transition",
+                 w.still.monitorKey.c_str());
         } else if (w.follows) {
             SetAlpha(w, AlphaOf(progress));
         }
@@ -362,6 +367,7 @@ bool OtherDisplays::Parked() {
         if (!w.shown) {
             w.appearAt = now;
             Show(w, 0);
+            ALOG(L"other displays: display %s's still came after the transition -- fading in", w.still.monitorKey.c_str());
         } else if (w.follows) {
             // The transition ended before it was whole: it carries on from where it got to.
             w.follows = false;
