@@ -133,6 +133,8 @@
   "font.search": "フォントの検索",
 
   "inspector.add": "コンポーネントの追加",
+  "inspector.brightness": "明るさ",
+  "inspector.brightness.detail": "ロック画面での壁紙の明るさです。コンポーネントには影響しません。下げると明るい壁紙の上でもコンポーネントが読みやすくなり、サインイン画面の背景も合わせて変わります。",
   "inspector.by": "作成者: {author}",
   "inspector.common": "よく使う項目",
   "inspector.components": "コンポーネント",

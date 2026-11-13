@@ -133,6 +133,8 @@
   "font.search": "Search fonts",
 
   "inspector.add": "Add component",
+  "inspector.brightness": "Brightness",
+  "inspector.brightness.detail": "How bright the wallpaper is on the lock screen; components are not affected. Lowering it makes components easier to read on a light wallpaper, and the sign-in screen's background follows.",
   "inspector.by": "By {author}",
   "inspector.common": "Common",
   "inspector.components": "Components",

@@ -448,3 +448,22 @@ TEST(ComposePlacesAnImageAsTheShaderDoes) {
     const std::vector<uint8_t> half = picture::Compose(image, layout::Map(2, 1, window, window, Scaling::Stretch), 4, 4, 2, 2);
     CHECK(half.size() == 2 * 2 * 3 && half[2] > half[0] && half[3] > half[5]);
 }
+
+// A theme's brightness reaches the display it is on, from theme.xml or from settings.ini.
+TEST(PlanCarriesTheThemesBrightness) {
+    FakeStore store = Store();
+    store.themes[L"dddddddddddddddd"] =
+        "<theme format=\"1\" name=\"D\"><wallpaper ref=\"default\" fit=\"fill\" brightness=\"0.4\"/></theme>";
+    Settings s;
+    s.theme = L"dddddddddddddddd";
+    plan::Plan p = plan::Build(s, Monitors(1), store);
+    CHECK(p.displays.size() == 1 && p.displays[0].wallpaper.brightness == 0.4f);
+    CHECK(plan::Describe(p.displays[0]).find(L"at 0.4 brightness") != std::wstring::npos);
+    s.themeOverrides[L"dddddddddddddddd"].brightness = 0.8f;
+    p = plan::Build(s, Monitors(1), store);
+    CHECK(p.displays[0].wallpaper.brightness == 0.8f);
+    // At full brightness the log line is as it always was.
+    s.theme = kThemeT;
+    p = plan::Build(s, Monitors(1), store);
+    CHECK(p.displays[0].wallpaper.brightness == kBrightness && plan::Describe(p.displays[0]).find(L"brightness") == std::wstring::npos);
+}

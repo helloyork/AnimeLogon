@@ -8,6 +8,8 @@
 // and putting a theme back as it came is removing its overrides.
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
 #include <map>
 #include <optional>
 #include <string>
@@ -40,6 +42,11 @@ enum class WakeStyle {
     Cut,    // goes at once
 };
 constexpr float kWakeSeconds = 0.5f, kWakeSecondsMin = 0.1f, kWakeSecondsMax = 2.0f;
+
+// How bright a theme's wallpaper is drawn on the logon screen, as a fraction of its own
+// brightness: 1 as it is, down to kBrightnessMin. Darkening a light wallpaper keeps the
+// components over it readable. Each colour channel is scaled by it.
+constexpr float kBrightness = 1.0f, kBrightnessMin = 0.1f;
 
 // Which displays components are drawn on. Auto is the display Windows puts its password box on.
 enum class ComponentDisplays { Auto, Primary, All };
@@ -78,12 +85,14 @@ struct InstanceOverrides {
     skin::Values values;              // by setting id or adjustment key, e.g. p1.l1.t1.weight
 };
 
-// What settings.ini changes about one theme: theme.<theme id>.wallpaper / .fit / .<instance>.*.
+// What settings.ini changes about one theme: theme.<theme id>.wallpaper / .fit / .wake /
+// .wake-duration / .brightness / .<instance>.*.
 struct ThemeOverrides {
     std::optional<std::wstring> wallpaper;  // a wallpaper id, "default" or "none"
     std::optional<Scaling> fit;
     std::optional<WakeStyle> wake;     // theme.<theme id>.wake
     std::optional<float> wakeSeconds;  // theme.<theme id>.wake-duration
+    std::optional<float> brightness;   // theme.<theme id>.brightness
     skin::Values wallpaperValues;  // scene settings and pN layer adjustments
     std::map<std::wstring, InstanceOverrides> instances;  // by instance id
 };
@@ -149,6 +158,12 @@ const wchar_t *ToString(WakeStyle style);
 bool Parse(std::wstring_view text, WakeStyle *out);  // fade, zoom, slide or cut
 // A wake transition's duration in seconds, within its range.
 bool ParseWakeSeconds(std::wstring_view text, float *out);
+// A wallpaper's brightness, from kBrightnessMin to 1.
+bool ParseBrightness(std::wstring_view text, float *out);
+// Scales the colour of `count` pixels `stride` bytes apart (3 for B G R, 4 for B G R A, whose
+// fourth byte is left alone) by `brightness`, rounding to nearest: as the logon screen's shader
+// draws a wallpaper of that brightness. Nothing happens at 1.
+void ApplyBrightness(uint8_t *pixels, size_t count, int stride, float brightness);
 const wchar_t *ToString(ComponentDisplays displays);
 bool Parse(std::wstring_view text, ComponentDisplays *out);  // auto, primary or all
 const wchar_t *ToString(OtherDisplays displays);

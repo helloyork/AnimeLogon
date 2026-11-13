@@ -10,11 +10,12 @@ const OBJECT_FIT: Record<Fit, CSSProperties['objectFit']> = { fill: 'cover', fit
 
 const fill: CSSProperties = { position: 'absolute', inset: 0, width: '100%', height: '100%', display: 'block', pointerEvents: 'none' };
 
-// A video wallpaper, muted and looping. Its first frame comes in softly over the still under it;
+// A video wallpaper, muted and looping, at the theme's `brightness` as the logon screen draws it
+// (the pictures around it, drawn natively, already are). Its first frame comes in softly over the still under it;
 // once a video fails to play, the page shows stills from then on. `playing` fires again each time
 // the loop jumps back to the start (and after any stall), so the fade belongs to the first start
 // of each video only: replayed at the seam, it showed the still through for a moment.
-export function WallpaperVideo({ wallpaper, fit, fade = true, onPlaying, style }: { wallpaper: string; fit: Fit; fade?: boolean; onPlaying?: () => void; style?: CSSProperties }) {
+export function WallpaperVideo({ wallpaper, fit, brightness = 1, fade = true, onPlaying, style }: { wallpaper: string; fit: Fit; brightness?: number; fade?: boolean; onPlaying?: () => void; style?: CSSProperties }) {
   const ref = useRef<HTMLVideoElement>(null);
   const faded = useRef('');
   useEffect(() => {
@@ -32,7 +33,7 @@ export function WallpaperVideo({ wallpaper, fit, fade = true, onPlaying, style }
       playsInline
       preload="auto"
       aria-hidden="true"
-      style={{ ...fill, objectFit: OBJECT_FIT[fit] || 'cover', ...style }}
+      style={{ ...fill, objectFit: OBJECT_FIT[fit] || 'cover', ...(brightness < 1 ? { filter: `brightness(${brightness})` } : {}), ...style }}
       onPlaying={e => {
         if (faded.current !== wallpaper) {
           faded.current = wallpaper;

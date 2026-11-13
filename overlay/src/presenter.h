@@ -109,7 +109,8 @@ public:
         int sceneW = 0, sceneH = 0;
         float sceneMix = 0;
     };
-    // One picture per target. `dim` fades the picture to black; `opacity` fades the window.
+    // One picture per target. `dim` fades the picture to black, over the darkening of the
+    // target's own brightness; `opacity` fades the window.
     bool Render(const std::vector<Picture> &pictures, float dim, float opacity);
     void DrawVideo(const VideoPlayer::Frame &frame, int width, int height, animelogon::Scaling fit, ID3D11Texture2D *output);
 

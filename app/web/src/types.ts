@@ -54,6 +54,7 @@ export interface ThemeEntry {
   wallpaperKind: WallpaperKind;
   wallpaperRef: string;
   fit: Fit;
+  brightness: number;       // how bright the wallpaper is drawn, 0.1 to 1
   wake: Wake;
   wakeSeconds: number;
   sceneStatic: boolean;
@@ -170,6 +171,9 @@ export interface OpenTheme {
   fitModified: boolean;
   ownWallpaper: string;
   ownFit: Fit;
+  brightness: number;
+  brightnessModified: boolean;
+  ownBrightness: number;
   wake: Wake;
   wakeModified: boolean;
   wakeSeconds: number;

@@ -501,7 +501,9 @@ bool Presenter::Render(const std::vector<Picture> &pictures, float dim, float op
             return false;
         }
         Params p{};
-        p.dim = dim;
+        // The theme's brightness darkens its wallpaper further. Not the still: the sign-in
+        // background it is was baked with that brightness already (bake.h).
+        p.dim = pic.kind == Picture::Kind::Still ? dim : 1.0f - (1.0f - dim) * t.wallpaper.brightness;
         // t0 and t1 the video's planes, t2 a picture.
         ID3D11ShaderResourceView *views[4] = {};
         bool placed = false;

@@ -355,6 +355,12 @@ TEST(AppLibraryWallpaperAndFit) {
     CHECK(l.SetWallpaper(kWallpaperX));
     CHECK(!l.settings().themeOverrides.count(kThemeT));
     CHECK(l.SetFit(Scaling::Fit) && l.Edited(kThemeT).fit == Scaling::Fit);
+    // Brightness: whole percents kept, the theme's own value clears the override, out of range refused.
+    const int before = l.Modifications(kThemeT);
+    CHECK(l.SetBrightness(0.69999f, 0) && l.Edited(kThemeT).brightness == 0.7f);
+    CHECK(l.settings().themeOverrides.at(kThemeT).brightness == 0.7f && l.Modifications(kThemeT) == before + 1);
+    CHECK(!l.SetBrightness(0.05f, 0) && !l.SetBrightness(1.5f, 0) && l.Edited(kThemeT).brightness == 0.7f);
+    CHECK(l.SetBrightness(1.0f, 0) && !l.settings().themeOverrides.at(kThemeT).brightness);
     CHECK(l.SetWallpaper(kNoWallpaper) && l.Edited(kThemeT).wallpaper == kNoWallpaper);
 }
 

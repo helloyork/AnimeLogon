@@ -148,13 +148,17 @@ function Overview() {
           {wp.modified && <ResetButton label={tr('inspector.wallpaper.reset')} onClick={() => edit('wallpaper', { ref: t.ownWallpaper })} />}
           <Button size="sm" onClick={() => openDialog({ kind: 'wallpaper' })}>{tr('inspector.wallpaper.change')}</Button>
         </div>
-        {((wp.kind === 'video' || wp.kind === 'image') || (scene && scene.settings.length > 0)) && (
+        {wp.kind !== 'none' && (
           <div className="props">
             {(wp.kind === 'video' || wp.kind === 'image') && (
               <ChoiceField id="wp-fit" label={tr('inspector.fit')} detail={tr('inspector.fit.detail')} value={t.fit} modified={t.fitModified}
                 options={[{ value: 'fill', label: tr('inspector.fit.fill') }, { value: 'fit', label: tr('inspector.fit.fit') }, { value: 'stretch', label: tr('inspector.fit.stretch') }]}
                 write={v => edit('fit', { value: v })} onReset={() => edit('fit', { value: t.ownFit })} />
             )}
+            <NumberField id="wp-brightness" label={tr('inspector.brightness')} detail={tr('inspector.brightness.detail')} min={0.1} max={1} step={0.01}
+              value={String(t.brightness)} modified={t.brightnessModified} view={{ factor: 100, digits: 0, unit: () => '%' }}
+              write={(v, gesture) => edit('brightness', { value: v, ...(gesture ? { gesture } : {}) })}
+              onReset={() => edit('brightness', { value: t.ownBrightness })} />
             {scene && scene.settings.map(st => <SettingField key={st.id} instId="wallpaper" setting={st} onReset={() => clearValues('wallpaper', [st.id])} />)}
           </div>
         )}
