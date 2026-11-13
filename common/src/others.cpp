@@ -206,8 +206,11 @@ int StopPrograms(const std::wstring &dir) {
         CloseHandle(snap);
         for (DWORD pid : pids) {
             tried.push_back(pid);
+            // Stopping its task may already have ended it: then terminating fails, and it is gone.
             HANDLE h = OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, FALSE, pid);
-            const bool gone = h && TerminateProcess(h, 0) && WaitForSingleObject(h, 5000) == WAIT_OBJECT_0;
+            const bool vanished = !h && GetLastError() == ERROR_INVALID_PARAMETER;
+            if (h) TerminateProcess(h, 0);
+            const bool gone = vanished || (h && WaitForSingleObject(h, 5000) == WAIT_OBJECT_0);
             if (h) CloseHandle(h);
             ALOG(L"others: %s %s (%lu)", gone ? L"stopped" : L"could not stop", name, pid);
             if (!gone) ++failed;
