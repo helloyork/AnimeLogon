@@ -18,6 +18,7 @@
 #include "animelogon/live.h"
 #include "animelogon/log.h"
 #include "animelogon/machine.h"
+#include "animelogon/others.h"
 #include "animelogon/paths.h"
 #include "animelogon/secure.h"
 #include "animelogon/settings.h"
@@ -478,6 +479,19 @@ Report Install(const std::wstring &targetDir, const InstallOptions &options) {
         return fail(WithError(Tr("install.error.service"), e));
     }
 
+    // Another program drawing the logon screen goes off before TurnOn records what Windows had.
+    std::wstring switchedOff;
+    for (const others::Program &p : others::Installed())
+        if (p.on) switchedOff = p.name;
+    if (!switchedOff.empty()) at(0.85, "install.step.others");
+    e = others::TurnOff(paths::BackgroundPath());
+    if (e != ERROR_SUCCESS) {
+        machine::TurnOff();
+        machine::RemoveService();
+        return fail(WithError(Tr("install.error.others", {{L"name", switchedOff.empty() ? std::wstring(L"Shittim Logon") : switchedOff}}), e));
+    }
+    r.switchedOff = switchedOff;
+
     at(0.88, "install.step.turn_on");
     e = machine::TurnOn(LauncherPath(targetDir), paths::BackgroundPath());
     if (e != ERROR_SUCCESS) {
@@ -500,6 +514,7 @@ Report Install(const std::wstring &targetDir, const InstallOptions &options) {
 
     r.ok = true;
     r.message = Tr("install.done");
+    if (!switchedOff.empty()) r.message += L"\n\n" + Tr("install.others_off", {{L"name", switchedOff}});
     if (options.progress) options.progress(1.0, Tr("install.step.done"));
     // The logon screen works without it; only the settings app needs it.
     if (!WebView2RuntimePresent(targetDir)) {
@@ -599,15 +614,24 @@ Report Uninstall(bool keepData, const Progress &progress) {
     }
     if (progress) progress(1.0, Tr("uninstall.step.done"));
 
+    // Another program drawing the logon screen stays off: say where it comes back on.
+    std::wstring stillOff;
+    for (const others::Program &p : others::Installed())
+        if (!p.on) {
+            r.othersOff.push_back(p.name);
+            stillOff += L"\n\n" + Tr("uninstall.others_off", {{L"name", p.name}});
+        }
+
     if (problems.empty()) {
         r.ok = true;
-        r.message = Tr("uninstall.done");
+        r.message = Tr("uninstall.done") + stillOff;
         return r;
     }
     std::wstring list;
     for (size_t i = 0; i < problems.size(); ++i) list += (i ? Tr("list.separator") : L"") + problems[i];
     r.message = Tr("uninstall.partial", {{L"list", list}});
     if (restored != ERROR_SUCCESS) r.message += Tr("sentence.separator") + Tr("uninstall.partial.restore");
+    r.message += stillOff;
     return r;
 }
 

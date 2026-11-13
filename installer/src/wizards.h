@@ -28,6 +28,7 @@ public:
     std::wstring targetDir;
     std::wstring installedVersion;  // empty for a new install
     bool askConsent = true;         // the Windows lock screen is still on: say what installing turns off
+    std::wstring othersOn;          // other programs drawing the logon screen that installing switches off (others.h)
     bool desktopShortcut = true;
     std::wstring language;          // the tag shown and installed with
     double fraction = 0;

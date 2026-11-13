@@ -32,7 +32,8 @@ for (const file of fs.readdirSync(dir).filter(f => f.endsWith('.json'))) {
   tables[lang] = table;
 }
 
-const placeholders = s => [...s.matchAll(/\{(\w+)\}/g)].map(m => m[1]).sort().join(',');
+// Which placeholders a string has, each once: a language may name one twice.
+const placeholders = s => [...new Set([...s.matchAll(/\{(\w+)\}/g)].map(m => m[1]))].sort().join(',');
 const base = tables[source] || {};
 for (const [lang, table] of Object.entries(tables)) {
   if (lang === source) continue;

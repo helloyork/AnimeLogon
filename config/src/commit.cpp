@@ -5,6 +5,7 @@
 
 #include "animelogon/log.h"
 #include "animelogon/machine.h"
+#include "animelogon/others.h"
 #include "animelogon/paths.h"
 #include "animelogon/wallpaper.h"
 
@@ -47,10 +48,12 @@ bool Fits(Arg kind, const std::wstring &value) {
     return false;
 }
 
-// The logon screen and the installer's switch, which need nothing staged.
+// The logon screen and the installer's switch, which need nothing staged. Another program drawing
+// the logon screen goes off before TurnOn records what Windows had.
 int SwitchOn() {
     const std::wstring dir = machine::InstallDir();
     if (dir.empty()) return kFailed;
+    if (others::TurnOff(paths::BackgroundPath()) != ERROR_SUCCESS) return kFailed;
     return machine::TurnOn(dir + L"\\launcher.exe", paths::BackgroundPath()) == ERROR_SUCCESS ? kOk : kFailed;
 }
 

@@ -19,12 +19,13 @@ import {
   screenTheme,
   setState,
   shapeOf,
+  switchOn,
   themeOf,
   usedOn,
   useStore,
   workshopFlow,
 } from '../store';
-import { t as tr } from '../i18n';
+import { list, t as tr } from '../i18n';
 import type { ThemeEntry } from '../types';
 import { Button, cx, IconButton } from '../ui/controls';
 
@@ -38,6 +39,7 @@ const moving = (t: ThemeEntry) => t.wallpaperKind === 'video' || (t.wallpaperKin
 export function LibraryPage() {
   const s = useStore();
   const lib = s.lib!;
+  const others = list(s.env.others.filter(o => o.on).map(o => o.name));
   return (
     <main className="scroll">
       <div className="page">
@@ -58,8 +60,15 @@ export function LibraryPage() {
         {s.env.installed && !s.env.on && (
           <div className="notice" role="status">
             <Warning16Regular />
-            <span>{tr('library.off')}</span>
-            <Button size="sm" shield onClick={() => send('switch', { on: true })}>{tr('library.turn_on')}</Button>
+            <span>{others ? tr('library.off_others', { names: others }) : tr('library.off')}</span>
+            <Button size="sm" shield onClick={switchOn}>{tr('library.turn_on')}</Button>
+          </div>
+        )}
+        {s.env.installed && s.env.on && others && (
+          <div className="notice" role="status">
+            <Warning16Regular />
+            <span>{tr('library.both_on', { names: others })}</span>
+            <Button size="sm" shield onClick={() => send('switch', { on: true })}>{tr('library.turn_off_others', { names: others })}</Button>
           </div>
         )}
         {perMonitor() ? <Screens /> : <Current />}

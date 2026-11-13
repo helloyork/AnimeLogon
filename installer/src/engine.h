@@ -18,6 +18,8 @@ struct Report {
     std::vector<std::wstring> problems;  // uninstall: what could not be undone
     bool webView2Missing = false;        // install: the settings app will not open until it is installed
     bool restartPending = false;         // uninstall: files in use go at the next restart
+    std::wstring switchedOff;            // install: another program drawing the logon screen it switched off
+    std::vector<std::wstring> othersOff; // uninstall: such programs left off, to be switched on in their own settings
 };
 
 // The program files, installed from inside install.exe (payload.h), or from beside it where a
@@ -57,9 +59,10 @@ struct InstallOptions {
 // window running from `targetDir`, writes the program files to `targetDir`, which must lie inside
 // Program Files, and deletes config.exe there (the settings app of earlier versions), bakes the
 // background, writes default settings (the default theme) unless settings.ini already names a
-// theme, registers the uninstall entry, installs the service and only then applies the Windows
-// lock-screen changes; a failure there undoes them. Ends with the shortcuts (needs COM), and says
-// when the settings app will not find the WebView2 runtime.
+// theme, registers the uninstall entry, installs the service, switches off other programs that draw
+// the logon screen (others.h) and only then applies the Windows lock-screen changes; a failure there
+// undoes them. Ends with the shortcuts (needs COM), and says when the settings app will not find
+// the WebView2 runtime.
 Report Install(const std::wstring &targetDir, const InstallOptions &options = {});
 
 // Closes a settings window running from the install directory, removes the shortcuts and the

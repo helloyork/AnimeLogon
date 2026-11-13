@@ -3,9 +3,9 @@
 // sub-settings follow it in the same card, indented.
 import { useId, useState, type ReactNode } from 'react';
 import { UacShield } from '../icons';
-import { LANGUAGES, t, tn, type Key } from '../i18n';
+import { LANGUAGES, list, t, tn, type Key } from '../i18n';
 import { send } from '../native';
-import { global, openLink, perMonitor, setLanguage, themeOf, useStore } from '../store';
+import { global, openLink, perMonitor, setLanguage, switchOn, themeOf, useStore } from '../store';
 import { Button, cx, Select, Slider, Switch, type Choice } from '../ui/controls';
 
 // The control in a row is named by the row's title.
@@ -52,6 +52,7 @@ export function SettingsPage() {
   const s = useStore();
   const set = s.lib!.settings, c = set.clock;
   const several = s.env.monitors.length > 1;
+  const others = list(s.env.others.filter(o => o.on).map(o => o.name));
   return (
     <main className="scroll">
       <div className="page narrow">
@@ -61,14 +62,20 @@ export function SettingsPage() {
 
         {/* The switch for the whole program comes first. */}
         <Group>
-          <Row title={t('settings.enable')} description={t('settings.enable.detail')}>
+          <Row title={t('settings.enable')} description={!s.env.on && others ? t('settings.enable.others', { names: others }) : t('settings.enable.detail')}>
             {() => (
               <>
                 <UacShield />
-                <Switch label={t('settings.enable')} checked={s.env.on} onChange={v => send('switch', { on: v })} />
+                <Switch label={t('settings.enable')} checked={s.env.on} onChange={v => (v ? switchOn() : send('switch', { on: false }))} />
               </>
             )}
           </Row>
+          {/* Both on: one of them has to go. */}
+          {s.env.on && others && (
+            <Row sub title={t('settings.others_on', { names: others })} description={t('settings.others_on.detail')}>
+              {() => <Button size="sm" shield onClick={() => send('switch', { on: true })}>{t('library.turn_off_others', { names: others })}</Button>}
+            </Row>
+          )}
         </Group>
 
         <Group title={t('settings.general')}>

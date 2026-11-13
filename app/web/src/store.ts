@@ -3,7 +3,7 @@
 // here change it.
 import { useSyncExternalStore } from 'react';
 import { onCalmChange } from './motion';
-import { setLang, t } from './i18n';
+import { list, setLang, t } from './i18n';
 import { listen, send } from './native';
 import { onPreview, pv, requestPreviewAgain, resetPreview } from './preview';
 import type { Environment, FromNative, Instance, Library, OpenTheme, SceneControls, Workshop } from './types';
@@ -45,7 +45,7 @@ export interface State {
 }
 
 let state: State = {
-  env: { on: false, installed: false, version: '', user: '', accountPicture: false, lang: '', langChoice: '', wallpaperEngine: false, monitors: [], fonts: [], devices: [] },
+  env: { on: false, installed: false, others: [], version: '', user: '', accountPicture: false, lang: '', langChoice: '', wallpaperEngine: false, monitors: [], fonts: [], devices: [] },
   lib: null,
   open: null,
   clock: '',
@@ -229,6 +229,20 @@ export const openLink = (to: 'home' | 'issues' | 'releases' | 'license' | 'notic
 export function workshopFlow(wallpaper: boolean) {
   send('workshop');
   openDialog({ kind: 'workshop', wallpaper });
+}
+
+/* --- the switch --- */
+// The other programs drawing the logon screen that are on now, by name.
+export const othersOn = () => state.env.others.filter(o => o.on).map(o => o.name);
+// Switching on switches the others off, so that is asked first.
+export function switchOn() {
+  const names = list(othersOn());
+  if (!names) return send('switch', { on: true });
+  openDialog({
+    kind: 'confirm', title: t('settings.enable'), action: t('library.turn_on'), elevated: true,
+    body: [t('dialog.switch_on.body', { names }), t('dialog.switch_on.detail', { names })],
+    run: () => send('switch', { on: true }),
+  });
 }
 
 /* --- what the native side says --- */

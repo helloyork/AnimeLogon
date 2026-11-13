@@ -19,6 +19,7 @@
 #include "animelogon/i18n.h"
 #include "animelogon/log.h"
 #include "animelogon/machine.h"
+#include "animelogon/others.h"
 
 #include "engine.h"
 #include "wizards.h"
@@ -88,6 +89,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
         w.targetDir = target;
         w.installedVersion = engine::InstalledVersion();
         w.askConsent = !animelogon::machine::WindowsLockScreenApplied();
+        for (const animelogon::others::Program &p : animelogon::others::Installed())
+            if (p.on) w.othersOn += (w.othersOn.empty() ? L"" : i18n::Tr("list.join")) + p.name;
         w.language = i18n::Tag(lang);
         w.SetLocale(i18n::Locale(lang));
         code = w.Run(i18n::Tr("setup.window"));

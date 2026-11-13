@@ -120,6 +120,7 @@ int wmain(int argc, wchar_t **argv) {
         });
     };
     install(L"1-welcome", [](auto &w) { w.page = P::Welcome; });
+    install(L"1c-welcome-others", [](auto &w) { w.page = P::Welcome; w.othersOn = L"Shittim Logon"; });
     install(L"1b-welcome-update", [](auto &w) { w.page = P::Welcome; w.installedVersion = L"0.1.0"; w.askConsent = false; });
     install(L"2-location", [](auto &w) { w.page = P::Location; });
     install(L"2b-location-outside", [](auto &w) { w.page = P::Location; w.targetDir = L"D:\\Apps\\AnimeLogon"; });
@@ -135,6 +136,7 @@ int wmain(int argc, wchar_t **argv) {
     });
     install(L"5-done", [](auto &w) { w.page = P::Done; w.report.ok = true; });
     install(L"5b-done-webview2", [](auto &w) { w.page = P::Done; w.report.ok = true; w.report.webView2Missing = true; });
+    install(L"5d-done-others", [](auto &w) { w.page = P::Done; w.report.ok = true; w.report.switchedOff = L"Shittim Logon"; });
     install(L"5c-done-update", [](auto &w) { w.page = P::Done; w.report.ok = true; w.installedVersion = L"0.1.0"; });
     install(L"6-failed", [](auto &w) {
         w.page = P::Failed;

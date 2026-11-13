@@ -78,12 +78,15 @@ void InstallWizard::Build(Builder &b) {
                           : Tr("setup.welcome.version", {{L"version", Version()}}));
         b.HeaderMenu(kLanguage, i18n::NativeName(lang), Tr("setup.language"));
         b.Para(Tr("setup.welcome.intro"));
-        if (askConsent) {
+        if (askConsent || !othersOn.empty()) {
             b.Gap(4);
             b.Heading(Tr("setup.welcome.changes"));
-            b.Bullet(Tr("setup.welcome.change.lock_screen"));
-            b.Bullet(Tr("setup.welcome.change.spotlight"));
-            b.Bullet(Tr("setup.welcome.change.undo"));
+            if (!othersOn.empty()) b.Bullet(Tr("setup.welcome.change.others", {{L"names", othersOn}}));
+            if (askConsent) {
+                b.Bullet(Tr("setup.welcome.change.lock_screen"));
+                b.Bullet(Tr("setup.welcome.change.spotlight"));
+                b.Bullet(Tr("setup.welcome.change.undo"));
+            }
         }
         if (update) b.Para(Tr("setup.welcome.keep"), Tone::Secondary);
         b.StartButton(kLicense, Tr("setup.license"), true);
@@ -129,6 +132,8 @@ void InstallWizard::Build(Builder &b) {
         b.Title(Tr(update ? "setup.done.updated" : "setup.done.title"));
         b.Subtitle(Tr("setup.done.subtitle"));
         if (report.webView2Missing) b.Problem(Severity::Warning, Tr("setup.done.webview2.title"), Tr("setup.done.webview2.detail"));
+        if (!report.switchedOff.empty())
+            b.Problem(Severity::Info, Tr("setup.done.others", {{L"name", report.switchedOff}}), Tr("setup.done.others.detail"));
         b.Row(Tr("setup.done.open.label"), Tr("setup.done.open.value"));
         if (!update) b.Row(Tr("setup.done.pause.label"), Tr("setup.done.pause.value"));
         b.Row(Tr("setup.done.uninstall.label"), Tr("setup.done.uninstall.value"));
@@ -310,6 +315,7 @@ void UninstallWizard::Build(Builder &b) {
             b.Para(Tr("uninstall.partial.restore"), Tone::Secondary);
         }
         if (report.restartPending) b.Para(Tr("uninstall.done.restart"), Tone::Secondary);
+        for (const std::wstring &name : report.othersOff) b.Para(Tr("uninstall.others_off", {{L"name", name}}), Tone::Secondary);
         b.Button(kClose, Tr("button.close"), true);
         break;
     }

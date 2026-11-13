@@ -19,6 +19,7 @@
 #include "animelogon/i18n.h"
 #include "animelogon/log.h"
 #include "animelogon/machine.h"
+#include "animelogon/others.h"
 #include "animelogon/paths.h"
 #include "animelogon/secure.h"
 #include "animelogon/text.h"
@@ -589,6 +590,12 @@ void Host::SendEnvironment() {
     // A sandbox (paths.h) stands for an installed AnimeLogon that is on, whatever this machine has.
     const bool sandbox = !paths::Sandbox().empty();
     w.Member(L"on", sandbox || machine::IsOn()).Member(L"installed", sandbox || !machine::InstallDir().empty());
+    // Other programs that draw the logon screen, which switching AnimeLogon on switches off.
+    w.Key(L"others").BeginArray();
+    if (!sandbox)
+        for (const others::Program &p : others::Installed())
+            w.BeginObject().Member(L"name", p.name).Member(L"on", p.on).EndObject();
+    w.EndArray();
     w.Member(L"version", L"" ANIMELOGON_VERSION);
     // The language the page is shown in, and whether the person chose it or it follows Windows.
     w.Member(L"lang", i18n::Tag(i18n::Current())).Member(L"langChoice", i18n::UserChoice());
@@ -1513,8 +1520,13 @@ void Host::Switch(bool on) {
         SendEnvironment();
         return;
     }
+    // Switching on switches these off (others.h).
+    std::wstring stopping;
+    for (const others::Program &p : others::Installed())
+        if (on && p.on) stopping += (stopping.empty() ? L"" : i18n::Tr("list.join")) + p.name;
     const int code = commit::RunElevated(hwnd_, on ? L"--switch-on" : L"--switch-off");
-    if (code == commit::kOk) Toast(i18n::Tr(on ? "msg.on" : "msg.off"));
+    if (code == commit::kOk && !on) Toast(i18n::Tr("msg.off"));
+    else if (code == commit::kOk) Toast(stopping.empty() ? i18n::Tr("msg.on") : i18n::Tr("msg.on_others", {{L"names", stopping}}));
     else if (code == commit::kDeclined) Toast(i18n::Tr("msg.cancelled"));
     else Problem(i18n::Tr("msg.switch_failed"));
     SendEnvironment();
