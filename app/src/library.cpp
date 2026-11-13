@@ -742,8 +742,21 @@ void Library::WriteOpen(json::Writer &w) const {
             }
             w.EndArray();
 
+            // What a switch of the component's own turns on and off (the clock's 背景暗晕 is its
+            // backdrop's 浓度) is set by that switch alone: offered again among the parts, it was a
+            // second place for the same value, and setting it there left the switch doing nothing.
+            // It still shows where it was set by hand before, so that it can be put back.
+            std::set<std::wstring> switched;
+            for (const skin::Setting &s : skin.settings)
+                if (s.kind == skin::SettingKind::Toggle)
+                    for (const std::wstring &k : skin::AdjustmentsOf(skin, s.id)) switched.insert(k);
             w.Key(L"parts").BeginArray();
-            for (const skin::Part &p : parts) {
+            for (const skin::Part &whole : parts) {
+                skin::Part p = whole;
+                p.adjustments.erase(std::remove_if(p.adjustments.begin(), p.adjustments.end(),
+                                                   [&](const skin::Adjustment &a) { return switched.count(a.key) && !mine.count(a.key); }),
+                                    p.adjustments.end());
+                if (p.adjustments.empty()) continue;
                 bool modified = false;
                 for (const skin::Adjustment &a : p.adjustments) modified = modified || mine.count(a.key) || fedModified.count(a.key);
                 w.BeginObject().Member(L"key", p.key).Member(L"label", p.label).Member(L"modified", modified);

@@ -2,7 +2,6 @@
 #include "sceneimport.h"
 
 #include <commdlg.h>
-#include <dwmapi.h>
 #include <sddl.h>
 #define SECURITY_WIN32
 #include <security.h>
@@ -201,20 +200,20 @@ bool Host::Create(int show) {
     wc.hInstance = GetModuleHandleW(nullptr);
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     wc.hIcon = LoadIconW(wc.hInstance, MAKEINTRESOURCEW(ANIMELOGON_ICON_ID));
-    wc.hbrBackground = CreateSolidBrush(dark_ ? RGB(32, 32, 32) : RGB(243, 243, 243));
+    wc.hbrBackground = CreateSolidBrush(Frame::Background(dark_));
     wc.lpszClassName = kClass;
     if (!RegisterClassExW(&wc)) return false;
 
     // Sized for the theme page: a preview beside a list. CW_USEDEFAULT keeps the position the
-    // shell asks for.
+    // shell asks for. The window keeps the styles of one with a caption, so Windows still treats
+    // it as one (snapping, the system menu, the animations); Frame takes the caption itself away.
     const UINT dpi = GetDpiForSystem();
     const int w = MulDiv(1240, dpi, 96), h = MulDiv(800, dpi, 96);
     hwnd_ = CreateWindowExW(0, kClass, paths::Sandbox().empty() ? std::wstring(L"AnimeLogon").c_str() : paths::SandboxTitle().c_str(), WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, w, h, nullptr,
                             nullptr, wc.hInstance, this);
     if (!hwnd_) return false;
     SetIcons();
-    const BOOL immersiveDark = dark_;
-    DwmSetWindowAttribute(hwnd_, DWMWA_USE_IMMERSIVE_DARK_MODE, &immersiveDark, sizeof(immersiveDark));
+    frame_.Attach(hwnd_, dark_);
     ShowWindow(hwnd_, show_);
     UpdateWindow(hwnd_);
     StartWebView();
@@ -260,8 +259,27 @@ void Host::SetIcons() {
     set(ICON_BIG, SM_CXICON);
 }
 
+void Host::PageBackground() {
+    ComPtr<ICoreWebView2Controller2> c2;
+    if (!controller_ || FAILED(controller_.As(&c2))) return;
+    const COLORREF c = Frame::Background(dark_);
+    c2->put_DefaultBackgroundColor(COREWEBVIEW2_COLOR{255, GetRValue(c), GetGValue(c), GetBValue(c)});
+}
+
 LRESULT Host::Handle(UINT msg, WPARAM wp, LPARAM lp) {
+    LRESULT answer = 0;
+    if (frame_.Handle(msg, wp, lp, &answer)) return answer;
     switch (msg) {
+    case WM_SETTINGCHANGE:
+        // Light or dark switched in Windows' colour settings: the page follows by itself, the
+        // frame and what shows before the page draws follow here.
+        if (lp && CompareStringOrdinal(reinterpret_cast<LPCWSTR>(lp), -1, L"ImmersiveColorSet", -1, TRUE) == CSTR_EQUAL &&
+            AppsDark() != dark_) {
+            dark_ = !dark_;
+            frame_.Colours(dark_);
+            PageBackground();
+        }
+        break;
     case WM_SIZE:
         if (wp == SIZE_MINIMIZED) scenePreviews_.clear();
         Fit();
@@ -294,7 +312,7 @@ LRESULT Host::Handle(UINT msg, WPARAM wp, LPARAM lp) {
         if (!inbox_.empty()) {
             const json::Value m = std::move(inbox_.front());
             inbox_.pop_front();
-            OnMessage(m);
+            if (!frame_.OnPage(m)) OnMessage(m);
         }
         return 0;
     case WM_CLOSE:
@@ -363,11 +381,15 @@ void Host::StartWebView() {
                                        settings->put_IsZoomControlEnabled(FALSE);
                                        ComPtr<ICoreWebView2Settings3> s3;
                                        if (SUCCEEDED(settings.As(&s3))) s3->put_AreBrowserAcceleratorKeysEnabled(FALSE);
+                                       // The page's bar is the window's title bar: where its CSS
+                                       // says `app-region: drag`, WebView2 drags the window,
+                                       // maximises it on a double click and opens the system menu
+                                       // on a right click, as a caption does.
+                                       ComPtr<ICoreWebView2Settings9> s9;
+                                       if (SUCCEEDED(settings.As(&s9))) s9->put_IsNonClientRegionSupportEnabled(TRUE);
+                                       else ALOG(L"WebView2: no drag regions; the window moves only from the keyboard (Alt+Space, Win+arrows)");
                                    }
-                                   ComPtr<ICoreWebView2Controller2> c2;
-                                   if (SUCCEEDED(controller_.As(&c2)))
-                                       c2->put_DefaultBackgroundColor(dark_ ? COREWEBVIEW2_COLOR{255, 32, 32, 32}
-                                                                            : COREWEBVIEW2_COLOR{255, 243, 243, 243});
+                                   PageBackground();
                                    // Media only: the page's own origin may play these files but
                                    // not read them.
                                    ComPtr<ICoreWebView2_3> view3;
@@ -432,6 +454,7 @@ void Host::StartWebView() {
                                            .Get(),
                                        &token);
                                    Fit();
+                                   frame_.Raise();
                                    view_->Navigate((std::wstring(kOrigin) + L"index.html").c_str());
                                    return S_OK;
                                })

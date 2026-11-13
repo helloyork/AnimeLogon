@@ -57,13 +57,18 @@ interface Entering {
 }
 
 // Each visible panel's picture and entrance, fetched and decoded before anything comes in, so that
-// none of them is late. Null until then.
+// none of them is late. Null until then. Fetched again as the clock turns (the query changes):
+// the pictures shown stay until the new ones are decoded, so nothing blinks.
 function useEntering(id: string, query: string) {
   const [parts, setParts] = useState<Entering[] | null>(null);
+  const shownFor = useRef(id);
   useEffect(() => {
     let alive = true;
     const urls: string[] = [];
-    setParts(null);
+    if (shownFor.current !== id) {
+      shownFor.current = id;
+      setParts(null);
+    }
     (async () => {
       const list: Omit<Entering, 'url' | 'box'>[] = await fetch(`${ORIGIN}lock/${id}/entrance.json?${query}`).then(r => r.json()).catch(() => []);
       const out: Entering[] = [];

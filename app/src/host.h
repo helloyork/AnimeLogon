@@ -17,6 +17,7 @@
 #include "animelogon/monitors.h"
 #include "staging.h"
 
+#include "frame.h"
 #include "json.h"
 #include "library.h"
 #include "pictures.h"
@@ -38,6 +39,8 @@ private:
     void StartWebView();
     void Fit();
     void SetIcons();
+    // What WebView2 shows before the page draws, in the page's background for light or dark.
+    void PageBackground();
 
     // --- talking to the page
     void Send(const json::Writer &message);
@@ -88,6 +91,9 @@ private:
 
     // Messages from the page, in order, waiting for the message loop to answer them.
     std::deque<json::Value> inbox_;
+
+    // The window's frame without Windows' caption: the page's bar is the title bar (frame.h).
+    Frame frame_{[this](const json::Writer &message) { Send(message); }};
 
     Library library_;
     Pictures pictures_;
