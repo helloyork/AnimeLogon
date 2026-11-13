@@ -1,112 +1,49 @@
-// One control for one value of the open theme. Sliders and the colour picker show their changes
-// live and save when let go; a typed number, a choice or a switch saves at once.
+// One control for one value of the open theme, as a row of the panel's grid: the label, the
+// control, and room at the end for the button that puts a changed value back. Sliders and the
+// colour picker show their changes live and save when let go; a typed number, a choice or a
+// switch saves at once.
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import {
-  AlphaSlider,
-  Button,
-  Caption1,
-  ColorArea,
-  ColorPicker,
-  ColorSlider,
-  ColorSwatch,
-  Combobox,
-  Dropdown,
-  Input,
-  Label,
-  makeStyles,
-  mergeClasses,
-  Option,
-  Popover,
-  PopoverSurface,
-  PopoverTrigger,
-  Slider,
-  SpinButton,
-  Switch,
-  SwatchPicker,
-  Tooltip,
-  tokens,
-} from '@fluentui/react-components';
-import { ArrowResetRegular } from '@fluentui/react-icons';
+import { AlphaSlider, ColorArea, ColorPicker, ColorSlider, Popover, PopoverSurface, PopoverTrigger, Tooltip } from '@fluentui/react-components';
 import { endGesture, liveSet, newGesture, setValue } from '../preview';
 import { useStore } from '../store';
 import type { Adjustment, Setting } from '../types';
-import { ANCHOR_NAMES, ANCHORS, clamp, decimals, roundTo } from './geometry';
+import { cx, NumberInput, ResetButton, SearchSelect, Segmented, Select, Slider, Switch, type Choice } from '../ui/controls';
+import { clamp, decimals, roundTo } from './geometry';
 
-const useStyles = makeStyles({
-  field: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXS, paddingBlock: tokens.spacingVerticalS },
-  head: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalXS, minHeight: '24px' },
-  grow: { flex: 1, minWidth: 0 },
-  value: { color: tokens.colorNeutralForeground3, fontVariantNumeric: 'tabular-nums' },
-  line: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS },
-  // A switch sits at the end of its label's row, as in Windows' settings.
-  row: { flexDirection: 'row' },
-  slider: { flex: 1, minWidth: 0, marginInline: `calc(-1 * ${tokens.spacingHorizontalS})` },
-  // Fluent marks every step on the rail; at a tenth of a percent that is a thousand marks.
-  rail: { '::before': { backgroundImage: 'none' } },
-  label: { cursor: 'default' },
-  spin: { width: '92px', flex: 'none' },
-  unit: { color: tokens.colorNeutralForeground3, minWidth: '3.2em', fontVariantNumeric: 'tabular-nums' },
-  full: { width: '100%' },
-  grid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(3, 1fr)',
-    gridTemplateRows: 'repeat(3, 1fr)',
-    width: '112px',
-    height: '72px',
-    padding: tokens.spacingHorizontalXS,
-    gap: tokens.spacingHorizontalXXS,
-    boxSizing: 'border-box',
-    backgroundColor: tokens.colorNeutralBackground1,
-    border: `${tokens.strokeWidthThin} solid ${tokens.colorNeutralStroke1}`,
-    borderRadius: tokens.borderRadiusMedium,
-    flex: 'none',
-  },
-  cell: {
-    display: 'grid',
-    placeItems: 'center',
-    padding: 0,
-    border: 'none',
-    borderRadius: tokens.borderRadiusSmall,
-    backgroundColor: 'transparent',
-    cursor: 'pointer',
-    ':hover': { backgroundColor: tokens.colorSubtleBackgroundHover },
-    ':active': { backgroundColor: tokens.colorSubtleBackgroundPressed },
-    '::after': {
-      content: '""',
-      width: '6px',
-      height: '6px',
-      borderRadius: '50%',
-      backgroundColor: tokens.colorNeutralForeground3,
-      transitionProperty: 'width, height, background-color',
-      transitionDuration: tokens.durationFaster,
-      transitionTimingFunction: tokens.curveDecelerateMax,
-    },
-  },
-  cellOn: { '::after': { width: '10px', height: '10px', backgroundColor: tokens.colorCompoundBrandBackground } },
-  colors: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS, flexWrap: 'wrap' },
-  hex: { width: '108px', fontFamily: tokens.fontFamilyMonospace },
-  pickerSurface: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM, width: '260px' },
-});
+interface Common {
+  id: string;
+  label: string;
+  detail?: string;
+  modified: boolean;
+  onReset: () => void;
+}
 
-// The label, the button that puts the value back, and what the value reads as.
-function Head({ id, label, detail, modified, onReset, value }: { id: string; label: string; detail?: string; modified?: boolean; onReset?: () => void; value?: ReactNode }) {
-  const styles = useStyles();
+// What a value is, said on the label: a tooltip, for those who point at it.
+function Name({ label, detail }: { label: string; detail?: string }) {
+  if (!detail) return <>{label}</>;
   return (
-    <div className={styles.head}>
-      <div className={styles.grow}>
-        {detail ? (
-          <Tooltip content={detail} relationship="description" positioning="above-start">
-            <Label htmlFor={id} className={styles.label}>{label}</Label>
-          </Tooltip>
-        ) : <Label htmlFor={id}>{label}</Label>}
+    <Tooltip content={detail} relationship="description" positioning="above-start" withArrow={false}>
+      <span>{label}</span>
+    </Tooltip>
+  );
+}
+
+function Reset({ modified, onReset }: { modified: boolean; onReset?: () => void }) {
+  return <span className="preset">{modified && onReset && <ResetButton onClick={onReset} />}</span>;
+}
+
+// A row of the grid: the label in the first column, the control and its reset button in the second.
+export function Prop({ id, label, detail, modified = false, onReset, top, children }: Partial<Common> & { label: string; top?: boolean; children: ReactNode }) {
+  return (
+    <>
+      <label className={cx('plabel', top && 'top')} htmlFor={id} id={id ? id + '-label' : undefined}>
+        <Name label={label} detail={detail} />
+      </label>
+      <div className="pctl">
+        <div className="pmain">{children}</div>
+        <Reset modified={modified} onReset={onReset} />
       </div>
-      {value != null && <Caption1 className={styles.value}>{value}</Caption1>}
-      {modified && onReset && (
-        <Tooltip content="恢复这一项" relationship="label">
-          <Button appearance="subtle" size="small" icon={<ArrowResetRegular />} onClick={onReset} />
-        </Tooltip>
-      )}
-    </div>
+    </>
   );
 }
 
@@ -127,7 +64,6 @@ export function viewFor(key: string, step: number): View {
     case 'offset-y': return plain('% 屏高', 1);
     case 'size': return panel ? plain('% 屏高', 1) : plain('倍', 2);
     case 'margin': return plain('% 短边', 1);
-    case 'weight': return { factor: 1, digits: 0, unit: v => WEIGHT_NAMES[Math.round(v / 100) * 100] || '' };
     case 'tracking': case 'x': case 'y': case 'blur': return plain('em', 3);
     case 'space': case 'gap': return plain('em', 2);
     case 'opacity': return { factor: 100, digits: 0, unit: v => (/\.(s\d+|b)\.opacity$/.test(key) && !v ? '不画' : '%') };
@@ -135,20 +71,14 @@ export function viewFor(key: string, step: number): View {
   return plain('', decimals(step));
 }
 
-export function NumberField({ id, label, detail, min, max, step, value, modified, view, write, onReset }: {
-  id: string;
-  label: string;
-  detail?: string;
+export function NumberField({ id, label, detail, min, max, step, value, modified, view, write, onReset }: Common & {
   min: number;
   max: number;
   step: number;
   value: string;
-  modified: boolean;
   view: View;
   write: (v: number, gesture?: number) => void;
-  onReset: () => void;
 }) {
-  const styles = useStyles();
   const [live, setLive] = useState<number | null>(null);
   const gesture = useRef(0);
   // What the native side says wins once it has answered; while the slider is held, the slider
@@ -162,95 +92,74 @@ export function NumberField({ id, label, detail, min, max, step, value, modified
     gesture.current = 0;
     endGesture();
   };
-  const f = view.factor, digits = view.digits;
-  const display = +(shown * f).toFixed(digits);
+  const f = view.factor, display = +(shown * f).toFixed(view.digits);
   return (
-    <div className={styles.field}>
-      <Head id={id} label={label} detail={detail} modified={modified} onReset={onReset} />
-      <div className={styles.line}>
-        <Slider id={id} className={styles.slider} rail={{ className: styles.rail }} min={min} max={max} step={step} value={shown}
-          onChange={(_, d) => {
-            if (!gesture.current) gesture.current = newGesture();
-            setLive(d.value);
-            write(d.value, gesture.current);
-          }}
-          onPointerUp={end} onKeyUp={end} onBlur={end} />
-        <SpinButton className={styles.spin} aria-label={label} value={display} min={min * f} max={max * f} step={step * f} precision={digits}
-          onChange={(_, d) => {
-            const typed = d.value ?? parseFloat(String(d.displayValue ?? '').replace(/[^\d.+\-−]/g, '').replace('−', '-'));
-            if (d.value === null && d.displayValue === undefined) return;
-            if (!Number.isFinite(typed)) return;
-            const v = clamp(roundTo(typed / f, step), min, max);
-            setLive(v);
-            write(v);
-          }} />
-        <Caption1 className={styles.unit}>{view.unit(display)}</Caption1>
-      </div>
-    </div>
+    <Prop id={id} label={label} detail={detail} modified={modified} onReset={onReset}>
+      <Slider id={id} label={label} min={min} max={max} step={step} value={shown} onDone={end}
+        onChange={v => {
+          if (!gesture.current) gesture.current = newGesture();
+          setLive(v);
+          write(v, gesture.current);
+        }} />
+      <NumberInput label={label} value={display} min={+(min * f).toFixed(view.digits)} max={+(max * f).toFixed(view.digits)} step={+(step * f).toFixed(6)} digits={view.digits}
+        unit={view.unit(display)}
+        onCommit={typed => {
+          const v = clamp(roundTo(typed / f, step), min, max);
+          setLive(v);
+          write(v);
+        }} />
+    </Prop>
   );
 }
 
 /* --- choices, switches, dates --- */
-export function ChoiceField({ id, label, detail, options, value, modified, write, onReset }: {
-  id: string; label: string; detail?: string; options: { value: string; label: string }[]; value: string; modified: boolean; write: (v: string) => void; onReset: () => void;
-}) {
-  const styles = useStyles();
-  const selected = options.find(o => o.value === value);
+// A few short choices side by side; a longer list drops down.
+export function ChoiceField({ id, label, detail, options, value, modified, write, onReset }: Common & { options: Choice[]; value: string; write: (v: string) => void }) {
+  const short = options.length <= 4 && options.every(o => o.label.length <= 2);
   return (
-    <div className={styles.field}>
-      <Head id={id} label={label} detail={detail} modified={modified} onReset={onReset} />
-      <Dropdown id={id} className={styles.full} value={selected?.label ?? value} selectedOptions={[value]} onOptionSelect={(_, d) => d.optionValue != null && write(d.optionValue)}>
-        {options.map(o => <Option key={o.value} value={o.value}>{o.label}</Option>)}
-      </Dropdown>
+    <Prop id={id} label={label} detail={detail} modified={modified} onReset={onReset}>
+      {short ? <Segmented id={id} label={label} options={options} value={value} onChange={write} />
+        : <Select id={id} label={label} size="sm" options={options} value={value} onChange={write} />}
+    </Prop>
+  );
+}
+
+// A switch sits at the end of its row, its label free to take the row's width.
+export function ToggleField({ id, label, detail, value, modified, write, onReset }: Partial<Common> & { id: string; label: string; value: boolean; write: (on: boolean) => void }) {
+  return (
+    <div className="ptoggle">
+      <label className="plabel" htmlFor={id}><Name label={label} detail={detail} /></label>
+      <Switch id={id} checked={value} onChange={write} />
+      <Reset modified={!!modified} onReset={onReset} />
     </div>
   );
 }
 
-export function ToggleField({ id, label, detail, value, modified, write, onReset }: { id: string; label: string; detail?: string; value: boolean; modified: boolean; write: (on: boolean) => void; onReset: () => void }) {
-  const styles = useStyles();
-  return (
-    <div className={mergeClasses(styles.field, styles.line, styles.row)}>
-      <div className={styles.grow}><Head id={id} label={label} detail={detail} modified={modified} onReset={onReset} /></div>
-      <Switch id={id} checked={value} onChange={(_, d) => write(d.checked)} />
-    </div>
-  );
-}
-
-export function DateField({ id, label, detail, value, modified, write, onReset }: { id: string; label: string; detail?: string; value: string; modified: boolean; write: (v: string) => void; onReset: () => void }) {
-  const styles = useStyles();
+export function DateField({ id, label, detail, value, modified, write, onReset }: Common & { value: string; write: (v: string) => void }) {
   const [text, setText] = useState(value);
   useEffect(() => setText(value), [value]);
   return (
-    <div className={styles.field}>
-      <Head id={id} label={label} detail={detail} modified={modified} onReset={onReset} />
-      <Input id={id} type="date" value={text} min="1601-01-01" max="9999-12-31" onChange={(_, d) => setText(d.value)}
-        onBlur={() => (/^\d{4}-\d{2}-\d{2}$/.test(text) ? text !== value && write(text) : setText(value))} />
-    </div>
+    <Prop id={id} label={label} detail={detail} modified={modified} onReset={onReset}>
+      <label className="field sm">
+        <input id={id} type="date" value={text} min="1601-01-01" max="9999-12-31" onChange={e => setText(e.currentTarget.value)}
+          onBlur={() => (/^\d{4}-\d{2}-\d{2}$/.test(text) ? text !== value && write(text) : setText(value))} />
+      </label>
+    </Prop>
   );
 }
 
 /* --- fonts --- */
-const fontStack = (stored: string) => (stored ? `"${stored}", ${tokens.fontFamilyBase}` : `"Segoe UI Variable Display", ${tokens.fontFamilyBase}`);
+const fontStack = (stored: string) => (stored ? `"${stored}", var(--font)` : 'var(--font-display)');
 const DEFAULT_FONT = '默认（Segoe UI Variable）';
 
 // Only fonts installed for every user: the logon screen runs as the system and sees no others.
-export function FontField({ id, label, detail, value, modified, write, onReset }: { id: string; label: string; detail?: string; value: string; modified: boolean; write: (v: string) => void; onReset: () => void }) {
-  const styles = useStyles();
+export function FontField({ id, label, detail, value, modified, write, onReset }: Common & { value: string; write: (v: string) => void }) {
   const { env } = useStore();
-  const list = useMemo(() => [{ name: DEFAULT_FONT, stored: '' }, ...env.fonts], [env.fonts]);
-  const current = list.find(f => f.stored === value)?.name ?? value;
-  const [query, setQuery] = useState<string | null>(null);
-  const q = (query ?? '').trim().toLowerCase();
-  const shown = (q ? list.filter(f => f.name.toLowerCase().includes(q) || f.stored.toLowerCase().includes(q)) : list).slice(0, 200);
+  const options = useMemo(() => [{ value: '', label: DEFAULT_FONT }, ...env.fonts.map(f => ({ value: f.stored, label: f.name }))], [env.fonts]);
   return (
-    <div className={styles.field}>
-      <Head id={id} label={label} detail={detail ?? '只列出为所有用户安装的字体。'} modified={modified} onReset={onReset} />
-      <Combobox id={id} className={styles.full} value={query ?? current} selectedOptions={[value]} placeholder="搜索字体"
-        onChange={e => setQuery(e.target.value)} onOpenChange={(_, d) => !d.open && setQuery(null)}
-        onOptionSelect={(_, d) => { setQuery(null); if (d.optionValue != null && d.optionValue !== value) write(d.optionValue); }}>
-        {shown.map(f => <Option key={f.stored || '-'} value={f.stored} text={f.name} style={{ fontFamily: fontStack(f.stored) }}>{f.name}</Option>)}
-      </Combobox>
-    </div>
+    <Prop id={id} label={label} detail={detail ?? '只列出为所有用户安装的字体。'} modified={modified} onReset={onReset}>
+      <SearchSelect id={id} label={label} options={options} value={value} onChange={write} placeholder="搜索字体" render={o => ({ fontFamily: fontStack(o.value) })} />
+    </Prop>
   );
 }
 
@@ -275,8 +184,8 @@ function hsvToHex({ h, s, v, a = 1 }: HsvColor) {
   return '#' + hex(f(5)) + hex(f(3)) + hex(f(1)) + (a < 1 ? hex(Math.round(a * 255)) : '');
 }
 
-export function ColorField({ id, label, detail, value, modified, write, onReset }: { id: string; label: string; detail?: string; value: string; modified: boolean; write: (v: string, gesture?: number) => void; onReset: () => void }) {
-  const styles = useStyles();
+// The colour as typed, its chip opening a picker, and a row of colours that suit a lock screen.
+export function ColorField({ id, label, detail, value, modified, write, onReset }: Common & { value: string; write: (v: string, gesture?: number) => void }) {
   const v0 = String(value).toUpperCase();
   const [hex, setHex] = useState(v0);
   const [hsv, setHsv] = useState<HsvColor>(() => hexToHsv(v0));
@@ -290,47 +199,39 @@ export function ColorField({ id, label, detail, value, modified, write, onReset 
     if (/^#[0-9A-F]{6}([0-9A-F]{2})?$/.test(v)) { if (v !== v0) write(v); } else setHex(v0);
   };
   return (
-    <div className={styles.field}>
-      <Head id={id} label={label} detail={detail} modified={modified} onReset={onReset} />
-      <div className={styles.colors}>
-        <SwatchPicker aria-label={label} size="small" shape="circular" selectedValue={v0.slice(0, 7)} onSelectionChange={(_, d) => write(d.selectedValue.toUpperCase())}>
-          {SWATCHES.map(([name, c]) => <ColorSwatch key={c} value={c} color={c} aria-label={name} />)}
-        </SwatchPicker>
-        <Popover positioning="below-end" onOpenChange={(_, d) => { if (!d.open && gesture.current) { gesture.current = 0; endGesture(); } }}>
-          <PopoverTrigger disableButtonEnhancement>
-            <Button size="small">自定义…</Button>
-          </PopoverTrigger>
-          <PopoverSurface className={styles.pickerSurface} aria-label="自定义颜色">
-            <ColorPicker color={hsv} onColorChange={(_, d) => {
-              setHsv(d.color);
-              const next = hsvToHex(d.color);
-              setHex(next);
-              if (!gesture.current) gesture.current = newGesture();
-              write(next, gesture.current);
-            }}>
-              <ColorArea />
-              <ColorSlider />
-              <AlphaSlider />
-            </ColorPicker>
-          </PopoverSurface>
-        </Popover>
-        <Input id={id} className={styles.hex} value={hex} maxLength={9} aria-label={label + '（十六进制）'} onChange={(_, d) => setHex(d.value)}
-          onBlur={commitHex} onKeyDown={e => e.key === 'Enter' && commitHex()} />
+    <Prop id={id} label={label} detail={detail} modified={modified} onReset={onReset} top>
+      <div className="pcolor">
+        <div className="field sm mono">
+          <Popover positioning={{ position: 'below', align: 'start', offset: 6 }} trapFocus
+            onOpenChange={(_, d) => { if (!d.open && gesture.current) { gesture.current = 0; endGesture(); } }}>
+            <PopoverTrigger disableButtonEnhancement>
+              <button type="button" className="chip" style={{ background: v0 }} aria-label="自定义颜色" />
+            </PopoverTrigger>
+            <PopoverSurface className="pop picker" aria-label="自定义颜色">
+              <ColorPicker color={hsv} onColorChange={(_, d) => {
+                setHsv(d.color);
+                const next = hsvToHex(d.color);
+                setHex(next);
+                if (!gesture.current) gesture.current = newGesture();
+                write(next, gesture.current);
+              }}>
+                <ColorArea />
+                <ColorSlider />
+                <AlphaSlider />
+              </ColorPicker>
+            </PopoverSurface>
+          </Popover>
+          <input id={id} value={hex} maxLength={9} spellCheck={false} aria-label={label + '（十六进制）'} onChange={e => setHex(e.currentTarget.value)}
+            onBlur={commitHex} onKeyDown={e => e.key === 'Enter' && commitHex()} />
+        </div>
+        <div className="swatches" role="radiogroup" aria-label={label}>
+          {SWATCHES.map(([name, c]) => (
+            <button key={c} type="button" role="radio" aria-checked={v0.slice(0, 7) === c && v0.length === 7} aria-label={name} title={name} style={{ background: c }}
+              onClick={() => write(c)} />
+          ))}
+        </div>
       </div>
-    </div>
-  );
-}
-
-/* --- the nine anchors --- */
-export function AnchorPicker({ value, onPick }: { value: string; onPick: (anchor: string) => void }) {
-  const styles = useStyles();
-  return (
-    <div className={styles.grid} role="radiogroup" aria-label="位置">
-      {ANCHORS.map((a, i) => (
-        <button key={a} type="button" role="radio" aria-checked={a === value} aria-label={ANCHOR_NAMES[i]} title={ANCHOR_NAMES[i]}
-          className={mergeClasses(styles.cell, a === value && styles.cellOn)} onClick={() => onPick(a)} />
-      ))}
-    </div>
+    </Prop>
   );
 }
 

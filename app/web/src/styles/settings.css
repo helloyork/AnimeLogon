@@ -1,0 +1,24 @@
+/* 设置: groups of rows, each group one card. */
+.group { margin-top: var(--s7); }
+.group:first-of-type { margin-top: 0; }
+.group > .t-group { margin: 0 0 var(--s2) 2px; }
+.card { overflow: hidden; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface-2); }
+
+.row { display: flex; align-items: center; gap: var(--s4); min-height: 56px; padding: var(--s3) var(--s4); }
+.row + .row { border-top: 1px solid var(--border); }
+.row .lbl { flex: 1; min-width: 0; }
+.row .lbl .t-cap { margin-top: 1px; }
+.row.sub { padding-left: var(--s10); }
+.row.sub .lbl { color: var(--text-2); }
+.row.dim .lbl { opacity: .55; }
+.row .ctl { flex: none; display: flex; align-items: center; gap: var(--s2); }
+.row .ctl .select { width: 220px; }
+.row .value { color: var(--text-2); font-size: 13px; }
+.row .range { display: flex; align-items: center; gap: var(--s3); width: 220px; }
+.row .range .value { width: 28px; text-align: right; }
+
+@media (max-width: 640px) {
+  .row { flex-wrap: wrap; }
+  .row .ctl { width: 100%; }
+  .row .ctl .select, .row .range { flex: 1; width: auto; }
+}

@@ -1,0 +1,112 @@
+/* Fluent's components at the page's sizes. Fluent writes its styles as single-class rules, so
+   each rule here names two classes to come first. */
+
+/* The provider fills the window; Fluent gives its class to the layers it opens over the page
+   (menus, tooltips) as well, which must not. */
+#app > .fui-FluentProvider { height: 100%; }
+.fui-FluentProvider { font-family: var(--font); }
+
+/* --- dropdowns and the font list, drawn as the page's fields --- */
+.select.fui-Dropdown,
+.select.fui-Combobox {
+  min-width: 0;
+  height: var(--h-md);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  background: var(--field);
+  transition: border-color .12s;
+}
+.select.fui-Dropdown::after,
+.select.fui-Combobox::after { display: none; }
+.select.fui-Dropdown:hover,
+.select.fui-Combobox:hover { border-color: var(--text-3); }
+.select.fui-Dropdown:focus-within,
+.select.fui-Combobox:focus-within { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.select.sm { height: var(--h-sm); }
+.select .fui-Dropdown__button {
+  height: 100%;
+  min-height: 0;
+  padding: 0 8px 0 10px;
+  color: var(--text-1);
+  font-size: 14px;
+  line-height: 20px;
+}
+.select.sm .fui-Dropdown__button { padding-left: 8px; font-size: 13px; }
+.select .fui-Combobox__input { height: 100%; padding: 0 0 0 10px; font-size: 14px; }
+.select.sm .fui-Combobox__input { padding-left: 8px; font-size: 13px; }
+.select .fui-Dropdown__expandIcon,
+.select .fui-Combobox__expandIcon { color: var(--text-2); margin-right: 8px; padding: 0; }
+.select.fui-Dropdown[aria-disabled=true],
+.select.fui-Dropdown:has(button:disabled) { opacity: .45; background: var(--field); border-color: var(--border-strong); }
+
+.listbox.fui-Listbox {
+  padding: 4px;
+  border: 0;
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-pop);
+  max-height: min(400px, 60vh);
+}
+.listbox .fui-Option {
+  min-height: 32px;
+  padding: 6px 8px;
+  border-radius: var(--r-xs);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+/* --- menus --- */
+.menu.fui-MenuPopover {
+  min-width: 180px;
+  padding: 4px;
+  border: 0;
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-pop);
+}
+.menu .fui-MenuItem { min-height: 32px; padding: 0 8px; border-radius: var(--r-xs); font-size: 14px; line-height: 20px; }
+.menu .fui-MenuItem__icon { width: 16px; height: 16px; font-size: 16px; }
+.menu .fui-MenuDivider { margin: 4px -4px; border-color: var(--border); }
+
+/* --- tooltips --- */
+.fui-FluentProvider .fui-Tooltip__content {
+  padding: 4px 8px 5px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-pop);
+  color: var(--text-1);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+/* --- dialogs --- */
+.dialog.fui-DialogSurface {
+  padding: var(--s6);
+  border: 0;
+  border-radius: var(--r-lg);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-dialog);
+}
+.dialog .fui-DialogBody { gap: var(--s5); }
+.dialog .fui-DialogTitle { font: 600 16px/24px var(--font); }
+.dialog .fui-DialogContent { font-size: 14px; line-height: 22px; color: var(--text-1); }
+.dialog .fui-DialogActions { gap: var(--s2); }
+
+/* --- toasts --- */
+.toast.fui-Toast {
+  padding: 10px 16px;
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-pop);
+}
+.toast .fui-ToastTitle { font-size: 13px; line-height: 20px; font-weight: 400; color: var(--text-1); }
+
+/* --- the colour picker's layer --- */
+.pop.fui-PopoverSurface {
+  padding: var(--s4);
+  border: 0;
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-pop);
+}

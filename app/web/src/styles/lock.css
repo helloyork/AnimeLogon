@@ -1,0 +1,37 @@
+/* The lock screen preview: the whole window, black around a display of another shape. Its own
+   words are white over the picture whatever the Windows theme. */
+.lock { position: fixed; inset: 0; z-index: 1000; background: #000; outline: none; }
+.lock-frame { position: absolute; inset: 0; margin: auto; overflow: hidden; }
+.lock-fill { position: absolute; inset: 0; width: 100%; height: 100%; }
+.lock-signin { position: absolute; inset: 0; display: grid; place-items: center; overflow: hidden; }
+.lock-blur { position: absolute; inset: 0; width: 100%; height: 100%; filter: blur(22px) brightness(.62); transform: scale(1.1); }
+.lock-box { position: relative; display: grid; justify-items: center; gap: 12px; padding: 0 16px; color: #fff; text-align: center; }
+.lock-avatar { display: grid; place-items: center; width: 104px; height: 104px; border-radius: 50%; background: rgba(255, 255, 255, .16); font-size: 40px; font-weight: 300; }
+.lock-name { font-size: 26px; line-height: 34px; font-weight: 300; }
+.lock-pin {
+  width: 260px;
+  max-width: 70vw;
+  padding: 9px 12px;
+  border-bottom: 2px solid rgba(255, 255, 255, .65);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, .12);
+  color: rgba(255, 255, 255, .6);
+  text-align: left;
+}
+.lock-note { margin-top: 10px; color: rgba(255, 255, 255, .6); font-size: 12px; }
+/* The preview's own words sit in the corner opposite its exit, off the lock screen's middle and
+   bottom, where its clock and components usually are. */
+.lock-hint {
+  position: absolute;
+  top: 12px;
+  left: 16px;
+  z-index: 3;
+  padding: 4px 10px;
+  border-radius: var(--r-sm);
+  background: rgba(0, 0, 0, .55);
+  color: rgba(255, 255, 255, .85);
+  font-size: 13px;
+  line-height: 20px;
+}
+.lock-exit.btn { position: absolute; top: 12px; right: 16px; z-index: 3; background: rgba(20, 20, 22, .78); border-color: rgba(255, 255, 255, .14); color: #fff; backdrop-filter: blur(6px); }
+.lock-exit.btn:hover { background: rgba(40, 40, 44, .9); }

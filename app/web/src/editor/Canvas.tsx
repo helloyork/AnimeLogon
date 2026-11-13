@@ -8,7 +8,7 @@
 // ends. Without a lift (scene layers; a component drawn on several displays of a wall) the
 // picture is redrawn live as before.
 import { useEffect, useLayoutEffect, useReducer, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
-import { Caption1, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
+import { Desktop16Regular } from '@fluentui/react-icons';
 import { SceneFrames, WallpaperVideo } from '../media';
 import { calm } from '../motion';
 import {
@@ -28,6 +28,7 @@ import {
 } from '../preview';
 import { getState, instOf, multiPanel, panelKey, ratioLabel, screenOf, select, setState, shapeOf, spanning, useStore } from '../store';
 import type { Bound } from '../types';
+import { cx } from '../ui/controls';
 import { setDraft } from './draft';
 import {
   adjustment,
@@ -51,78 +52,11 @@ import {
   type SnapLine,
 } from './geometry';
 
-const MARK = '#ffffff', EDGE = 'rgba(0, 0, 0, .55)';
-
-const useStyles = makeStyles({
-  area: {
-    flex: 1,
-    minWidth: 0,
-    minHeight: 0,
-    display: 'flex',
-    flexDirection: 'column',
-    backgroundColor: tokens.colorNeutralBackground4,
-  },
-  well: { flex: 1, minHeight: 0, position: 'relative' },
-  stage: {
-    position: 'absolute',
-    overflow: 'hidden',
-    backgroundColor: '#000',
-    borderRadius: tokens.borderRadiusMedium,
-    // The lock screen is often dark on a dark canvas: a hairline shows where it ends.
-    boxShadow: `${tokens.shadow8}, 0 0 0 1px ${tokens.colorNeutralStroke2}`,
-    touchAction: 'none',
-    cursor: 'default',
-  },
-  over: { cursor: 'grab' },
-  dragging: { cursor: 'grabbing' },
-  layer: { position: 'absolute', inset: 0, width: '100%', height: '100%', display: 'block', pointerEvents: 'none' },
-  sprite: { position: 'absolute', inset: 0, backgroundSize: '100% 100%', pointerEvents: 'none', willChange: 'transform' },
-  box: { position: 'absolute', pointerEvents: 'none', borderRadius: '2px', boxSizing: 'border-box' },
-  selected: {
-    border: `1.5px solid ${MARK}`,
-    boxShadow: `0 0 0 1px ${EDGE}, inset 0 0 0 1px ${EDGE}`,
-    zIndex: 4,
-    transitionProperty: 'left, top, width, height',
-    transitionDuration: tokens.durationFaster,
-    transitionTimingFunction: tokens.curveDecelerateMax,
-  },
-  still: { transitionProperty: 'none' },
-  part: { border: `1px dashed ${MARK}`, boxShadow: `0 0 0 1px ${EDGE}`, zIndex: 4 },
-  hover: { border: `1px dashed ${MARK}`, boxShadow: `0 0 0 1px ${EDGE}`, zIndex: 3, opacity: 0.85 },
-  handle: {
-    position: 'absolute',
-    width: '10px',
-    height: '10px',
-    boxSizing: 'border-box',
-    backgroundColor: MARK,
-    border: `1px solid ${EDGE}`,
-    borderRadius: '2px',
-    pointerEvents: 'auto',
-    touchAction: 'none',
-  },
-  marks: { position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 3, overflow: 'visible' },
-  readout: {
-    position: 'absolute',
-    zIndex: 5,
-    pointerEvents: 'none',
-    whiteSpace: 'nowrap',
-    fontSize: tokens.fontSizeBase200,
-    lineHeight: tokens.lineHeightBase200,
-    fontVariantNumeric: 'tabular-nums',
-    color: '#fff',
-    backgroundColor: 'rgba(0, 0, 0, .78)',
-    padding: `${tokens.spacingVerticalXXS} ${tokens.spacingHorizontalS}`,
-    borderRadius: tokens.borderRadiusMedium,
-  },
-  foot: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS, paddingInline: tokens.spacingHorizontalM, minHeight: '36px' },
-  quiet: { color: tokens.colorNeutralForeground3 },
-});
-
 const HANDLES: [string, CSSProperties][] = [
-  ['nw', { left: -6, top: -6, cursor: 'nwse-resize' }],
-  ['ne', { right: -6, top: -6, cursor: 'nesw-resize' }],
-  ['sw', { left: -6, bottom: -6, cursor: 'nesw-resize' }],
-  ['se', { right: -6, bottom: -6, cursor: 'nwse-resize' }],
+  ['nw', { left: -5, top: -5, cursor: 'nwse-resize' }],
+  ['ne', { right: -5, top: -5, cursor: 'nesw-resize' }],
+  ['sw', { left: -5, bottom: -5, cursor: 'nesw-resize' }],
+  ['se', { right: -5, bottom: -5, cursor: 'nwse-resize' }],
 ];
 
 // A drag or resize under way, or one that has ended and waits for its exact picture.
@@ -155,7 +89,6 @@ const pad = (r: Rect, p: number): CSSProperties => ({ left: r.left - p, top: r.t
 
 export function Canvas() {
   const s = useStore();
-  const styles = useStyles();
   const t = s.open!;
   const [, redraw] = useReducer((x: number) => x + 1, 0);
   useEffect(() => subscribePreview(redraw), []);
@@ -173,15 +106,16 @@ export function Canvas() {
     const el = well.current;
     if (!el) return;
     const fit = () => {
-      const r = el.getBoundingClientRect(), margin = 24, ratio = shape.width / shape.height;
-      let w = Math.max(0, r.width - margin * 2), h = w / ratio;
-      if (h > r.height - margin * 2) {
-        h = Math.max(0, r.height - margin * 2);
+      // Room around the picture, more below it for the line that says which display it is.
+      const r = el.getBoundingClientRect(), side = 32, above = 32, below = 48, ratio = shape.width / shape.height;
+      let w = Math.max(0, r.width - side * 2), h = w / ratio;
+      if (h > r.height - above - below) {
+        h = Math.max(0, r.height - above - below);
         w = h * ratio;
       }
       w = Math.floor(w);
       h = Math.floor(h);
-      setStage({ left: Math.round((r.width - w) / 2), top: Math.round((r.height - h) / 2), width: w, height: h });
+      setStage({ left: Math.round((r.width - w) / 2), top: Math.round(above + (r.height - above - below - h) / 2), width: w, height: h });
       const dpr = window.devicePixelRatio || 1;
       askPreview(Math.round(w * dpr), Math.round(h * dpr));
     };
@@ -436,13 +370,13 @@ export function Canvas() {
   const video = wallpaper.kind === 'video' && pv.shownLayer && !scene;
   const m = screenOf(t.id);
   return (
-    <div className={styles.area}>
-      <div className={styles.well} ref={well}>
+    <div className="stage-area">
+      <div className="well" ref={well}>
         {stage.width > 0 && (
           <div
             ref={stageRef}
             data-stage
-            className={mergeClasses(styles.stage, over && styles.over, !!drag && !drag.settling && styles.dragging)}
+            className={cx('stage', over && 'over', !!drag && !drag.settling && 'dragging')}
             style={{ left: stage.left, top: stage.top, width: stage.width, height: stage.height }}
             onPointerDown={onDown}
             onPointerMove={onMove}
@@ -454,12 +388,12 @@ export function Canvas() {
             )}
             {video && <WallpaperVideo key={wallpaper.ref} wallpaper={wallpaper.ref} fit={t.fit} />}
             {pv.url && <Picture url={pv.url} hidden={!!lifted} />}
-            {lifted && <img className={styles.layer} src={lifted.base} alt="" draggable={false} />}
-            {rest && <div className={styles.sprite} style={rest} />}
-            {sprite && <div className={styles.sprite} style={sprite} />}
+            {lifted && <img className="layer" src={lifted.base} alt="" draggable={false} />}
+            {rest && <div className="sprite" style={rest} />}
+            {sprite && <div className="sprite" style={sprite} />}
             {pv.previous && <Leaving url={pv.previous} />}
 
-            <svg className={styles.marks}>
+            <svg className="marks">
               {pv.screens.length > 1 && pv.screens.map((sc, i) => {
                 const a = { x: sc.left * k + 0.5, y: sc.top * k + 0.5, width: Math.max(0, (sc.right - sc.left) * k - 1), height: Math.max(0, (sc.bottom - sc.top) * k - 1), fill: 'none' };
                 return (
@@ -472,21 +406,22 @@ export function Canvas() {
               {drag && !drag.settling && drag.lines?.map((l, i) => <Guide key={i} {...l} />)}
             </svg>
 
-            {hoverRects.map((r, i) => <div key={i} className={mergeClasses(styles.box, styles.hover)} style={pad(r, 4)} />)}
-            {partRect && <div className={mergeClasses(styles.box, styles.part)} style={pad(partRect, 2)} />}
+            {hoverRects.map((r, i) => <div key={i} className="box hov" style={pad(r, 4)} />)}
+            {partRect && <div className="box part" style={pad(partRect, 2)} />}
             {selRect && (
-              <div className={mergeClasses(styles.box, styles.selected, (drag || calm()) && styles.still)} style={pad(selRect, 6)}>
-                {!whole && !drag?.settling && HANDLES.map(([name, at]) => <span key={name} data-handle={name} className={styles.handle} style={at} />)}
+              <div className={cx('box', 'sel', (drag || calm()) && 'still')} style={pad(selRect, 6)}>
+                {!whole && !drag?.settling && HANDLES.map(([name, at]) => <span key={name} data-handle={name} className="handle" style={at} />)}
               </div>
             )}
-            {drag && !drag.settling && selRect && <div className={styles.readout} style={readoutStyle(selRect)}>{drag.readout}</div>}
+            {drag && !drag.settling && selRect && <div className="readout num" style={readoutStyle(selRect)}>{drag.readout}</div>}
           </div>
         )}
       </div>
       {/* Which display's shape the stage has; other shapes are in the toolbar's lock screen preview. */}
-      <div className={styles.foot}>
-        <Caption1 className={styles.quiet}>{spanning() ? '横跨所有显示器' : `${m.name} · ${ratioLabel(m.width, m.height)}`}</Caption1>
-        {!s.lib!.settings.components && <Caption1 className={styles.quiet}>· 组件已在设置里关闭，锁屏上只显示壁纸。</Caption1>}
+      <div className="stage-foot">
+        <Desktop16Regular />
+        <span>{spanning() ? '横跨所有显示器' : `${m.name} · ${ratioLabel(m.width, m.height)}`}</span>
+        {!s.lib!.settings.components && <span>· 组件已在设置里关闭，锁屏上只显示壁纸。</span>}
       </div>
     </div>
   );
@@ -494,19 +429,17 @@ export function Canvas() {
 
 // The picture on the stage; the first one of a page fades in.
 function Picture({ url, hidden }: { url: string; hidden: boolean }) {
-  const styles = useStyles();
   const ref = useRef<HTMLImageElement>(null);
   const first = useRef(true);
   useEffect(() => {
     if (first.current && !calm()) ref.current?.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 150, easing: 'linear' });
     first.current = false;
   }, [url]);
-  return <img ref={ref} className={styles.layer} style={hidden ? { visibility: 'hidden' } : undefined} src={url} alt="" draggable={false} />;
+  return <img ref={ref} className="layer" style={hidden ? { visibility: 'hidden' } : undefined} src={url} alt="" draggable={false} />;
 }
 
 // The picture before a new wallpaper or fit, fading out over the new one.
 function Leaving({ url }: { url: string }) {
-  const styles = useStyles();
   const ref = useRef<HTMLImageElement>(null);
   useEffect(() => {
     if (calm() || !ref.current) return forgetPrevious();
@@ -514,7 +447,7 @@ function Leaving({ url }: { url: string }) {
     a.onfinish = () => forgetPrevious();
     return () => a.cancel();
   }, [url]);
-  return <img ref={ref} className={styles.layer} src={url} alt="" draggable={false} />;
+  return <img ref={ref} className="layer" src={url} alt="" draggable={false} />;
 }
 
 function Guide(p: { x1: number; y1: number; x2: number; y2: number }) {
