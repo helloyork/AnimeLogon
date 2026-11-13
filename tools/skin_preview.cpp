@@ -1,11 +1,12 @@
 // Draws a skin over a still image, for judging its look without a lock screen:
 // skin_preview <background> <out.png> [--skin skin.xml] [--locale ll-CC] [--time HH:MM] [--date YYYY-MM-DD]
 //              [--hours auto|12|24] [--ampm on|off] [--date-style weekday|long|none] [--language ll-CC]
-//              [--component battery|media|countdown] [--data sample|paused|charging|mains]
-//              [setting=value ...] [p1.l1.t1.weight=300 ...]
+//              [--component battery|media|countdown] [--data sample|paused|charging|plugged|mains|idle]
+//              [--title words] [--artist words] [--album words] [setting=value ...] [p1.l1.t1.weight=300 ...]
 // Without --skin or --component it draws the default clock. --locale stands in for the regional
 // format. Without --data there is no battery and nothing playing; with mains, a machine without a
-// battery, on mains power, playing nothing.
+// battery, on mains power, playing nothing; with idle, the sample battery and nothing playing.
+// --title, --artist and --album name the sample song.
 #include <windows.h>
 
 #include <fcntl.h>
@@ -46,6 +47,7 @@ int wmain(int argc, wchar_t **argv) {
     ClockStyle style;
     bool withData = false;
     data::Snapshot snapshot;
+    std::wstring title = L"夜に駆ける", artist = L"YOASOBI", album = L"THE BOOK";
     for (int i = 3; i < argc; ++i) {
         const std::wstring arg = argv[i];
         const bool more = i + 1 < argc;
@@ -85,9 +87,13 @@ int wmain(int argc, wchar_t **argv) {
             snapshot = data::Sample((uint64_t)ft.dwHighDateTime << 32 | ft.dwLowDateTime);
             const std::wstring kind = argv[++i];
             if (kind == L"paused") snapshot.media.state = data::MediaState::Paused;
-            if (kind == L"charging") snapshot.battery = {data::BatteryState::Charging, 42, -1};
+            if (kind == L"charging") snapshot.battery = {data::BatteryState::Charging, 42, -1, true};
+            if (kind == L"plugged") snapshot.battery = {data::BatteryState::Plugged, 100, -1, true};
             if (kind == L"mains") snapshot = {{data::BatteryState::None, -1, -1, true}, {}};
+            if (kind == L"idle") snapshot.media = {};
             withData = true;
+        } else if ((arg == L"--title" || arg == L"--artist" || arg == L"--album") && more) {
+            (arg == L"--title" ? title : arg == L"--artist" ? artist : album) = argv[++i];
         } else if (arg.find(L'=') != std::wstring::npos) {
             const size_t eq = arg.find(L'=');
             values[arg.substr(0, eq)] = arg.substr(eq + 1);
@@ -100,6 +106,12 @@ int wmain(int argc, wchar_t **argv) {
         const skin::Setting *setting = s.Find(id);
         if (setting ? !skin::IsValue(*setting, value) : !skin::IsAdjustmentValue(id, value))
             std::fwprintf(stderr, L"%s=%s is not a value of this skin; using the default\n", id.c_str(), value.c_str());
+    }
+
+    if (snapshot.media.state != data::MediaState::None) {
+        snapshot.media.title = title;
+        snapshot.media.artist = artist;
+        snapshot.media.album = album;
     }
 
     CoInitializeEx(nullptr, COINIT_MULTITHREADED);

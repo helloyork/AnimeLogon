@@ -235,6 +235,9 @@ std::wstring FillText(const std::wstring &text, const RegionalFormat &format, co
     const ClockHours hours = style.hours;
     const bool marker = style.ampm && (hours == ClockHours::H12 || (hours == ClockHours::Auto && HasMarker(time)));
     const bool dated = style.date != ClockDate::None;
+    // Data in words ({power.status}, {until.unit}) is in the clock's language.
+    data::Context filling = context ? *context : data::Context{};
+    filling.locale = format.locale;
     std::wstring out;
     for (size_t i = 0; i < text.size(); ++i) {
         const size_t end = text[i] == L'{' ? text.find(L'}', i) : std::wstring::npos;
@@ -245,7 +248,7 @@ std::wstring FillText(const std::wstring &text, const RegionalFormat &format, co
         const std::wstring name = text.substr(i + 1, end - i - 1);
         i = end;
         std::wstring words;
-        if (data::Fill(name, context ? *context : data::Context{}, t, &words)) {
+        if (data::Fill(name, filling, t, &words)) {
             out += words;
             continue;
         }

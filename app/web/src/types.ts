@@ -110,6 +110,7 @@ export interface Setting {
   value: string;
   modified: boolean;
   folded?: boolean;   // shown with a part's adjustments rather than with the component's style
+  content?: boolean;  // a switch that only shows or hides parts: listed under what the component shows
   min: number;
   max: number;
   step: number;
@@ -121,7 +122,7 @@ export interface Adjustment {
   key: string;
   label: string;
   detail: string;
-  control: 'slider' | 'choice' | 'color' | 'font';
+  control: 'slider' | 'choice' | 'color' | 'font' | 'toggle';  // a toggle's value is "true" or "false"
   min: number;
   max: number;
   step: number;

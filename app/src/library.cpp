@@ -82,6 +82,16 @@ bool Folded(const skin::Skin &skin, const std::wstring &setting) {
     return true;
 }
 
+// A switch that only shows or hides parts (the artist, the progress bar) says what the component
+// shows rather than how it looks; the page lists such switches together.
+bool Content(const skin::Skin &skin, const skin::Setting &setting) {
+    if (setting.kind != skin::SettingKind::Toggle) return false;
+    const std::vector<std::wstring> keys = skin::AdjustmentsOf(skin, setting.id);
+    return !keys.empty() && std::all_of(keys.begin(), keys.end(), [](const std::wstring &k) {
+        return k.size() > 5 && k.compare(k.size() - 5, 5, L".show") == 0;
+    });
+}
+
 const wchar_t *KindName(skin::SettingKind kind) {
     switch (kind) {
     case skin::SettingKind::Toggle: return L"toggle";
@@ -98,6 +108,7 @@ const wchar_t *ControlName(skin::Control control) {
     case skin::Control::Choice: return L"choice";
     case skin::Control::Color: return L"color";
     case skin::Control::Font: return L"font";
+    case skin::Control::Toggle: return L"toggle";
     default: return L"slider";
     }
 }
@@ -889,6 +900,7 @@ void Library::WriteOpen(json::Writer &w) const {
                 w.Member(L"id", s.id).Member(L"kind", KindName(s.kind)).Member(L"label", i18n::Label(s.label));
                 w.Member(L"detail", i18n::Label(s.detail)).Member(L"value", skin::ValueOf(s, i.sets));
                 w.Member(L"modified", mine.count(s.id) > 0).Member(L"folded", Folded(skin, s.id));
+                w.Member(L"content", Content(skin, s));
                 w.Member(L"min", s.min).Member(L"max", s.max).Member(L"step", s.step);
                 WriteOptions(w, s.options);
                 w.EndObject();
