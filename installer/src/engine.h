@@ -28,12 +28,15 @@ std::wstring DefaultInstallDir();
 // (the settings app of earlier versions), bakes the background, writes
 // default settings (the default theme) unless settings.ini already names a theme, registers
 // the uninstall entry, installs the service and only then applies the Windows lock-screen
-// changes; a failure there undoes them. Ends with the Start-menu shortcut (needs COM), and adds
-// to the message when the settings app will not find the WebView2 runtime.
+// changes; a failure there undoes them. Ends with the Start-menu shortcut and the Run entry that
+// shows the icon in the notification area at sign-in, and starts the icon for whoever is signed
+// in here (needs COM); adds to the message when the settings app will not find the WebView2
+// runtime. AnimeLogon's own windows on this desktop are closed before its files are replaced.
 Report Install(const std::wstring &targetDir);
 
-// Stops and removes the service, restores the Windows lock screen, removes the shortcut and
-// uninstall entry, and deletes the installed files (at the next restart if in use).
+// Stops and removes the service, restores the Windows lock screen, removes the shortcut, the Run
+// entry and the uninstall entry, closes AnimeLogon's windows on this desktop and deletes the
+// installed files (at the next restart if in use).
 // `keepData` leaves the themes, their wallpapers and components, and settings.ini in place;
 // otherwise all of %ProgramData%\AnimeLogon goes, the stores with it.
 Report Uninstall(bool keepData);
