@@ -74,7 +74,6 @@
 .winctl.over-lock button:active, .winctl.over-lock button.press { background: rgba(255, 255, 255, .16); }
 .winctl.over-lock .close:hover { background: #c42b1c; }
 .winctl.over-lock.inactive button:not(:hover, .hover, .press) { color: rgba(255, 255, 255, .6); }
-.lock .lock-exit.btn { right: calc(3 * 46px + var(--s4)); }
 
 /* A page that scrolls, its content in a column of a set width in the middle of the window. */
 .scroll { flex: 1; min-height: 0; overflow-y: auto; }

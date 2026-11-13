@@ -43,5 +43,6 @@
   font-size: 13px;
   line-height: 20px;
 }
-.lock-exit.btn { position: absolute; top: 12px; right: 16px; z-index: 3; background: rgba(20, 20, 22, .78); border-color: rgba(255, 255, 255, .14); color: #fff; backdrop-filter: blur(6px); }
+/* Left of the window's own buttons, which stay over the preview (shell.css .winctl). */
+.lock-exit.btn { position: absolute; top: 12px; right: calc(3 * 46px + 16px); z-index: 3; background: rgba(20, 20, 22, .78); border-color: rgba(255, 255, 255, .14); color: #fff; backdrop-filter: blur(6px); }
 .lock-exit.btn:hover { background: rgba(40, 40, 44, .9); }
