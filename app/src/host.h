@@ -30,7 +30,8 @@ class Host {
 public:
     Host();
     ~Host();
-    bool Create(int show);
+    // `reveal`: what the icon in the notification area asked the app to come up at (tray.h).
+    bool Create(int show, const std::wstring &reveal = L"");
     int Run();
 
 private:
@@ -51,6 +52,10 @@ private:
     void Problem(const std::wstring &text);
     void Busy(const std::wstring &label, int percent);
     void OnMessage(const json::Value &m);
+    // What the icon asks by WM_COPYDATA (tray.h): come forward at a setting; read settings.ini again.
+    bool OnAsked(const COPYDATASTRUCT &cd);
+    void Reveal();
+    void Reread();
     void OnResource(ICoreWebView2WebResourceRequestedEventArgs *args);
 
     // --- the open theme
@@ -91,6 +96,9 @@ private:
 
     // Messages from the page, in order, waiting for the message loop to answer them.
     std::deque<json::Value> inbox_;
+    bool ready_ = false;  // the page has asked for its state
+    // What the page is to show once it can, when the icon asked: "switch", "lock" or nothing.
+    std::wstring reveal_;
 
     // The window's frame without Windows' caption: the page's bar is the title bar (frame.h).
     Frame frame_{[this](const json::Writer &message) { Send(message); }};

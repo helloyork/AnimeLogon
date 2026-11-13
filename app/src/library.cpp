@@ -191,17 +191,56 @@ bool Library::LoadScene(const std::wstring &id, scene::Document *out) const {
 
 bool Library::Apply(const std::wstring &id, const std::wstring &monitor) {
     if (!Entry(id)) return false;
-    if (set_.monitorMode != MonitorMode::PerMonitor || monitor.empty() || monitor == L"all") {
+    const bool all = set_.monitorMode != MonitorMode::PerMonitor || monitor.empty() || monitor == L"all";
+    if (!all && !IsTypedValueText(monitor)) return false;
+    Used(id);
+    if (all) {
         set_.theme = id;
         if (monitor == L"all") set_.screens.clear();
     } else {
-        if (!IsTypedValueText(monitor)) return false;
         set_.screens[monitor] = id;
     }
     return true;
 }
 
+std::vector<std::wstring> Library::InUse() const {
+    std::vector<std::wstring> list{Current()};
+    if (set_.monitorMode == MonitorMode::PerMonitor)
+        for (const auto &[monitor, theme] : set_.screens) list.push_back(theme);
+    return list;
+}
+
+// Called before `id` goes on the logon screen. What was there joins the list too if it was not
+// in it (a settings.ini from before the list, or edited by hand), so that it can be chosen again.
+void Library::Used(const std::wstring &id) {
+    auto &r = set_.recent;
+    for (const std::wstring &shown : InUse())
+        if (Entry(shown) && std::find(r.begin(), r.end(), shown) == r.end()) r.push_back(shown);
+    r.erase(std::remove(r.begin(), r.end(), id), r.end());
+    r.insert(r.begin(), id);
+    if (r.size() > kRecentMax) r.resize(kRecentMax);
+}
+
+std::vector<std::wstring> Library::Recent(size_t count) const {
+    const std::vector<std::wstring> inUse = InUse();
+    std::vector<std::wstring> order = set_.recent;
+    for (const std::wstring &id : inUse)
+        if (std::find(order.begin(), order.end(), id) == order.end()) order.push_back(id);
+    std::vector<std::wstring> list;
+    auto add = [&](const std::wstring &id) {
+        if (Entry(id) && std::find(list.begin(), list.end(), id) == list.end()) list.push_back(id);
+    };
+    // What the logon screen shows is always offered, so that the menu can mark it.
+    for (const std::wstring &id : order)
+        if (std::find(inUse.begin(), inUse.end(), id) != inUse.end()) add(id);
+    const size_t keep = std::max(count, list.size());
+    for (const std::wstring &id : order)
+        if (list.size() < keep) add(id);
+    return list;
+}
+
 void Library::Forget(const std::wstring &id) {
+    set_.recent.erase(std::remove(set_.recent.begin(), set_.recent.end(), id), set_.recent.end());
     set_.themeOverrides.erase(id);
     if (set_.theme == id) set_.theme = kDefaultTheme;
     for (auto it = set_.screens.begin(); it != set_.screens.end();) it = it->second == id ? set_.screens.erase(it) : std::next(it);
@@ -217,6 +256,8 @@ void Library::Move(const std::wstring &from, const std::wstring &to) {
     if (set_.theme == from) set_.theme = to;
     for (auto &[monitor, theme] : set_.screens)
         if (theme == from) theme = to;
+    for (std::wstring &id : set_.recent)
+        if (id == from) id = to;
     if (open_ == from) open_ = to;
     Touched(to);
 }
@@ -515,7 +556,13 @@ bool Library::SetGlobal(const std::wstring &key, const std::wstring &value) {
         const std::wstring monitor = key.substr(7);
         ok = !monitor.empty() && IsTypedValueText(monitor) && (value.empty() || Entry(value));
         if (ok && value.empty()) set_.screens.erase(monitor);
-        else if (ok) set_.screens[monitor] = value;
+        else if (ok) Used(value), set_.screens[monitor] = value;
+    } else if (key == L"tray") {
+        ok = flag(&set_.tray);
+    } else if (key == L"trayRecent") {
+        double v = 0;
+        if ((ok = Number(value, &v) && v == std::floor(v) && v >= kTrayRecentMin && v <= kTrayRecentMax))
+            set_.trayRecent = (int)v;
     } else if (key == L"audio.enabled") {
         ok = flag(&set_.audio.enabled);
     } else if (key == L"audio.device") {
@@ -596,6 +643,7 @@ void Library::WriteLibrary(json::Writer &w) const {
     w.Member(L"components", set_.components).Member(L"componentDisplays", ToString(set_.componentDisplays));
     w.Member(L"otherDisplays", ToString(set_.otherDisplays));
     w.Member(L"media", set_.media);
+    w.Member(L"tray", set_.tray).Member(L"trayRecent", set_.trayRecent);
     w.Key(L"clock").BeginObject();
     w.Member(L"hours", ToString(set_.clock.hours)).Member(L"ampm", set_.clock.ampm);
     w.Member(L"date", ToString(set_.clock.date)).Member(L"language", set_.clock.locale);

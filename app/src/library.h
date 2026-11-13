@@ -69,8 +69,11 @@ public:
 
     // --- the library -----------------------------------------------------------------------
     // Puts theme `id` on the logon screen. In per-monitor mode, `monitor` names one display,
-    // or is "all"; otherwise it is ignored.
+    // or is "all"; otherwise it is ignored. The theme becomes the first of the recent ones.
     bool Apply(const std::wstring &id, const std::wstring &monitor);
+    // What the icon in the notification area offers: the installed themes among the recent ones,
+    // at most `count`, those on the logon screen first and always; otherwise newest first.
+    std::vector<std::wstring> Recent(size_t count) const;
     // After a theme is removed: drops its overrides and whatever pointed at it.
     void Forget(const std::wstring &id);
     // After a theme is installed again under a new id: its overrides and references follow it.
@@ -119,6 +122,8 @@ public:
 
 private:
     animelogon::ThemeOverrides &Overrides();  // the open theme's
+    void Used(const std::wstring &id);        // first among the recent themes
+    std::vector<std::wstring> InUse() const;  // the themes the logon screen shows
     void Step(int gesture);
     void Tidy();
     void Touched(const std::wstring &id);

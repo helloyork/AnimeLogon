@@ -29,6 +29,7 @@
 #include "exporter.h"
 #include "fonts.h"
 #include "resources.h"
+#include "tray.h"
 
 using Microsoft::WRL::Callback;
 using Microsoft::WRL::ComPtr;
@@ -45,6 +46,8 @@ constexpr wchar_t kWallpaperHost[] = L"wallpapers.animelogon.invalid";
 constexpr UINT kImportProgress = WM_APP + 10;
 constexpr UINT kImportDone = WM_APP + 11;
 constexpr UINT kPageMessage = WM_APP + 12;
+constexpr UINT kReveal = WM_APP + 13;  // the icon asked: the window comes forward
+constexpr UINT kReread = WM_APP + 14;  // the icon changed settings.ini
 
 std::wstring PickFile(HWND owner, const wchar_t *filter, const wchar_t *extension, bool save,
                       const std::wstring &suggested) {
@@ -192,8 +195,9 @@ Host::~Host() {
     }
 }
 
-bool Host::Create(int show) {
+bool Host::Create(int show, const std::wstring &reveal) {
     show_ = show;
+    reveal_ = reveal;
     dark_ = AppsDark();
     WNDCLASSEXW wc{sizeof(wc)};
     wc.lpfnWndProc = Proc;
@@ -209,15 +213,19 @@ bool Host::Create(int show) {
     // it as one (snapping, the system menu, the animations); Frame takes the caption itself away.
     const UINT dpi = GetDpiForSystem();
     const int w = MulDiv(1240, dpi, 96), h = MulDiv(800, dpi, 96);
-    hwnd_ = CreateWindowExW(0, kClass, paths::Sandbox().empty() ? std::wstring(L"AnimeLogon").c_str() : paths::SandboxTitle().c_str(), WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, w, h, nullptr,
-                            nullptr, wc.hInstance, this);
+    hwnd_ = CreateWindowExW(0, kClass, WindowTitle().c_str(), WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, w, h,
+                            nullptr, nullptr, wc.hInstance, this);
     if (!hwnd_) return false;
+    // The icon asks by WM_COPYDATA, also when this window runs elevated and it does not.
+    ChangeWindowMessageFilterEx(hwnd_, WM_COPYDATA, MSGFLT_ALLOW, nullptr);
     SetIcons();
     frame_.Attach(hwnd_, dark_);
     ShowWindow(hwnd_, show_);
     UpdateWindow(hwnd_);
     StartWebView();
     SetTimer(hwnd_,1,500,nullptr);
+    // Opening the app brings the icon back, after "退出" in its menu too.
+    if (library_.settings().tray) StartTray();
     return true;
 }
 
@@ -307,6 +315,14 @@ LRESULT Host::Handle(UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     case kImportDone:
         FinishImport();
+        return 0;
+    case WM_COPYDATA:
+        return OnAsked(*reinterpret_cast<const COPYDATASTRUCT *>(lp));
+    case kReveal:
+        Reveal();
+        return 0;
+    case kReread:
+        Reread();
         return 0;
     case kPageMessage:
         if (!inbox_.empty()) {
@@ -480,6 +496,43 @@ void Host::SendState() {
     library_.WriteOpen(w);
     w.EndObject();
     Send(w);
+}
+
+// Answered at once, since the icon waits for the answer; what it asks for is done from the
+// message loop.
+bool Host::OnAsked(const COPYDATASTRUCT &cd) {
+    if (cd.dwData == kAskReread && cd.cbData == 0) {
+        PostMessageW(hwnd_, kReread, 0, 0);
+        return true;
+    }
+    if (cd.dwData != kAskShow || cd.cbData % sizeof(wchar_t) || cd.cbData > 32 * sizeof(wchar_t) || (cd.cbData && !cd.lpData))
+        return false;
+    const std::wstring what(static_cast<const wchar_t *>(cd.lpData), cd.cbData / sizeof(wchar_t));
+    if (!IsShowTarget(what)) return false;
+    reveal_ = what;
+    PostMessageW(hwnd_, kReveal, 0, 0);
+    return true;
+}
+
+// Comes forward, and has the page show what the icon asked for once it is there to.
+void Host::Reveal() {
+    if (IsIconic(hwnd_)) ShowWindow(hwnd_, SW_RESTORE);
+    SetForegroundWindow(hwnd_);
+    if (!ready_ || reveal_.empty()) return;
+    json::Writer w;
+    w.BeginObject().Member(L"type", L"show").Member(L"what", reveal_).EndObject();
+    Send(w);
+    reveal_.clear();
+}
+
+// settings.ini changed under the window (the icon put another theme on the logon screen).
+void Host::Reread() {
+    library_.Reload();
+    if (!ready_) return;
+    const bool open = !library_.open().empty();
+    if (open) RenderPreview();
+    SendState();
+    if (open) SendPreview(0);
 }
 
 void Host::SendEnvironment() {
@@ -868,6 +921,8 @@ void Host::OnMessage(const json::Value &m) {
     if (op == L"ready") {
         SendEnvironment();
         SendState();
+        ready_ = true;
+        if (!reveal_.empty()) Reveal();
     } else if (op == L"refresh") {
         SendState();
     } else if (op == L"open") {
@@ -934,7 +989,11 @@ void Host::OnMessage(const json::Value &m) {
     } else if (op == L"commit") {
         Edited(true, false, seq);
     } else if (op == L"global") {
-        if (library_.SetGlobal(m[L"key"].Str(), m[L"value"].Str())) Save();
+        const std::wstring key = m[L"key"].Str();
+        if (library_.SetGlobal(key, m[L"value"].Str()) && Save() && key == L"tray") {
+            if (library_.settings().tray) StartTray();
+            else CloseTray();
+        }
         if (!library_.open().empty()) RenderPreview();
         SendState();
         if (!library_.open().empty()) SendPreview(seq);

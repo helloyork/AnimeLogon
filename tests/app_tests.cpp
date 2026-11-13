@@ -13,6 +13,7 @@
 
 #include "json.h"
 #include "library.h"
+#include "traymenu.h"
 
 using namespace animelogon;
 
@@ -360,4 +361,62 @@ TEST(AppLibraryDescribesTheOpenTheme) {
     CHECK(v[L"current"].Str() == kThemeT && v[L"themes"].size() == 3);
     CHECK(v[L"themes"][1][L"modifications"].Num() == 1 && v[L"themes"][1][L"summary"].Str() == L"时钟");
     CHECK(v[L"wallpapers"][0][L"id"].Str() == L"default" && v[L"wallpapers"][3][L"id"].Str() == L"none");
+}
+
+TEST(AppLibraryRemembersTheRecentThemes) {
+    FakeStores s = Stores();
+    app::Library l(s);
+    using List = std::vector<std::wstring>;
+    // A settings.ini from before the list: the theme in use is offered all the same, and stays
+    // on the list when another takes its place.
+    CHECK(l.Recent(5) == List{kThemeT});
+    CHECK(l.Apply(kThemeU, L"") && l.settings().recent == (List{kThemeU, kThemeT}));
+    CHECK(l.Apply(kDefaultTheme, L"") && l.Apply(kThemeU, L""));
+    CHECK(l.settings().recent == (List{kThemeU, kDefaultTheme, kThemeT}));
+    CHECK(l.Recent(2) == (List{kThemeU, kDefaultTheme}) && l.Recent(10).size() == 3);
+    // Renamed, a theme keeps its place; removed, it leaves the list.
+    l.Move(kThemeT, L"dddddddddddddddd");
+    CHECK(l.settings().recent.back() == L"dddddddddddddddd");
+    CHECK(l.Recent(10) == (List{kThemeU, kDefaultTheme}));  // not installed under that id here
+    l.Forget(L"dddddddddddddddd");
+    CHECK(l.settings().recent == (List{kThemeU, kDefaultTheme}));
+    CHECK(l.Save() && s.written.find(L"\r\nrecent = " + kThemeU + L",default\r\n") != std::wstring::npos);
+    // Choosing a theme for one display in per-monitor mode counts too.
+    CHECK(l.SetGlobal(L"monitorMode", L"per-monitor"));
+    CHECK(l.SetGlobal(L"screen.00000000000000aa", kThemeT) && l.settings().recent.front() == kThemeT);
+    // The menu's size, and whether it is shown at all.
+    CHECK(l.SetGlobal(L"trayRecent", L"3") && l.settings().trayRecent == 3);
+    CHECK(!l.SetGlobal(L"trayRecent", L"0") && !l.SetGlobal(L"trayRecent", L"11") && !l.SetGlobal(L"trayRecent", L"2.5"));
+    CHECK(l.SetGlobal(L"tray", L"false") && !l.settings().tray);
+}
+
+TEST(AppTrayMenuMarksWhatTheLogonScreenShows) {
+    FakeStores s = Stores();
+    s.settings = L"theme = " + kThemeT + L"\r\ntray_recent = 2\r\nrecent = " + kThemeU + L",default," + kThemeT + L"\r\n";
+    app::Library one(s);
+    MonitorInfo a, b;
+    a.key = L"00000000000000aa";
+    a.primary = true;
+    b.key = L"00000000000000bb";
+    // The theme in use is offered even when it is not among the newest.
+    app::TrayMenu m = app::MenuFor(one, {a, b});
+    CHECK(m.displays.empty() && m.themes.size() == 2);
+    CHECK(m.themes[0].id == kThemeT && m.themes[0].name == L"T" && m.themes[0].checked && m.themes[0].monitor.empty());
+    CHECK(m.themes[1].id == kThemeU && !m.themes[1].checked);
+    CHECK(app::ShowingNow(one, {a, b}) == L"T");
+
+    // Per-monitor mode: a submenu for each display, each marking its own theme.
+    s.settings += L"monitor_mode = per-monitor\r\nscreen.00000000000000aa = " + kThemeU + L"\r\n";
+    app::Library each(s);
+    m = app::MenuFor(each, {a, b});
+    CHECK(m.themes.empty() && m.displays.size() == 2);
+    CHECK(m.displays[0].label == L"显示器 1（主）" && m.displays[1].label == L"显示器 2");
+    CHECK(m.displays[0].themes.size() == 2 && m.displays[0].themes[0].id == kThemeU && m.displays[0].themes[0].checked &&
+          m.displays[0].themes[0].monitor == a.key);
+    CHECK(m.displays[1].themes[1].id == kThemeT && m.displays[1].themes[1].checked && m.displays[1].themes[1].monitor == b.key);
+    CHECK(app::ShowingNow(each, {a, b}) == L"每块屏幕各自使用主题");
+    // With one display left, one list, and the choice goes on that display.
+    m = app::MenuFor(each, {a});
+    CHECK(m.displays.empty() && m.themes[0].id == kThemeU && m.themes[0].checked && m.themes[0].monitor == a.key);
+    CHECK(app::ShowingNow(each, {a}) == L"U");
 }

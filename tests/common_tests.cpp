@@ -235,3 +235,33 @@ int main(int argc, char **argv) {
     }
     return check::RunAll();
 }
+
+TEST(SettingsKeepTheTrayAndTheRecentThemes) {
+    const Settings d = ParseSettings(L"theme = default\r\n");
+    CHECK(d.tray && d.trayRecent == kTrayRecent && d.recent.empty());
+    Settings s;
+    s.tray = false;
+    s.trayRecent = 8;
+    s.recent = {L"0123456789abcdef", L"default"};
+    std::vector<std::wstring> problems;
+    const Settings t = ParseSettings(SerializeSettings(s), &problems);
+    CHECK(problems.empty());
+    CHECK(!t.tray && t.trayRecent == 8 && t.recent == s.recent);
+    // What is not a theme's id is left out, the rest kept in order once; a count out of range
+    // keeps the default.
+    problems.clear();
+    const Settings u = ParseSettings(
+        L"theme = default\r\ntray_recent = 11\r\nrecent = 0123456789abcdef, ../x,default,0123456789abcdef\r\n", &problems);
+    CHECK(problems.size() == 2);
+    CHECK(u.trayRecent == kTrayRecent);
+    CHECK(u.recent == (std::vector<std::wstring>{L"0123456789abcdef", L"default"}));
+    std::wstring many = L"theme = default\r\nrecent = ";
+    for (int i = 1; i <= 12; ++i) {
+        wchar_t id[17];
+        swprintf_s(id, L"%016x", i);
+        many += (i > 1 ? L"," : L"") + std::wstring(id);
+    }
+    const Settings v = ParseSettings(many);
+    CHECK(v.recent.size() == kRecentMax && v.recent.front() == L"0000000000000001");
+    CHECK(ParseSettings(L"theme = default\r\nrecent = \r\n").recent.empty());
+}

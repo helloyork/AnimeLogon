@@ -1,5 +1,6 @@
 #include "animelogon/settings.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <cwchar>
 
@@ -246,6 +247,27 @@ void Read(const std::wstring &text, Settings *out, bool *namesTheme, std::vector
             ok = ParseBool(value, &s.audio.videoTrack.enabled);
         } else if (key == L"video_audio_volume") {
             ok = ParseVolume(value, &s.audio.videoTrack.volume);
+        } else if (key == L"tray") {
+            ok = ParseBool(value, &s.tray);
+        } else if (key == L"tray_recent") {
+            long long n = 0;
+            ok = ParseInt(value, &n) && n >= kTrayRecentMin && n <= kTrayRecentMax;
+            if (ok) s.trayRecent = (int)n;
+        } else if (key == L"recent") {
+            // Ids that are not themes' are left out; the rest are kept in their order.
+            s.recent.clear();
+            for (size_t at = 0; at <= value.size() && !value.empty();) {
+                size_t comma = value.find(L',', at);
+                if (comma == std::wstring_view::npos) comma = value.size();
+                const std::wstring id(Trim(value.substr(at, comma - at)));
+                at = comma + 1;
+                if (!IsThemeId(id)) {
+                    ok = false;
+                    continue;
+                }
+                if (s.recent.size() < kRecentMax && std::find(s.recent.begin(), s.recent.end(), id) == s.recent.end())
+                    s.recent.push_back(id);
+            }
         } else if (key == L"clock_hours") {
             ok = Parse(std::wstring(value), &s.clock.hours);
         } else if (key == L"clock_ampm") {
@@ -318,6 +340,11 @@ std::wstring SerializeSettings(const Settings &s) {
     out += L"audio_volume = " + std::to_wstring(s.audio.volume) + L"\r\n";
     out += L"video_audio = " + std::wstring(s.audio.videoTrack.enabled ? L"true" : L"false") + L"\r\n";
     out += L"video_audio_volume = " + std::to_wstring(s.audio.videoTrack.volume) + L"\r\n";
+    out += L"tray = " + std::wstring(s.tray ? L"true" : L"false") + L"\r\n";
+    out += L"tray_recent = " + std::to_wstring(s.trayRecent) + L"\r\n";
+    std::wstring recent;
+    for (size_t i = 0; i < s.recent.size() && i < kRecentMax; ++i) recent += (i ? L"," : L"") + s.recent[i];
+    out += L"recent = " + recent + L"\r\n";
     AppendOverrides(s, &out);
     return out;
 }
