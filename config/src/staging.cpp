@@ -225,7 +225,7 @@ Result Package(const std::wstring &source, const std::wstring &dir, const std::a
         if (reader.Compressed())
             return Error(L"这个主题包经过了压缩，无法导入。.altheme 必须是不压缩（存储）的 zip 文件。"
                          L"可以在 7-Zip 中选择 zip 格式、压缩等级“仅存储”重新打包，"
-                         L"或者在命令提示符中运行 tar -a -c --options zip:compression=store -f 主题.altheme 加上包内的文件。");
+                         L"或者在命令提示符中运行 tar -c --format zip --options zip:compression=store -f 主题.altheme 加上包内的文件。");
         return Error(L"这个文件不是有效的主题包（.altheme）。");
     }
 
