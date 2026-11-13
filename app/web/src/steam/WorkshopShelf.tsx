@@ -1,4 +1,4 @@
-// The library's 创意工坊 tab (D62): the Workshop items the person subscribes to, each as it is on this
+// The library's 创意工坊 tab: the Workshop items the person subscribes to, each as it is on this
 // computer. Not installed yet, an item is chosen with its box and installed with any others chosen
 // on one administrator's approval; installed, it is a theme like any other, which a click puts on
 // the logon screen. An update, once Steam has downloaded it, is installed the same way and takes

@@ -91,7 +91,7 @@ export function LibraryPage() {
   );
 }
 
-// In the Steam edition the themes share the section with the Workshop's items subscribed to (D62):
+// In the Steam edition the themes share the section with the Workshop's items subscribed to:
 // two tabs, the themes first.
 function WithWorkshop() {
   const s = useStore();

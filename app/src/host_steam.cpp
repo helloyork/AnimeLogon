@@ -1,6 +1,6 @@
 // The settings app's Steam Workshop, in the Steam edition only: what the discover page asks of
-// Steam (D68), and the Workshop's themes in the library, installed with one administrator's
-// approval for as many as were chosen (D62). Everything Steam is asked goes through
+// Steam, and the Workshop's themes in the library, installed with one administrator's
+// approval for as many as were chosen. Everything Steam is asked goes through
 // animelogon-steam.exe (steam_client.h, steam/PROTOCOL.md); its answers come back on this window's
 // message loop, matched to what was asked by their ids.
 #include "host.h"
@@ -262,7 +262,7 @@ void Host::SteamAnswered(const SteamRequest &r, const json::Value &v) {
         failed(w);
         w.EndObject();
         Send(w);
-        // Subscribed: its files are fetched at once, so that it can be installed (D62).
+        // Subscribed: its files are fetched at once, so that it can be installed.
         if (ok && r.on) {
             steamProblems_.erase(r.item);
             SteamDownload(r.item, true);

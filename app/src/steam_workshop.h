@@ -1,4 +1,4 @@
-// The Steam Workshop items a person subscribes to, as the theme library shows them (D62): each
+// The Steam Workshop items a person subscribes to, as the theme library shows them: each
 // item's folder holds one .altheme, which the person installs like any theme package, with one
 // administrator's approval for as many items as they chose. Nothing here talks to Steam: what
 // Steam says comes in as the helper's answers (steam_client.h), and without Steam the items are
