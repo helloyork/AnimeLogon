@@ -50,7 +50,7 @@ animelogon_add_executable(app WIN32
         ${config_src}/transcode.cpp
         ${config_src}/devices.cpp
         ${config_src}/fonts.cpp
-    DESCRIPTION "AnimeLogon 设置"
+    DESCRIPTION "AnimeLogon"
     LIBS animelogon_render animelogon_scene_preview webview2::loader mfplat mfreadwrite mfuuid mmdevapi ole32 shell32 shlwapi comdlg32 secur32 advapi32
          dwmapi delayimp windowsapp)
 target_include_directories(app PRIVATE src ${config_src})

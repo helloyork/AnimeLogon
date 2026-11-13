@@ -19,7 +19,7 @@ animelogon_add_executable(overlay
         src/staticcover.cpp
         src/stills.cpp
         src/otherdisplays.cpp
-    DESCRIPTION "AnimeLogon 登录界面视频"
+    DESCRIPTION "AnimeLogon Lock Screen"
     LIBS animelogon_render animelogon_scene_host d3d11 dxgi dcomp dwmapi d2d1 dwrite dxguid mf mfplat mfreadwrite mfuuid windowscodecs xaudio2 mmdevapi
          wtsapi32 shcore runtimeobject)
 
@@ -30,5 +30,5 @@ animelogon_compile_shader(overlay ${CMAKE_CURRENT_SOURCE_DIR}/shaders/video.hlsl
 
 animelogon_add_executable(launcher
     SOURCES src/launcher.cpp src/livedata.cpp
-    DESCRIPTION "AnimeLogon 登录界面视频服务"
+    DESCRIPTION "AnimeLogon Service"
     LIBS wtsapi32 userenv)

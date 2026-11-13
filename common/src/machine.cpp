@@ -3,6 +3,7 @@
 #include <vector>
 
 #include "animelogon/log.h"
+#include "animelogon/i18n.h"
 #include "animelogon/paths.h"
 #include "animelogon/text.h"
 
@@ -348,7 +349,9 @@ DWORD InstallService(const std::wstring &launcherPath) {
         if (!svc) e = GetLastError();
     }
     if (svc) {
-        SERVICE_DESCRIPTIONW description{const_cast<wchar_t *>(L"在登录界面上播放 AnimeLogon 视频。")};
+        // In the language the installer was run in: services.msc shows it as written.
+        std::wstring text = i18n::Tr("service.description");
+        SERVICE_DESCRIPTIONW description{text.data()};
         ChangeServiceConfig2W(svc, SERVICE_CONFIG_DESCRIPTION, &description);
         // Restarted by the service manager if it ever stops unexpectedly.
         SC_ACTION actions[3] = {{SC_ACTION_RESTART, 2000}, {SC_ACTION_RESTART, 5000}, {SC_ACTION_RESTART, 30000}};

@@ -22,3 +22,15 @@ add_executable(scene_preview scene_preview.cpp
     ${PROJECT_SOURCE_DIR}/config/src/transcode.cpp)
 target_link_libraries(scene_preview PRIVATE animelogon_scene_preview mfplat mfreadwrite mfuuid ole32)
 target_link_libraries(theme_fixture PRIVATE animelogon_common bcrypt)
+
+# Pictures of every page of the installer's and uninstaller's wizards, without installing.
+animelogon_add_executable(setup_preview WIN32 LOCALES
+    SOURCES setup_preview.cpp
+        ${PROJECT_SOURCE_DIR}/installer/src/ui.cpp
+        ${PROJECT_SOURCE_DIR}/installer/src/wizards.cpp
+        ${PROJECT_SOURCE_DIR}/installer/src/engine.cpp
+        ${PROJECT_SOURCE_DIR}/installer/src/payload.cpp
+    DESCRIPTION "AnimeLogon Setup Preview"
+    LIBS mfuuid ole32 oleaut32 shell32 comctl32 d2d1 dwrite dwmapi)
+# A console program, though its windows need the manifest of a windowed one (common controls 6).
+set_target_properties(setup_preview PROPERTIES WIN32_EXECUTABLE OFF)
