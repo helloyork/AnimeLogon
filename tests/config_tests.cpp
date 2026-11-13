@@ -622,6 +622,14 @@ TEST(ImportPictureStagesATheme) {
     WriteAll(longSource, png);
     const std::wstring dir2 = ImportDir(scratch);
     CHECK(staging::Media(longSource, dir2, cancel, nullptr).name == std::wstring(40, L'a'));
+    // A name given with the file (a Wallpaper Engine title) is the theme's, cut and on one line
+    // as a file's would be.
+    const std::wstring dir3 = ImportDir(scratch);
+    const staging::Result named = staging::Media(source, dir3, cancel, nullptr, L"【4K60】阿罗娜\n& 普拉娜");
+    CHECK(named.ok && named.name == L"【4K60】阿罗娜 & 普拉娜");
+    CHECK(theme::Parse(Text(ReadAll(dir3 + L"\\theme.xml")), theme::Form::Package, &th, nullptr) && th.name == named.name);
+    CHECK(staging::Media(source, ImportDir(scratch), cancel, nullptr, std::wstring(50, L'b')).name == std::wstring(40, L'b'));
+    CHECK(staging::Wallpaper(source, ImportDir(scratch), cancel, nullptr, L"Harbour").name == L"Harbour");
     // Not a picture, by its extension and by its bytes.
     WriteAll(scratch + L"\\notes.png", std::string("hello"));
     const staging::Result bad = staging::Media(scratch + L"\\notes.png", ImportDir(scratch), cancel, nullptr);

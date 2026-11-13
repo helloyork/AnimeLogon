@@ -22,6 +22,7 @@ import {
   themeOf,
   usedOn,
   useStore,
+  workshopFlow,
 } from '../store';
 import type { ThemeEntry } from '../types';
 import { Button, cx, IconButton } from '../ui/controls';
@@ -44,6 +45,7 @@ export function LibraryPage() {
           <span className="t-cap num">{`${lib.themes.length} 个主题`}</span>
           <div className="actions">
             <Button shield onClick={() => send('import')}>导入…</Button>
+            {s.env.wallpaperEngine && <Button onClick={() => workshopFlow(false)}>从 Wallpaper Engine 导入…</Button>}
             <Button icon={<Add16Regular />} onClick={() => openDialog({ kind: 'newTheme' })}>新建主题</Button>
           </div>
         </div>

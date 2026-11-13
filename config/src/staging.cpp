@@ -188,8 +188,8 @@ bool LooksLikePicture(const std::wstring &path) {
 }
 
 Result Media(const std::wstring &source, const std::wstring &dir, const std::atomic<bool> &cancel,
-             const Progress &progress) {
-    const std::wstring name = ThemeName(FileStem(source));
+             const Progress &progress, const std::wstring &named) {
+    const std::wstring name = ThemeName(named.empty() ? FileStem(source) : named);
     bool picture = false;
     Result r = StageWallpaper(source, dir + L"\\wallpaper", name, cancel, progress, &picture);
     if (!r.ok) return r;
@@ -206,8 +206,8 @@ Result Media(const std::wstring &source, const std::wstring &dir, const std::ato
 }
 
 Result Wallpaper(const std::wstring &source, const std::wstring &dir, const std::atomic<bool> &cancel,
-                 const Progress &progress) {
-    const std::wstring name = ThemeName(FileStem(source));
+                 const Progress &progress, const std::wstring &named) {
+    const std::wstring name = ThemeName(named.empty() ? FileStem(source) : named);
     bool picture = false;
     Result r = StageWallpaper(source, dir, name, cancel, progress, &picture);
     if (!r.ok) return r;
