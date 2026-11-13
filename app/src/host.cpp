@@ -1142,8 +1142,7 @@ void Host::Import(bool wallpaper) {
     if (importing_) return;
     const std::wstring source =
         wallpaper ? PickFile(hwnd_,
-                             Filters({{i18n::Tr("filter.wallpapers"),
-                                       (std::wstring(L"*.alscene;") + kPicturePatterns + L";" + kVideoPatterns).c_str()},
+                             Filters({{i18n::Tr("filter.media"), (std::wstring(kPicturePatterns) + L";" + kVideoPatterns).c_str()},
                                       {i18n::Tr("filter.pictures"), kPicturePatterns},
                                       {i18n::Tr("filter.videos"), kVideoPatterns},
                                       {i18n::Tr("filter.all"), L"*.*"}})
@@ -1151,9 +1150,8 @@ void Host::Import(bool wallpaper) {
                              nullptr, false, L"")
                   : PickFile(hwnd_,
                              Filters({{i18n::Tr("filter.importable"),
-                                       (std::wstring(L"*.altheme;*.alscene;") + kPicturePatterns + L";" + kVideoPatterns).c_str()},
+                                       (std::wstring(L"*.altheme;") + kPicturePatterns + L";" + kVideoPatterns).c_str()},
                                       {i18n::Tr("filter.themes"), L"*.altheme"},
-                                      {i18n::Tr("filter.scenes"), L"*.alscene"},
                                       {i18n::Tr("filter.pictures"), kPicturePatterns},
                                       {i18n::Tr("filter.videos"), kVideoPatterns},
                                       {i18n::Tr("filter.all"), L"*.*"}})

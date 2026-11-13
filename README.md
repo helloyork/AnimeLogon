@@ -14,8 +14,8 @@ can place videos, widgets and other content on it.
 
 - [x] Full-screen video on the lock screen and on the sign-in screen at startup
 - [x] Custom clock styles
-- [x] Layered HLSL and Lottie scene wallpapers, with editable parameters and layer placement
 - [x] Widgets
+- [ ] Scene wallpapers (HLSL and Lottie)
 
 ## Requirements
 
@@ -43,16 +43,12 @@ Lock the computer (<kbd>Win</kbd>+<kbd>L</kbd>) or restart it. The lock screen s
 until you press a key or click, and the Windows sign-in screen appears.
 
 To change it, click a theme in the theme library. Videos, pictures and theme packages
-(.altheme), along with scenes (.alscene), are added with **Import…**, and an imported theme is put in use at once. Select
+(.altheme) are added with **Import…**, and an imported theme is put in use at once. Select
 **Customize** on a theme to change its wallpaper and widgets. Themes can be exported as .altheme
 files to share.
 
 Choose the display language in **Settings > General > Display language**: 简体中文, 繁體中文, English or
 日本語. It follows Windows unless you choose one.
-
-Scene controls appear under **Wallpaper** on the theme page and do not need elevation.
-Hover a scene card to play it. See the [scene author guide](tools/SCENES.md) for the format
-and the `scene_preview` image and frame-sequence tool.
 
 ## Changes to your system
 

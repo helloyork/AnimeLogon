@@ -236,6 +236,8 @@ Result Package(const std::wstring &source, const std::wstring &dir, const std::a
         ALOG(L"import: %s theme.xml %s", source.c_str(), why.c_str());
         return Error(newer ? animelogon::i18n::Tr("package.error.newer") : animelogon::i18n::Tr("package.error.theme_xml", {{L"why", why}}));
     }
+    if (!kTakesScenes && t.wallpaper == L"wallpaper.alscene")
+        return Error(animelogon::i18n::Tr("package.error.scene_wallpaper"));
 
     // The files the archive carries must be the ones theme.xml names.
     const package::Entry *wallpaper = reader.Wallpaper();

@@ -226,6 +226,9 @@ Result SceneWallpaper(package::Reader &reader, const std::wstring &dir, const st
     Result r; r.ok = true; r.name = info.name; if (progress) progress(1); return r;
 }
 Result Scene(const std::wstring &source, const std::wstring &dir, const std::atomic<bool> &cancel, const Progress &progress) {
+    if (!kTakesScenes) {
+        Result r; r.error = animelogon::i18n::Tr("scene_import.unsupported"); return r;
+    }
     package::Reader reader; std::wstring why;
     if (!reader.Open(source,&why)) return Error(reader.Compressed() ? animelogon::i18n::Tr("scene_import.compressed") : why);
     const auto r = SceneWallpaper(reader,dir+L"\\wallpaper",L"",cancel,progress);
