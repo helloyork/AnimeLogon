@@ -6,6 +6,7 @@ import { WindowButtons, WindowTitle } from './frame';
 import { LibraryPage } from './library/LibraryPage';
 import { LockPreview } from './lock/LockPreview';
 import { SettingsPage } from './settings/SettingsPage';
+import { DiscoverPage } from './steam/DiscoverPage';
 import { send } from './native';
 import { t } from './i18n';
 import { goBack, onToast, setTab, useStore, type Tab } from './store';
@@ -48,7 +49,9 @@ export function App() {
   );
 }
 
-const PAGES: [Tab, Parameters<typeof t>[0]][] = [['mine', 'nav.library'], ['settings', 'nav.settings']];
+// 发现, the Steam Workshop, only in the Steam edition (D63, D68).
+const pagesFor = (steam: boolean): [Tab, Parameters<typeof t>[0]][] =>
+  [['mine', 'nav.library'], ...(steam ? [['discover', 'nav.discover']] as [Tab, Parameters<typeof t>[0]][] : []), ['settings', 'nav.settings']];
 
 // The app bar stays over every page (D59): the library, a theme's own page under it, and the
 // settings. It is also the window's title bar, so it is there from the start and stays when a page
@@ -59,7 +62,7 @@ function AppBar() {
     <header className="topbar">
       <WindowTitle />
       <nav className="nav" aria-label={t('nav.label')}>
-        {PAGES.map(([tab, name]) => (
+        {pagesFor(s.env.steam).map(([tab, name]) => (
           <button key={tab} type="button" className={cx(s.tab === tab && 'on')} aria-current={s.tab === tab ? 'page' : undefined} onClick={() => setTab(tab)}>{t(name)}</button>
         ))}
       </nav>
@@ -99,6 +102,7 @@ function useBack() {
 function Page() {
   const s = useStore();
   const themePage = s.tab === 'mine' && s.view === 'theme' && !!s.open;
+  if (s.tab === 'discover' && s.env.steam) return <DiscoverPage />;
   return s.tab === 'settings' ? <SettingsPage /> : themePage ? <EditorPage /> : <LibraryPage />;
 }
 

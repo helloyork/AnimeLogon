@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<!-- Fluent UI writes its styles into the page at run time, so styles may be inline; scripts still come only from the program itself. Pictures and videos may also come from the wallpaper store and from Wallpaper Engine's folders, each mapped to a host name by the program. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: blob: https://*.workshop.animelogon.invalid; media-src https://wallpapers.animelogon.invalid https://*.workshop.animelogon.invalid; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'">
+<!-- Fluent UI writes its styles into the page at run time, so styles may be inline; scripts still come only from the program itself. Pictures and videos may also come from the wallpaper store and from Wallpaper Engine's folders, each mapped to a host name by the program. In the Steam edition, the Steam Workshop's preview pictures come from Steam's servers; steam-fixture is mapped only while developing with a stand-in for Steam's library (steam/PROTOCOL.md). -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: blob: https://*.workshop.animelogon.invalid https://images.steamusercontent.com https://steamuserimages-a.akamaihd.net https://steam-fixture.animelogon.invalid; media-src https://wallpapers.animelogon.invalid https://*.workshop.animelogon.invalid; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'">
 <title>AnimeLogon</title>
 <link rel="stylesheet" href="app.css">
 </head>

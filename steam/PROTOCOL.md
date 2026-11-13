@@ -73,6 +73,21 @@ Every operation but `status` and `quit` checks its parameters, then fails with `
 - **Upload stages:** `idle`, `preparingConfig`, `preparingContent`, `uploadingContent`,
   `uploadingPreview`, `committing`.
 
+## Tags
+
+Every tag a Workshop item of AnimeLogon can have is listed in [`tags.json`](tags.json), in English,
+in three groups. That one list is what the settings app filters by, what publishing sets, and what
+the Workshop's tags are set up from in Steamworks; adding a tag means adding it there, in Steamworks,
+and to `res/locales` (`steam.tag.<the tag in lowercase>`, which is how the settings app shows it).
+
+| Group | Tags | Which |
+|---|---|---|
+| `type` | `Video`, `Picture` | The wallpaper: exactly one. |
+| `resolution` | `1080p`, `1440p`, `4K`, `Ultrawide` | By the wallpaper's height: `1080p` from 1080 pixels, `1440p` from 1440, `4K` from 2160; none below 1080. `Ultrawide` as well when it is at least 2.2 times as wide as it is high. |
+| `content` | `Sound`, `Components` | The wallpaper has sound; the theme shows components. |
+
+Tags are matched as they are written, so items are published with these spellings only.
+
 ## Item
 
 What `query` and `details` give for an item:
@@ -262,7 +277,13 @@ To run the settings app's Workshop pages against it:
 3. Set `ANIMELOGON_FAKE_STEAM` to the fixture's full path in the environment the settings app starts
    in; the helper inherits it. Optionally set `ANIMELOGON_FAKE_STEAM_LOG` to a file that gets one line
    per notable call (init, shutdown, download, create, every field of an update, submit).
-4. Start the helper with any app id but 0, e.g. `--appid 480`.
+4. Start the helper with any app id but 0, e.g. `--appid 480`. The settings app starts it with the
+   app id in `ANIMELOGON_STEAM_APPID` when that is set, so set it to 480 as well.
+
+While `ANIMELOGON_FAKE_STEAM` is set, the settings app also serves the fixture's folder as
+`https://steam-fixture.animelogon.invalid/`, which its page may show pictures from: a fixture item's
+`preview` can name a picture beside the fixture, as `steam/dev/fixture.json` does
+(`previews\<id>.jpg`; put pictures there, or the page shows a plain frame).
 
 The stand-in reads the fixture when the helper connects. Subscribing, downloading and publishing
 change its items in memory only.
@@ -303,8 +324,7 @@ change its items in memory only.
   folder unless it is a full path; an installed item without one is in `content\<id>` there.
 - A publish applies the update's fields to the item when the upload ends, and fails with
   `FileNotFound` when the content folder does not exist.
-- Tag names in `steam/dev/fixture.json` are placeholders until the Workshop's tags are set in
-  Steamworks; preview URLs there are empty.
+- Tags in `steam/dev/fixture.json` are from the list above (see Tags).
 
 ## Checking against the SDK
 
@@ -325,4 +345,7 @@ CI, and without adding any of its files here):
 - that `SteamAPI_ManualDispatch_Init` belongs after `SteamAPI_Init`, and that connecting again after
   `SteamAPI_Shutdown` (when Steam was closed and started again) works;
 - that setting `SteamAppId` is enough for a program Steam did not start, or whether
-  `SteamAPI_RestartAppIfNecessary` is needed.
+  `SteamAPI_RestartAppIfNecessary` is needed;
+- the hosts of the preview URLs Steam gives (`preview` and `previews`), which the settings page's
+  Content-Security-Policy must allow (`app/web/index.html`): it allows
+  `https://images.steamusercontent.com` and `https://steamuserimages-a.akamaihd.net`.

@@ -78,3 +78,14 @@ if(TARGET animelogon_steam)
         "ANIMELOGON_STEAM_HELPER=\"$<TARGET_FILE:animelogon_steam>\""
         "ANIMELOGON_FAKE_STEAM_DLL=\"$<TARGET_FILE:fake_steam_api>\"")
 endif()
+
+# The library's Steam Workshop items (workshop.ini, an item's folder, its state, what an update may
+# take away with the theme it replaces) and the settings app's cutting of the Steam helper's output
+# into lines. steam/src only for the app id the client starts the helper with.
+target_sources(animelogon_tests PRIVATE steam_workshop_tests.cpp ${PROJECT_SOURCE_DIR}/app/src/steam_workshop.cpp
+                                        ${PROJECT_SOURCE_DIR}/app/src/steam_client.cpp)
+target_include_directories(animelogon_tests PRIVATE ${PROJECT_SOURCE_DIR}/steam/src)
+# The settings app's client of the Steam helper, run against the helper and the stand-in library.
+if(TARGET animelogon_steam)
+    target_sources(animelogon_tests PRIVATE steam_client_tests.cpp)
+endif()

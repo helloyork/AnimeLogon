@@ -47,9 +47,10 @@ Result Wallpaper(const std::wstring &source, const std::wstring &dir, const std:
 // theme.xml must parse; the wallpaper file it carries must be the one theme.xml names (or none
 // when theme.xml names a built-in wallpaper or none), and its component files exactly those
 // theme.xml names. Components are written normalised, the wallpaper goes through the same
-// normalisation as Media, and theme.xml is written afresh.
+// normalisation as Media, and theme.xml is written afresh, named `name` (cut as Media cuts it)
+// when one is given (a Steam Workshop item's title), otherwise as the package names it.
 Result Package(const std::wstring &source, const std::wstring &dir, const std::atomic<bool> &cancel,
-               const Progress &progress);
+               const Progress &progress, const std::wstring &name = L"");
 
 // A component file (.xml), staged for --commit-component as dir\component.xml, normalised.
 Result Component(const std::wstring &source, const std::wstring &dir);
