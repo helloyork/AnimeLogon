@@ -7,6 +7,8 @@ add_dependencies(animelogon_tests scene)
 # The overlay's plan and its reading of still wallpapers need nothing but animelogon_common.
 target_sources(animelogon_tests PRIVATE overlay_tests.cpp ${PROJECT_SOURCE_DIR}/overlay/src/plan.cpp
                                         ${PROJECT_SOURCE_DIR}/overlay/src/picture.cpp)
+# Which of the other displays get a still after a wake, what each is cut from, and the blur.
+target_sources(animelogon_tests PRIVATE stills_tests.cpp ${PROJECT_SOURCE_DIR}/overlay/src/stills.cpp)
 target_include_directories(animelogon_tests PRIVATE ${PROJECT_SOURCE_DIR}/overlay/src)
 target_link_libraries(animelogon_tests PRIVATE animelogon_common)
 add_test(NAME animelogon_tests COMMAND animelogon_tests)

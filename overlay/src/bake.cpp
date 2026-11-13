@@ -195,6 +195,15 @@ bool Write(const std::wstring &path, const std::vector<uint8_t> &bytes) {
 
 }  // namespace
 
+bool FirstFrameOn(const std::wstring &video, const RECT &canvas, const RECT &rect, animelogon::Scaling fit,
+                  std::vector<uint8_t> *bgr) {
+    const int w = rect.right - rect.left, h = rect.bottom - rect.top;
+    Frame f;
+    if (w <= 0 || h <= 0 || !FirstFrame(video, &f)) return false;
+    *bgr = Compose(f, layout::Map(f.displayW, f.displayH, canvas, rect, fit), w, h, w, h);
+    return true;
+}
+
 bool Refresh(const std::wstring &preview) {
     std::wstring why;
     const animelogon::Settings settings = animelogon::LoadSettings(false, &why);

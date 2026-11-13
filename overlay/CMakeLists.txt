@@ -17,6 +17,8 @@ animelogon_add_executable(overlay
         src/datafeed.cpp
         src/scenes.cpp
         src/staticcover.cpp
+        src/stills.cpp
+        src/otherdisplays.cpp
     DESCRIPTION "AnimeLogon 登录界面视频"
     LIBS animelogon_render animelogon_scene_host d3d11 dxgi dcomp dwmapi d2d1 dwrite dxguid mf mfplat mfreadwrite mfuuid windowscodecs xaudio2 mmdevapi
          wtsapi32 shcore runtimeobject)

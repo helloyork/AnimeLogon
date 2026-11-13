@@ -34,6 +34,14 @@ enum class Scaling {
 // Which displays components are drawn on. Auto is the display Windows puts its password box on.
 enum class ComponentDisplays { Auto, Primary, All };
 
+// What the displays other than the primary show from the wake until sign-in. Windows draws
+// nothing there while it asks for the password, so without a picture of ours they are black.
+enum class OtherDisplays {
+    Blur,     // a blurred, slightly darkened still of the display's own wallpaper
+    Picture,  // the same still, as it is
+    Black,    // nothing: black, as Windows leaves them
+};
+
 struct AudioSource {
     bool enabled = true;
     int volume = 100;  // 0..100
@@ -73,6 +81,7 @@ struct Settings {
     std::map<std::wstring, std::wstring> screens;
     bool components = true;  // `components`: false hides every component of every theme
     ComponentDisplays componentDisplays = ComponentDisplays::Auto;  // `component_displays`
+    OtherDisplays otherDisplays = OtherDisplays::Blur;              // `other_displays`
     // `media`: whether components may show what is playing (titles and artists, from the
     // signed-in person's own session, on their own lock screen only).
     bool media = true;
@@ -110,5 +119,7 @@ const wchar_t *ToString(Scaling scaling);
 bool Parse(std::wstring_view text, Scaling *out);  // fill, fit or stretch
 const wchar_t *ToString(ComponentDisplays displays);
 bool Parse(std::wstring_view text, ComponentDisplays *out);  // auto, primary or all
+const wchar_t *ToString(OtherDisplays displays);
+bool Parse(std::wstring_view text, OtherDisplays *out);  // blur, picture or black
 
 }  // namespace animelogon

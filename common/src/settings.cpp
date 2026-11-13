@@ -22,6 +22,7 @@ constexpr DWORD kRetryMs = 50;
 constexpr const wchar_t *kScreenPrefix = L"screen.";
 constexpr const wchar_t *kThemePrefix = L"theme.";
 const wchar_t *const kComponentDisplays[] = {L"auto", L"primary", L"all"};
+const wchar_t *const kOtherDisplays[] = {L"blur", L"picture", L"black"};
 
 bool ParseBool(std::wstring_view v, bool *out) {
     if (EqualsNoCase(v, L"true") || v == L"1") return *out = true, true;
@@ -127,6 +128,14 @@ bool Parse(std::wstring_view text, ComponentDisplays *out) {
     return false;
 }
 
+const wchar_t *ToString(OtherDisplays displays) { return kOtherDisplays[(int)displays]; }
+
+bool Parse(std::wstring_view text, OtherDisplays *out) {
+    for (size_t i = 0; i < ARRAYSIZE(kOtherDisplays); ++i)
+        if (EqualsNoCase(text, kOtherDisplays[i])) return *out = (OtherDisplays)i, true;
+    return false;
+}
+
 bool IsTypedValueText(std::wstring_view value) {
     if (value.size() > 128) return false;
     for (wchar_t c : value)
@@ -180,6 +189,8 @@ void Read(const std::wstring &text, Settings *out, bool *namesTheme, std::vector
             ok = ParseBool(value, &s.components);
         } else if (key == L"component_displays") {
             ok = Parse(value, &s.componentDisplays);
+        } else if (key == L"other_displays") {
+            ok = Parse(value, &s.otherDisplays);
         } else if (key == L"media") {
             ok = ParseBool(value, &s.media);
         } else if (key.substr(0, wcslen(kThemePrefix)) == kThemePrefix) {
@@ -253,6 +264,7 @@ std::wstring SerializeSettings(const Settings &s) {
     for (const auto &[monitor, id] : s.screens) out += kScreenPrefix + monitor + L" = " + id + L"\r\n";
     out += L"components = " + std::wstring(s.components ? L"true" : L"false") + L"\r\n";
     out += L"component_displays = " + std::wstring(ToString(s.componentDisplays)) + L"\r\n";
+    out += L"other_displays = " + std::wstring(ToString(s.otherDisplays)) + L"\r\n";
     out += L"media = " + std::wstring(s.media ? L"true" : L"false") + L"\r\n";
     const ClockStyle &style = s.clock;
     out += L"clock_hours = " + std::wstring(ToString(style.hours)) + L"\r\n";

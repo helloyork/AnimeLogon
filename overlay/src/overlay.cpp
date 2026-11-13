@@ -38,6 +38,7 @@
 #include "events.h"
 #include "inputsink.h"
 #include "keyhook.h"
+#include "otherdisplays.h"
 #include "plan.h"
 #include "player.h"
 #include "presenter.h"
@@ -75,6 +76,7 @@ struct Options {
     bool still = false;      // with --windowed: input does not wake it, for screenshots
     int seconds = 0;         // exit after this many seconds, for testing; 0 is forever
     std::wstring bakePreview;  // write the sign-in background this would bake there, and exit
+    std::wstring stillsPreview;  // write the other displays' stills into this directory, and exit
 };
 
 // Why a live appearance ended, and so what to do next.
@@ -103,6 +105,9 @@ struct Overlay {
 };
 
 Overlay g_overlay;
+// The displays other than the primary, from a wake until sign-in. It outlives an appearance:
+// the stills stay up through the parked wait that follows a wake.
+OtherDisplays g_otherDisplays;
 const GUID kConsoleDisplayState = {0x6fe69556, 0x704a, 0x47a0, {0x8f, 0x24, 0xc2, 0x8d, 0x93, 0x6f, 0xda, 0x47}};
 
 // The watchdog's view of the main thread: whether it is timing it -- while a screen is live, and
@@ -122,6 +127,14 @@ void Wake(const wchar_t *how) {
     // A click wakes too; after any wake no further key is withheld.
     keyhook::State().armed.store(false);
     ALOG(L"wake: %s -- fading out", how);
+}
+
+// How long the wake transition takes, and how far it has gone: 0 at the wake, 1 once it is over.
+// The other displays' stills keep in step with it (otherdisplays.h).
+float WakeSeconds() { return kFadeSeconds; }
+float WakeProgress(ULONGLONG now) {
+    if (!g_overlay.woke) return 0.0f;
+    return std::min(1.0f, (float)(now - g_overlay.fadeStart) / 1000.0f / WakeSeconds());
 }
 
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
@@ -195,6 +208,7 @@ Options ParseOptions(int argc, wchar_t **argv) {
         else if (a == kDismissedFlag) o.dismissed = true;
         else if (a == L"--still") o.still = true;
         else if (a == L"--bake-preview" && i + 1 < argc) o.bakePreview = argv[++i];
+        else if (a == L"--stills-preview" && i + 1 < argc) o.stillsPreview = argv[++i];
         else if (a == L"--seconds" && i + 1 < argc) o.seconds = _wtoi(argv[++i]);
     }
     return o;
@@ -264,10 +278,11 @@ bool WaitForLogonScreen(Presenter &presenter, Scenes &scenes, bool *dismissed) {
             if (!secure || (s.signedIn && !s.locked && !g_overlay.lockNotified)) {
                 *dismissed = false;
             } else {
-                Sleep(200);
+                Sleep(g_otherDisplays.Parked(WakeSeconds()) ? 16 : 200);
                 continue;
             }
         }
+        g_otherDisplays.Clear();  // the password screen is over
 
         screen::GateInput in;
         in.secure = secure;
@@ -690,6 +705,7 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
         ALOG(L"overlay: live on %zu display(s), %llu ms after the logon screen", targets.size(),
              GetTickCount64() - g_overlay.seenAt);
     }
+    if (!done && !opt.windowed) g_otherDisplays.Prepare(plan, settings.otherDisplays);
 
     // --- frame loop --------------------------------------------------------------------
     HANDLE timer = CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
@@ -775,6 +791,7 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
                 end = LiveEnd::Dismissed;
             }
         }
+        if (!opt.windowed) g_otherDisplays.Live(g_overlay.woke, WakeProgress(now));
 
         // A video that stopped decoding is replaced before this tick's picture is composed, so
         // the built-in wallpaper is drawn in its place at once.
@@ -933,6 +950,14 @@ int wmain(int argc, wchar_t **argv) {
         CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
         MFStartup(MF_VERSION, MFSTARTUP_LITE);
         const bool ok = bake::Refresh(opt.bakePreview);
+        MFShutdown();
+        return ok ? 0 : 1;
+    }
+    if (!opt.stillsPreview.empty()) {
+        DeclareDpi();
+        CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+        MFStartup(MF_VERSION, MFSTARTUP_LITE);
+        const bool ok = OtherDisplays::Preview(opt.stillsPreview);
         MFShutdown();
         return ok ? 0 : 1;
     }
