@@ -1,115 +1,65 @@
-// A theme's own page (D40): a toolbar, the lock screen on the left, the panel of adjustments on
-// the right. Changes save themselves; undo and redo go back and forth through them.
+// A theme's own page (D40), under the library: a line saying which theme it is with the tools
+// for it, the lock screen on the left and the panel of adjustments on the right. Changes save
+// themselves; undo and redo go back and forth through them.
 import { useEffect } from 'react';
-import {
-  Breadcrumb,
-  BreadcrumbButton,
-  BreadcrumbDivider,
-  BreadcrumbItem,
-  Button,
-  Caption1,
-  makeStyles,
-  Menu,
-  MenuItem,
-  MenuList,
-  MenuPopover,
-  MenuTrigger,
-  mergeClasses,
-  SplitButton,
-  Toolbar,
-  ToolbarButton,
-  ToolbarDivider,
-  Tooltip,
-  tokens,
-  type MenuButtonProps,
-} from '@fluentui/react-components';
-import { ArrowRedoRegular, ArrowUndoRegular, MoreHorizontalRegular } from '@fluentui/react-icons';
+import { Menu, MenuItem, MenuList, MenuPopover, MenuTrigger } from '@fluentui/react-components';
+import { ArrowRedo16Regular, ArrowUndo16Regular, ChevronDown12Regular, MoreHorizontal16Regular, Play16Regular } from '@fluentui/react-icons';
 import { ThemeMenuItems } from '../library/LibraryPage';
 import { edit, endGesture, liveSet, newGesture, pendingValues, pv, setValue } from '../preview';
 import { applyFlow, getState, instOf, leaveTheme, multiPanel, panelKey, select, setState, themeOf, usedOn, useStore } from '../store';
+import { Button, Crumbs, IconButton } from '../ui/controls';
 import { Canvas } from './Canvas';
 import { clamp, geometry, offsetLimits, roundTo, shownOffset, valueOf } from './geometry';
 import { Inspector } from './Inspector';
 
-const useStyles = makeStyles({
-  page: { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' },
-  bar: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    minHeight: '52px',
-    paddingInline: `${tokens.spacingHorizontalL} ${tokens.spacingHorizontalM}`,
-    borderBottom: `${tokens.strokeWidthThin} solid ${tokens.colorNeutralStroke2}`,
-    flex: 'none',
-  },
-  crumbs: { minWidth: 0 },
-  crumb: { fontSize: tokens.fontSizeBase500, lineHeight: tokens.lineHeightBase500 },
-  name: { fontWeight: tokens.fontWeightSemibold, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 },
-  status: { color: tokens.colorNeutralForeground3, whiteSpace: 'nowrap' },
-  spacer: { flex: 1 },
-  body: { flex: 1, minHeight: 0, display: 'flex' },
-});
+const RATIOS = [[16, 9], [16, 10], [21, 9], [32, 9], [4, 3]];
 
 export function EditorPage() {
   const s = useStore();
-  const styles = useStyles();
   const t = s.open!;
   const entry = themeOf(t.id);
   const used = usedOn(t.id);
   useKeys();
+  const status = [used.length ? (used[0] === '使用中' ? '使用中' : `用于${used.join('、')}`) : null, '已自动保存'].filter(Boolean).join(' · ');
   return (
-    <div className={styles.page}>
-      <header className={styles.bar} data-own-keys>
-        <Breadcrumb aria-label="主题页" className={styles.crumbs}>
-          <BreadcrumbItem>
-            <BreadcrumbButton className={styles.crumb} onClick={() => leaveTheme()}>主题库</BreadcrumbButton>
-          </BreadcrumbItem>
-          <BreadcrumbDivider />
-          <BreadcrumbItem>
-            <BreadcrumbButton className={mergeClasses(styles.crumb, styles.name)} current>{t.name}</BreadcrumbButton>
-          </BreadcrumbItem>
-        </Breadcrumb>
-        <Caption1 className={styles.status}>{used.length ? (used[0] === '使用中' ? '使用中' : `用于${used.join('、')}`) : t.modifications ? '已修改' : ''}</Caption1>
-        <div className={styles.spacer} />
-        <Toolbar aria-label="编辑" size="medium">
-          <Tooltip content="撤销 (Ctrl+Z)" relationship="label">
-            <ToolbarButton icon={<ArrowUndoRegular />} disabled={!t.canUndo} onClick={() => edit('undo')} />
-          </Tooltip>
-          <Tooltip content="重做 (Ctrl+Y)" relationship="label">
-            <ToolbarButton icon={<ArrowRedoRegular />} disabled={!t.canRedo} onClick={() => edit('redo')} />
-          </Tooltip>
-          <ToolbarDivider />
+    <div className="themepage">
+      <header className="subhead" data-own-keys>
+        <Crumbs label="主题页" items={[{ label: '主题库', go: () => leaveTheme() }, { label: t.name }]} />
+        <span className="t-cap3 state">{status}</span>
+        <div className="tools">
+          <IconButton size="sm" label="撤销" tip="撤销 (Ctrl+Z)" icon={<ArrowUndo16Regular />} disabled={!t.canUndo} onClick={() => edit('undo')} />
+          <IconButton size="sm" label="重做" tip="重做 (Ctrl+Y)" icon={<ArrowRedo16Regular />} disabled={!t.canRedo} onClick={() => edit('redo')} />
+          <span className="vsep" />
+          {!used.length && <Button size="sm" variant="primary" onClick={() => applyFlow(t.id)}>套用</Button>}
           {/* The lock screen at this display's shape; the menu shows it at others. */}
-          <Menu positioning="below-end">
-            <MenuTrigger disableButtonEnhancement>
-              {(trigger: MenuButtonProps) => (
-                <SplitButton menuButton={trigger} primaryActionButton={{ onClick: () => setState({ lock: { theme: t.id } }) }}>锁屏预览</SplitButton>
-              )}
-            </MenuTrigger>
-            <MenuPopover>
-              <MenuList>
-                {[[16, 9], [16, 10], [21, 9], [32, 9], [4, 3]].map(([a, b]) => (
-                  <MenuItem key={a + ':' + b} onClick={() => setState({ lock: { theme: t.id, ratio: a / b } })}>{`以 ${a}:${b} 预览`}</MenuItem>
-                ))}
-              </MenuList>
-            </MenuPopover>
-          </Menu>
-          {!used.length && <Button appearance="primary" onClick={() => applyFlow(t.id)} style={{ marginLeft: tokens.spacingHorizontalS }}>套用</Button>}
-          {entry && (
-            <Menu>
+          <div className="split">
+            <Button size="sm" icon={<Play16Regular />} onClick={() => setState({ lock: { theme: t.id } })}>锁屏预览</Button>
+            <Menu positioning={{ position: 'below', align: 'end', offset: 4 }}>
               <MenuTrigger disableButtonEnhancement>
-                <Tooltip content="更多" relationship="label">
-                  <ToolbarButton icon={<MoreHorizontalRegular />} />
-                </Tooltip>
+                <IconButton size="sm" variant="secondary" label="以其他比例预览" icon={<ChevronDown12Regular />} />
               </MenuTrigger>
-              <MenuPopover>
+              <MenuPopover className="menu">
+                <MenuList>
+                  {RATIOS.map(([a, b]) => (
+                    <MenuItem key={a + ':' + b} onClick={() => setState({ lock: { theme: t.id, ratio: a / b } })}>{`以 ${a}:${b} 预览`}</MenuItem>
+                  ))}
+                </MenuList>
+              </MenuPopover>
+            </Menu>
+          </div>
+          {entry && (
+            <Menu positioning={{ position: 'below', align: 'end', offset: 4 }}>
+              <MenuTrigger disableButtonEnhancement>
+                <IconButton size="sm" label="更多" icon={<MoreHorizontal16Regular />} />
+              </MenuTrigger>
+              <MenuPopover className="menu">
                 <ThemeMenuItems theme={entry} onPage />
               </MenuPopover>
             </Menu>
           )}
-        </Toolbar>
+        </div>
       </header>
-      <div className={styles.body}>
+      <div className="editor">
         <Canvas />
         <Inspector />
       </div>

@@ -1,34 +1,9 @@
 // 主题库: the theme in use, large, then every theme. A click on a theme puts it in use (D41).
 import { useState, type CSSProperties } from 'react';
-import {
-  Button,
-  Caption1,
-  Card,
-  cardCSSVars,
-  CardPreview,
-  Link,
-  makeStyles,
-  Menu,
-  MenuDivider,
-  MenuItem,
-  MenuList,
-  MenuPopover,
-  MenuTrigger,
-  MessageBar,
-  MessageBarActions,
-  MessageBarBody,
-  mergeClasses,
-  shorthands,
-  Subtitle1,
-  Subtitle2,
-  Text,
-  Title3,
-  tokens,
-} from '@fluentui/react-components';
-import { MoreHorizontalRegular } from '@fluentui/react-icons';
+import { Menu, MenuDivider, MenuItem, MenuList, MenuPopover, MenuTrigger } from '@fluentui/react-components';
+import { Add16Regular, Edit16Regular, MoreHorizontal16Regular, Play16Regular, Warning16Regular } from '@fluentui/react-icons';
 import { UacShield } from '../icons';
 import { SceneFrames, WallpaperVideo } from '../media';
-import { calm } from '../motion';
 import { layerUrl, send, thumbUrl } from '../native';
 import { motion } from '../preview';
 import {
@@ -36,6 +11,7 @@ import {
   copyFlow,
   deleteFlow,
   kindName,
+  openDialog,
   openTheme,
   perMonitor,
   renameFlow,
@@ -48,208 +24,142 @@ import {
   useStore,
 } from '../store';
 import type { ThemeEntry } from '../types';
-
-const useStyles = makeStyles({
-  scroll: { flex: 1, minHeight: 0, overflowY: 'auto' },
-  page: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalXXL,
-    paddingInline: tokens.spacingHorizontalXXL,
-    paddingTop: tokens.spacingVerticalS,
-    paddingBottom: tokens.spacingVerticalXXXL,
-    maxWidth: '1440px',
-  },
-  section: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM },
-  heading: { display: 'flex', alignItems: 'baseline', gap: tokens.spacingHorizontalS },
-  quiet: { color: tokens.colorNeutralForeground3 },
-  // The theme in use: its picture and what it is made of, as wide as they need and no wider.
-  current: {
-    display: 'grid',
-    gridTemplateColumns: 'minmax(0, 640px) minmax(240px, 360px)',
-    alignSelf: 'flex-start',
-    maxWidth: '100%',
-    boxSizing: 'border-box',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalXXL,
-    padding: tokens.spacingHorizontalL,
-    backgroundColor: tokens.colorNeutralBackground1,
-    border: `${tokens.strokeWidthThin} solid ${tokens.colorNeutralStroke2}`,
-    borderRadius: tokens.borderRadiusXLarge,
-    '@media (max-width: 760px)': { gridTemplateColumns: 'minmax(0, 1fr)' },
-  },
-  info: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXS, minWidth: 0 },
-  fact: { margin: 0, minWidth: 0 },
-  facts: { margin: 0, display: 'grid', gridTemplateColumns: 'auto minmax(0, 1fr)', columnGap: tokens.spacingHorizontalL, rowGap: tokens.spacingVerticalXS, marginTop: tokens.spacingVerticalS },
-  actions: { display: 'flex', gap: tokens.spacingHorizontalS, marginTop: tokens.spacingVerticalM, flexWrap: 'wrap' },
-  screens: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 260px), 1fr))',
-    gap: tokens.spacingHorizontalL,
-    padding: tokens.spacingHorizontalL,
-    backgroundColor: tokens.colorNeutralBackground1,
-    border: `${tokens.strokeWidthThin} solid ${tokens.colorNeutralStroke2}`,
-    borderRadius: tokens.borderRadiusXLarge,
-  },
-  screen: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXS, margin: 0 },
-  caption: { display: 'flex', justifyContent: 'space-between', gap: tokens.spacingHorizontalS },
-  grid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 220px), 1fr))',
-    gap: `${tokens.spacingVerticalXL} ${tokens.spacingHorizontalL}`,
-    alignItems: 'start',
-  },
-  picture: {
-    position: 'relative',
-    overflow: 'hidden',
-    borderRadius: tokens.borderRadiusMedium,
-    backgroundColor: '#000',
-    aspectRatio: 'var(--arw) / var(--arh)',
-  },
-  shot: { position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', display: 'block' },
-  // A theme card is Fluent's selectable Card, drawn by its stroke like every card here: none of
-  // Fluent's card shadows, and the card's own corners.
-  card: {
-    [cardCSSVars.cardBorderRadiusVar]: tokens.borderRadiusXLarge,
-    boxShadow: 'none',
-    ':hover': { boxShadow: 'none' },
-    '::after': { ...shorthands.borderColor(tokens.colorNeutralStroke2) },
-  },
-  // Fluent marks a selected card with a neutral stroke, too faint to tell the theme in use at a
-  // glance; it takes the brand colour, as the page's other selected items do.
-  inUse: {
-    '::after': { ...shorthands.borderColor(tokens.colorBrandStroke1), ...shorthands.borderWidth(tokens.strokeWidthThick) },
-  },
-  tile: {
-    position: 'relative',
-    overflow: 'hidden',
-    backgroundColor: '#000',
-    aspectRatio: 'var(--arw) / var(--arh)',
-  },
-  overlay: {
-    position: 'absolute',
-    right: tokens.spacingHorizontalS,
-    bottom: tokens.spacingVerticalS,
-    display: 'flex',
-    gap: tokens.spacingHorizontalXS,
-    opacity: 0,
-    transitionProperty: 'opacity',
-    transitionDuration: tokens.durationFaster,
-  },
-  overlayShown: { opacity: 1 },
-  meta: { display: 'flex', flexDirection: 'column', minWidth: 0 },
-  ellipsis: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-});
+import { Button, cx, IconButton } from '../ui/controls';
 
 const shapeVars = (id: string) => {
   const s = shapeOf(id);
   return { '--arw': String(s.width), '--arh': String(s.height) } as CSSProperties;
 };
 
+const moving = (t: ThemeEntry) => t.wallpaperKind === 'video' || (t.wallpaperKind === 'scene' && !t.sceneStatic);
+
 export function LibraryPage() {
   const s = useStore();
-  const styles = useStyles();
   const lib = s.lib!;
   return (
-    <main className={styles.scroll}>
-      <div className={styles.page}>
-        <Title3 as="h1">主题库</Title3>
+    <main className="scroll">
+      <div className="page">
+        <div className="pagehead">
+          <h1 className="t-title">主题库</h1>
+          <span className="t-cap num">{`${lib.themes.length} 个主题`}</span>
+          <div className="actions">
+            <Button shield onClick={() => send('import')}>导入…</Button>
+            <Button icon={<Add16Regular />} onClick={() => openDialog({ kind: 'newTheme' })}>新建主题</Button>
+          </div>
+        </div>
         {!s.env.installed && (
-          <MessageBar intent="warning">
-            <MessageBarBody>这台电脑上没有安装 AnimeLogon，改动无法保存。</MessageBarBody>
-          </MessageBar>
+          <div className="notice" role="status">
+            <Warning16Regular />
+            <span>这台电脑上没有安装 AnimeLogon，改动无法保存。</span>
+          </div>
         )}
         {s.env.installed && !s.env.on && (
-          <MessageBar intent="info">
-            <MessageBarBody>AnimeLogon 已关闭，锁屏显示 Windows 默认界面。</MessageBarBody>
-            <MessageBarActions>
-              <Button size="small" icon={<UacShield />} onClick={() => send('switch', { on: true })}>启用</Button>
-            </MessageBarActions>
-          </MessageBar>
+          <div className="notice" role="status">
+            <Warning16Regular />
+            <span>AnimeLogon 已关闭，锁屏显示的是 Windows 默认画面。</span>
+            <Button size="sm" shield onClick={() => send('switch', { on: true })}>启用</Button>
+          </div>
         )}
-        <section className={styles.section}>
-          <div className={styles.heading}>
-            <Subtitle2 as="h2">当前主题</Subtitle2>
-            {perMonitor() && <Caption1 className={styles.quiet}>每块屏幕各自使用主题</Caption1>}
-          </div>
-          {perMonitor() ? <Screens /> : <Current />}
-        </section>
-        <section className={styles.section}>
-          <div className={styles.heading}>
-            <Subtitle2 as="h2">我的主题</Subtitle2>
-            <Caption1 className={styles.quiet}>{lib.themes.length} 个</Caption1>
-          </div>
-          <div className={styles.grid}>
-            {lib.themes.map(t => <ThemeCard key={t.id} theme={t} />)}
-          </div>
-        </section>
+        {perMonitor() ? <Screens /> : <Current />}
+        <div className="sechead">
+          <h2 className="t-h">我的主题</h2>
+        </div>
+        <div className="grid">
+          {lib.themes.map(t => <ThemeCard key={t.id} theme={t} />)}
+        </div>
       </div>
     </main>
   );
 }
 
-function Current() {
+// What the shown picture is made of: the still, then over it the wallpaper playing and the
+// components drawn alone, when the wallpaper moves and motion is wanted.
+function Picture({ t, width, playing }: { t: ThemeEntry; width: number; playing: boolean }) {
   const s = useStore();
-  const styles = useStyles();
-  const t = themeOf(s.lib!.current);
-  if (!t) return null;
-  const wallpaper = ['image', 'video'].includes(t.wallpaperKind) ? `${t.wallpaper}（${kindName(t.wallpaperKind)}）` : t.wallpaper;
-  const showComponents = s.lib!.settings.components;
+  const play = playing && motion() && moving(t);
   return (
-    <div className={styles.current}>
-      <div className={styles.picture} style={shapeVars(t.id)}>
-        <img className={styles.shot} src={thumbUrl(t.id, t.revision, 960, s.tick)} alt="" draggable={false} />
-        {t.wallpaperKind === 'video' && motion() && <WallpaperVideo key={t.wallpaperRef} wallpaper={t.wallpaperRef} fit={t.fit} />}
-        {t.wallpaperKind === 'scene' && motion() && !t.sceneStatic && <SceneFrames theme={t.id} width={960} moving />}
-        {(t.wallpaperKind === 'video' || (t.wallpaperKind === 'scene' && !t.sceneStatic)) && motion() && showComponents && (
-          <img className={styles.shot} src={layerUrl(t.id, t.revision, 960, s.tick)} alt="" draggable={false} />
-        )}
-      </div>
-      <div className={styles.info}>
-        <Subtitle1 as="h3">{t.name}</Subtitle1>
-        <dl className={styles.facts}>
-          <dt><Caption1 className={styles.quiet}>壁纸</Caption1></dt>
-          <dd className={mergeClasses(styles.fact, styles.ellipsis)}><Caption1>{wallpaper}</Caption1></dd>
-          <dt><Caption1 className={styles.quiet}>组件</Caption1></dt>
-          <dd className={mergeClasses(styles.fact, styles.ellipsis)}><Caption1>{showComponents ? t.summary || '无' : '已在设置里关闭'}</Caption1></dd>
-          {t.modifications > 0 && (
-            <>
-              <dt><Caption1 className={styles.quiet}>修改</Caption1></dt>
-              <dd className={styles.fact}><Caption1>{`${t.modifications} 项`}</Caption1></dd>
-            </>
-          )}
-        </dl>
-        <div className={styles.actions}>
-          <Button onClick={() => openTheme(t.id)}>自定义</Button>
-          <Button onClick={() => setState({ lock: { theme: t.id } })}>锁屏预览</Button>
-        </div>
-      </div>
-    </div>
+    <>
+      <img src={thumbUrl(t.id, t.revision, width, s.tick)} alt="" draggable={false} />
+      {play && t.wallpaperKind === 'video' && <WallpaperVideo key={t.wallpaperRef} wallpaper={t.wallpaperRef} fit={t.fit} />}
+      {play && t.wallpaperKind === 'scene' && <SceneFrames theme={t.id} width={width} moving />}
+      {play && s.lib!.settings.components && <img src={layerUrl(t.id, t.revision, width, s.tick)} alt="" draggable={false} />}
+    </>
   );
 }
 
+function Current() {
+  const s = useStore();
+  const t = themeOf(s.lib!.current);
+  if (!t) return null;
+  const meta = s.lib!.wallpapers.find(w => w.id === t.wallpaperRef)?.meta;
+  const showComponents = s.lib!.settings.components;
+  return (
+    <section className="hero" aria-label="当前主题">
+      <div className="shot" style={shapeVars(t.id)}>
+        <Picture t={t} width={1280} playing />
+      </div>
+      <div className="info">
+        <span className="t-cap3">当前主题</span>
+        <h2 className="name ellipsis">{t.name}</h2>
+        <dl className="facts">
+          <dt>壁纸</dt>
+          <dd>
+            <div className="ellipsis">{t.wallpaper}</div>
+            {meta && <div className="t-cap ellipsis num">{meta}</div>}
+          </dd>
+          <dt>组件</dt>
+          <dd className="ellipsis">{showComponents ? t.summary || '无' : '已在设置里关闭'}</dd>
+          {t.modifications > 0 && (
+            <>
+              <dt>修改</dt>
+              <dd className="num">{`改过 ${t.modifications} 项`}</dd>
+            </>
+          )}
+          {t.author && !t.builtIn && (
+            <>
+              <dt>作者</dt>
+              <dd className="ellipsis">{t.author}</dd>
+            </>
+          )}
+        </dl>
+        <div className="acts">
+          <Button variant="primary" icon={<Edit16Regular />} onClick={() => openTheme(t.id)}>自定义</Button>
+          <Button icon={<Play16Regular />} onClick={() => setState({ lock: { theme: t.id } })}>锁屏预览</Button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// A theme for each display: each display's picture, with the theme it shows.
 function Screens() {
   const s = useStore();
-  const styles = useStyles();
   const showOn = (primary: boolean) => s.lib!.settings.componentDisplays === 'all' || primary;
   return (
-    <div className={styles.screens}>
-      {s.env.monitors.map(m => {
-        const t = themeOf(screenTheme(m.key));
-        if (!t) return null;
-        return (
-          <figure key={m.key} className={styles.screen}>
-            <div className={styles.picture} style={{ '--arw': String(m.width), '--arh': String(m.height) } as CSSProperties}>
-              <img className={styles.shot} src={thumbUrl(t.id, t.revision, 640, s.tick)} alt="" draggable={false} />
-            </div>
-            <figcaption className={styles.caption}>
-              <Caption1 className={styles.quiet}>{m.name + (m.primary ? '（主）' : '') + (showOn(m.primary) ? '' : ' · 不显示组件')}</Caption1>
-              <Link onClick={() => openTheme(t.id)}>{t.name}</Link>
-            </figcaption>
-          </figure>
-        );
-      })}
-    </div>
+    <section aria-label="当前主题">
+      <div className="sechead first">
+        <h2 className="t-h">当前主题</h2>
+        <span className="t-cap">每块屏幕各自使用主题</span>
+      </div>
+      <div className="screens">
+        {s.env.monitors.map(m => {
+          const t = themeOf(screenTheme(m.key));
+          if (!t) return null;
+          return (
+            <figure key={m.key} className="screen">
+              <button type="button" className="shot" style={{ '--arw': String(m.width), '--arh': String(m.height) } as CSSProperties}
+                aria-label={`自定义「${t.name}」`} onClick={() => openTheme(t.id)}>
+                <img src={thumbUrl(t.id, t.revision, 640, s.tick)} alt="" draggable={false} />
+              </button>
+              <figcaption>
+                <span className="ellipsis">{t.name}</span>
+                <span className="t-cap3 ellipsis">{m.name + (m.primary ? '（主）' : '') + (showOn(m.primary) ? '' : ' · 不显示组件')}</span>
+              </figcaption>
+            </figure>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
@@ -269,59 +179,44 @@ export function ThemeMenuItems({ theme, onPage }: { theme: ThemeEntry; onPage?: 
   );
 }
 
+// A theme: its picture and name are one button that puts it in use; 自定义 and its menu sit over
+// the picture's corner, beside that button rather than inside it.
 function ThemeCard({ theme: t }: { theme: ThemeEntry }) {
-  const s = useStore();
-  const styles = useStyles();
   const [hover, setHover] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const used = usedOn(t.id);
-  const moves = hover && motion() && (t.wallpaperKind === 'video' || (t.wallpaperKind === 'scene' && !t.sceneStatic));
-  const facts = [kindName(t.wallpaperKind), t.summary, t.modifications ? '已修改' : null, t.author && !t.builtIn ? t.author : null].filter(Boolean).join(' · ');
-  // Selecting the card puts the theme in use; it stays selected while the theme is in use, and a
-  // click on the buttons over its picture does not select it (Card leaves focusable children alone).
+  const facts = [...used, kindName(t.wallpaperKind), t.summary, t.modifications ? '已修改' : null, t.author && !t.builtIn ? t.author : null].filter(Boolean).join(' · ');
   return (
-    <article data-theme={t.id} onPointerEnter={() => setHover(true)} onPointerLeave={() => setHover(false)}>
-      <Card
-        className={mergeClasses(styles.card, used.length > 0 && styles.inUse)}
-        selected={used.length > 0}
-        onSelectionChange={e => {
-          // Space on the card's checkbox reaches Card twice, as the checkbox's change and as the
-          // same click bubbling to the card; only the change is acted on.
-          if (e.type === 'click' && e.target instanceof HTMLInputElement) return;
+    <article className={cx('tcard', used.length > 0 && 'use')} data-theme={t.id} style={shapeVars(t.id)}
+      onPointerEnter={() => setHover(true)} onPointerLeave={() => setHover(false)}>
+      <button type="button" className="hit" aria-pressed={used.length > 0}
+        onClick={() => {
           // The theme in use is already applied; with a theme for each display, choosing it
           // again still asks which display to put it on.
           if (used.length && !perMonitor()) return;
           applyFlow(t.id);
-        }}
-        checkbox={{ 'aria-label': `套用「${t.name}」` }}
-      >
-        <CardPreview>
-          <div className={styles.tile} style={shapeVars(t.id)}>
-            <img className={styles.shot} src={thumbUrl(t.id, t.revision, 480, s.tick)} alt="" draggable={false} />
-            {moves && t.wallpaperKind === 'video' && <WallpaperVideo wallpaper={t.wallpaperRef} fit={t.fit} />}
-            {moves && t.wallpaperKind === 'scene' && <SceneFrames theme={t.id} width={480} moving />}
-            {moves && s.lib!.settings.components && <img className={styles.shot} src={layerUrl(t.id, t.revision, 480, s.tick)} alt="" draggable={false} />}
-            <div className={mergeClasses(styles.overlay, (hover || menuOpen || calm()) && styles.overlayShown)} onClick={e => e.stopPropagation()}>
-              <Button size="small" onClick={() => openTheme(t.id)}>自定义</Button>
-              <Menu open={menuOpen} onOpenChange={(_, d) => setMenuOpen(d.open)}>
-                <MenuTrigger disableButtonEnhancement>
-                  <Button size="small" icon={<MoreHorizontalRegular />} aria-label={`「${t.name}」的更多操作`} />
-                </MenuTrigger>
-                <MenuPopover>
-                  <ThemeMenuItems theme={t} />
-                </MenuPopover>
-              </Menu>
-            </div>
-          </div>
-        </CardPreview>
-        <div className={styles.meta}>
-          <Text className={styles.ellipsis}>{t.name}</Text>
-          {/* A card colours its Text with currentColor, so the quiet colour is set on a wrapper. */}
-          <div className={mergeClasses(styles.quiet, styles.ellipsis)}>
-            <Caption1>{(used.length ? used.join('、') + ' · ' : '') + facts}</Caption1>
-          </div>
+        }}>
+        <div className="thumb">
+          <Picture t={t} width={480} playing={hover} />
         </div>
-      </Card>
+        <div className="meta">
+          <div className="nm ellipsis">{t.name}</div>
+          <div className="t-cap3 ellipsis">{facts}</div>
+        </div>
+      </button>
+      <div className="over">
+        <div className={cx('hov', menuOpen && 'shown')}>
+          <Button size="sm" onClick={() => openTheme(t.id)}>自定义</Button>
+          <Menu open={menuOpen} onOpenChange={(_, d) => setMenuOpen(d.open)} positioning={{ position: 'below', align: 'end', offset: 4 }}>
+            <MenuTrigger disableButtonEnhancement>
+              <IconButton size="sm" variant="secondary" label={`「${t.name}」的更多操作`} tip="更多" icon={<MoreHorizontal16Regular />} />
+            </MenuTrigger>
+            <MenuPopover className="menu">
+              <ThemeMenuItems theme={t} />
+            </MenuPopover>
+          </Menu>
+        </div>
+      </div>
     </article>
   );
 }

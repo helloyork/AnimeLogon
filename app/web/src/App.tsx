@@ -1,56 +1,13 @@
 import { Component, useEffect, type ReactNode } from 'react';
-import {
-  Button,
-  FluentProvider,
-  makeStyles,
-  ProgressBar,
-  Tab,
-  TabList,
-  Text,
-  Toast,
-  Toaster,
-  ToastTitle,
-  tokens,
-  useId,
-  useToastController,
-} from '@fluentui/react-components';
+import { FluentProvider, Toast, Toaster, ToastTitle, useId, useToastController } from '@fluentui/react-components';
 import { Dialogs } from './dialogs/Dialogs';
 import { EditorPage } from './editor/EditorPage';
-import { UacShield } from './icons';
 import { LibraryPage } from './library/LibraryPage';
 import { LockPreview } from './lock/LockPreview';
-import { send } from './native';
 import { SettingsPage } from './settings/SettingsPage';
-import { onToast, openDialog, setTab, useStore, type Tab as TabName } from './store';
+import { onToast, setTab, useStore, type Tab } from './store';
 import { darkTheme, lightTheme, useDark } from './theme';
-
-const useStyles = makeStyles({
-  root: {
-    height: '100%',
-    display: 'flex',
-    flexDirection: 'column',
-    backgroundColor: tokens.colorNeutralBackground2,
-    color: tokens.colorNeutralForeground1,
-  },
-  bar: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalM,
-    minHeight: '48px',
-    paddingInline: tokens.spacingHorizontalXXL,
-    flex: 'none',
-  },
-  brand: { marginRight: tokens.spacingHorizontalS },
-  spacer: { flex: 1 },
-  busy: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalM,
-    paddingInline: tokens.spacingHorizontalXXL,
-    paddingBlock: tokens.spacingVerticalS,
-  },
-  busyBar: { maxWidth: '320px' },
-});
+import { Button, cx, Progress } from './ui/controls';
 
 // Something on the page failed to draw: say so and offer to start the page again, rather than
 // leave the window empty.
@@ -62,10 +19,10 @@ class Fallback extends Component<{ children: ReactNode }, { failed: string | nul
   render() {
     if (!this.state.failed) return this.props.children;
     return (
-      <div style={{ padding: tokens.spacingHorizontalXXL, display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM, alignItems: 'flex-start' }}>
-        <Text weight="semibold">页面出现问题</Text>
-        <Text className="selectable" size={200}>{this.state.failed}</Text>
-        <Button appearance="primary" onClick={() => location.reload()}>重新载入</Button>
+      <div className="fallback">
+        <h1 className="t-h">页面出现问题</h1>
+        <p className="t-cap selectable">{this.state.failed}</p>
+        <Button variant="primary" onClick={() => location.reload()}>重新载入</Button>
       </div>
     );
   }
@@ -74,10 +31,9 @@ class Fallback extends Component<{ children: ReactNode }, { failed: string | nul
 export function App() {
   const dark = useDark();
   const s = useStore();
-  const styles = useStyles();
   return (
     <FluentProvider theme={dark ? darkTheme : lightTheme}>
-      <div className={styles.root}>
+      <div className="app">
         <Fallback>{!s.lib ? null : <Shell />}</Fallback>
       </div>
       <Toasts />
@@ -87,43 +43,37 @@ export function App() {
   );
 }
 
+const PAGES: [Tab, string][] = [['mine', '主题库'], ['settings', '设置']];
+
 // The app bar stays over every page (D59): the library, a theme's own page under it, and the
-// settings. Importing and making a theme belong to the library's list, so only it shows them.
+// settings. What is being done in the background shows at its end.
 function Shell() {
   const s = useStore();
-  const styles = useStyles();
   const themePage = s.tab === 'mine' && s.view === 'theme' && !!s.open;
   return (
     <>
-      <header className={styles.bar}>
-        <Text weight="semibold" className={styles.brand}>AnimeLogon</Text>
-        <TabList selectedValue={s.tab} onTabSelect={(_, d) => setTab(d.value as TabName)} aria-label="页面">
-          <Tab value="mine">主题库</Tab>
-          <Tab value="settings">设置</Tab>
-        </TabList>
-        <div className={styles.spacer} />
-        {s.tab === 'mine' && !themePage && (
-          <>
-            <Button icon={<UacShield />} onClick={() => send('import')}>导入…</Button>
-            <Button appearance="primary" onClick={() => openDialog({ kind: 'newTheme' })}>新建主题</Button>
-          </>
-        )}
+      <header className="topbar">
+        <span className="brand">AnimeLogon</span>
+        <nav className="nav" aria-label="页面">
+          {PAGES.map(([tab, name]) => (
+            <button key={tab} type="button" className={cx(s.tab === tab && 'on')} aria-current={s.tab === tab ? 'page' : undefined} onClick={() => setTab(tab)}>{name}</button>
+          ))}
+        </nav>
+        <BusyBar />
       </header>
-      <BusyBar />
       {s.tab === 'settings' ? <SettingsPage /> : themePage ? <EditorPage /> : <LibraryPage />}
     </>
   );
 }
 
-export function BusyBar() {
+function BusyBar() {
   const { busy } = useStore();
-  const styles = useStyles();
   if (!busy) return null;
   return (
-    <div className={styles.busy} role="status">
-      <Text size={200}>{busy.label}</Text>
-      <ProgressBar className={styles.busyBar} value={busy.percent / 100} thickness="medium" />
-      <Text size={200}>{busy.percent}%</Text>
+    <div className="busy" role="status">
+      <span className="t-cap ellipsis">{busy.label}</span>
+      <Progress value={busy.percent} label={busy.label} />
+      <span className="t-cap num">{busy.percent}%</span>
     </div>
   );
 }
@@ -135,7 +85,7 @@ function Toasts() {
     () =>
       onToast(text =>
         dispatchToast(
-          <Toast>
+          <Toast className="toast">
             <ToastTitle>{text}</ToastTitle>
           </Toast>,
           { timeout: 3000 },
@@ -143,5 +93,5 @@ function Toasts() {
       ),
     [dispatchToast],
   );
-  return <Toaster toasterId={toasterId} position="bottom" />;
+  return <Toaster toasterId={toasterId} position="bottom" offset={{ vertical: 24 }} />;
 }

@@ -1,0 +1,60 @@
+/* What dialogs hold (the dialog itself is in fluent.css). */
+.dlg-text { display: flex; flex-direction: column; gap: var(--s3); }
+.dlg-text .quiet { color: var(--text-2); }
+.dlg-stack { display: flex; flex-direction: column; gap: var(--s5); }
+.dlg-field { display: flex; flex-direction: column; gap: var(--s2); }
+.dlg-label { display: flex; align-items: baseline; gap: var(--s2); font-size: 13px; line-height: 20px; color: var(--text-2); }
+
+/* A choice among a few things: a display, a component. */
+.choices { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr)); gap: var(--s2); }
+.choice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+  padding: 10px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  font-size: 14px;
+  line-height: 20px;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color .12s;
+}
+.choice:hover { background: var(--surface-3); }
+.choice:active { background: var(--surface-hover); }
+.choice > span { max-width: 100%; }
+
+/* Wallpapers to choose from. */
+.pictures { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 148px), 1fr)); gap: var(--s4) var(--s3); }
+.pick {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  font-size: 13px;
+  line-height: 20px;
+  text-align: left;
+  cursor: pointer;
+}
+.pick:focus-visible { outline: none; }
+.pick .pic {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  margin-bottom: 6px;
+  border-radius: var(--r-sm);
+  object-fit: cover;
+  background: #000;
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.pick:hover .pic { box-shadow: inset 0 0 0 1px var(--border-strong); }
+.pick.on .pic,
+.pick:focus-visible .pic { outline: 2px solid var(--accent); outline-offset: 2px; }
+.pick .browse { display: grid; place-items: center; background: var(--surface-3); color: var(--text-2); }
+.pick .browse svg { width: 20px; height: 20px; }
+.shielded { display: flex; align-items: center; gap: 6px; }

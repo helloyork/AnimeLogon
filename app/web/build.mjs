@@ -1,5 +1,5 @@
-// Bundles the settings app's page into one app.js beside index.html and app.css, the three files
-// animelogon.exe carries as resources (app/src/web.rc.in). CMake runs it with the output
+// Bundles the settings app's page into app.js and app.css (the styles src/main.tsx imports) beside
+// index.html, the three files animelogon.exe carries as resources (app/src/web.rc.in). CMake runs it with the output
 // directory in the build tree:
 //   node build.mjs --out <dir>
 // The bundle keeps the libraries' license comments at its end.
@@ -31,4 +31,4 @@ await build({
   define: { 'process.env.NODE_ENV': '"production"' },
   logLevel: 'warning',
 });
-for (const file of ['index.html', 'app.css']) copyFileSync(join(here, file), join(out, file));
+copyFileSync(join(here, 'index.html'), join(out, 'index.html'));

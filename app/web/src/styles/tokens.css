@@ -1,0 +1,84 @@
+/* The one scale everything on the page is measured by: space on a 4 px grid, a short ladder of
+   type sizes, three corner radii, two control heights, and the colours, light or dark as Windows
+   is. Fluent's own components read the same values (src/ui/fluent.ts maps its tokens onto these). */
+:root {
+  --font: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif;
+  --font-display: "Segoe UI Variable Display", "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif;
+  --font-mono: "Cascadia Mono", Consolas, "Microsoft YaHei UI", monospace;
+
+  /* space */
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 20px;
+  --s6: 24px;
+  --s7: 28px;
+  --s8: 32px;
+  --s10: 40px;
+  --s12: 48px;
+
+  /* corners: small parts, controls, pictures and menus, cards and dialogs */
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 12px;
+
+  /* control heights: the pages, and the theme page's panel */
+  --h-md: 32px;
+  --h-sm: 28px;
+
+  /* light */
+  --bg: #f4f4f6;
+  --bg-stage: #e6e6ea;
+  --surface-1: #fafafb;
+  --surface-2: #ffffff;
+  --surface-3: #eeeef1;
+  --surface-hover: #e6e6ea;
+  --field: #ffffff;
+  --border: rgba(0, 0, 0, .08);
+  --border-strong: rgba(0, 0, 0, .15);
+  --track: rgba(0, 0, 0, .16);
+  --text-1: #18181b;
+  --text-2: #56585f;
+  --text-3: #8a8c93;
+  --accent: #2f6fe4;
+  --accent-hover: #3d7cf0;
+  --accent-press: #2662cf;
+  --on-accent: #ffffff;
+  --warn: #b7791f;
+  --danger: #c4314b;
+  --shadow-pop: 0 8px 24px rgba(0, 0, 0, .12), 0 0 0 1px var(--border-strong);
+  --shadow-dialog: 0 24px 64px rgba(0, 0, 0, .22), 0 0 0 1px var(--border-strong);
+  --shadow-frame: 0 12px 32px rgba(0, 0, 0, .18);
+  --scrim: rgba(0, 0, 0, .32);
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111214;
+    --bg-stage: #0a0a0b;
+    --surface-1: #17181b;
+    --surface-2: #1c1d21;
+    --surface-3: #26272c;
+    --surface-hover: #2d2e34;
+    --field: #1f2024;
+    --border: rgba(255, 255, 255, .075);
+    --border-strong: rgba(255, 255, 255, .14);
+    --track: rgba(255, 255, 255, .18);
+    --text-1: #ececef;
+    --text-2: #a2a5ac;
+    --text-3: #6d7078;
+    --accent: #4a8af4;
+    --accent-hover: #5b96f6;
+    --accent-press: #3c7de6;
+    --warn: #e5b246;
+    --danger: #f07167;
+    --shadow-pop: 0 12px 32px rgba(0, 0, 0, .45), 0 0 0 1px var(--border-strong);
+    --shadow-dialog: 0 24px 64px rgba(0, 0, 0, .55), 0 0 0 1px var(--border-strong);
+    --shadow-frame: 0 16px 48px rgba(0, 0, 0, .5);
+    --scrim: rgba(0, 0, 0, .55);
+    color-scheme: dark;
+  }
+}

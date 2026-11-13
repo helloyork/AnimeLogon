@@ -8,7 +8,7 @@ find_program(NODE_EXECUTABLE node REQUIRED)
 find_program(NPM_EXECUTABLE NAMES npm.cmd npm REQUIRED)
 set(APP_WEB_SRC ${CMAKE_CURRENT_SOURCE_DIR}/web)
 set(APP_WEB_DIR ${CMAKE_CURRENT_BINARY_DIR}/web)
-file(GLOB_RECURSE app_web_sources CONFIGURE_DEPENDS ${APP_WEB_SRC}/src/*.ts ${APP_WEB_SRC}/src/*.tsx)
+file(GLOB_RECURSE app_web_sources CONFIGURE_DEPENDS ${APP_WEB_SRC}/src/*.ts ${APP_WEB_SRC}/src/*.tsx ${APP_WEB_SRC}/src/*.css)
 add_custom_command(OUTPUT ${APP_WEB_SRC}/node_modules/.package-lock.json
     # npm is a .cmd script: called through cmd so that the build step goes on after it.
     COMMAND cmd /c npm ci --ignore-scripts --no-audit --no-fund
@@ -18,7 +18,7 @@ add_custom_command(OUTPUT ${APP_WEB_SRC}/node_modules/.package-lock.json
     VERBATIM)
 add_custom_command(OUTPUT ${APP_WEB_DIR}/index.html ${APP_WEB_DIR}/app.css ${APP_WEB_DIR}/app.js
     COMMAND ${NODE_EXECUTABLE} build.mjs --out ${APP_WEB_DIR}
-    DEPENDS ${app_web_sources} ${APP_WEB_SRC}/build.mjs ${APP_WEB_SRC}/index.html ${APP_WEB_SRC}/app.css
+    DEPENDS ${app_web_sources} ${APP_WEB_SRC}/build.mjs ${APP_WEB_SRC}/index.html
             ${APP_WEB_SRC}/node_modules/.package-lock.json
     WORKING_DIRECTORY ${APP_WEB_SRC}
     COMMENT "Bundling the settings page"
