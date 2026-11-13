@@ -272,8 +272,6 @@ DWORD WriteUninstallEntry(const std::wstring &targetDir) {
     return ERROR_SUCCESS;
 }
 
-constexpr size_t kMaxSettingsBytes = 256 * 1024;
-
 // %ProgramData%\AnimeLogon and the directories in it, taken back and emptied if anyone but
 // an administrator could have prepared them: the logs, and the stores themes are made of.
 DWORD PrepareDataDir() {

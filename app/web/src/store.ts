@@ -23,6 +23,7 @@ export type Dialog = { id: number } & (
   | { kind: 'newTheme' }
   | { kind: 'wallpaper' }
   | { kind: 'addComponent' }
+  | { kind: 'copyComponents' }  // the open theme's components, to other themes
   | { kind: 'workshop'; wallpaper: boolean }  // with `wallpaper`, one, for the open theme
 );
 

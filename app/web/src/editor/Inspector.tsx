@@ -10,6 +10,7 @@ import {
   ChevronDown12Regular,
   ChevronRight12Regular,
   Clock16Regular,
+  CopyArrowRight16Regular,
   Image16Regular,
   MoreHorizontal16Regular,
   MusicNote216Regular,
@@ -130,6 +131,7 @@ function Overview() {
   const sections = useSections('overview', ['wallpaper', 'components', 'wake']);
   const t = s.open!, wp = t.wallpaper, scene = wp.scene;
   const full = t.room <= 0;
+  const others = s.lib!.themes.some(x => x.id !== t.id);
   const hoverOn = (id: string, on: boolean) => setState({ hover: on ? { inst: id, pk: null } : getState().hover?.inst === id ? null : getState().hover });
   return (
     <>
@@ -188,7 +190,14 @@ function Overview() {
             </div>
           ))}
         </div>
-        <Button size="sm" variant="ghost" className="add" icon={<Add16Regular />} disabled={full} onClick={() => openDialog({ kind: 'addComponent' })}>{tr('inspector.add')}</Button>
+        <div className="adds">
+          <Button size="sm" variant="ghost" icon={<Add16Regular />} disabled={full} onClick={() => openDialog({ kind: 'addComponent' })}>{tr('inspector.add')}</Button>
+          {/* The same components on other themes, which keep their own wallpapers. Once: they do
+              not follow later edits. */}
+          {others && (
+            <Button size="sm" variant="ghost" icon={<CopyArrowRight16Regular />} disabled={!t.instances.length} onClick={() => openDialog({ kind: 'copyComponents' })}>{tr('inspector.copy_components')}</Button>
+          )}
+        </div>
         {full && <p className="inote">{tr('inspector.full')}</p>}
       </Section>
       {/* How the lock screen gives way to the sign-in screen when a key or a click wakes it. The

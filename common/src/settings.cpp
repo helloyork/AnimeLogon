@@ -17,7 +17,6 @@
 namespace animelogon {
 namespace {
 
-constexpr size_t kMaxSettingsBytes = 256 * 1024;
 constexpr int kReadAttempts = 5;
 constexpr DWORD kRetryMs = 50;
 constexpr const wchar_t *kScreenPrefix = L"screen.";
