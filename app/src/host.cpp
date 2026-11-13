@@ -294,9 +294,12 @@ bool Host::Create(int show) {
     if (!hwnd_) return false;
     SetIcons();
     frame_.Attach(hwnd_, dark_);
-    // Where it was left, maximised or not; otherwise where the shell puts a new window.
+    // Where it was left, maximised or not; otherwise where the shell puts a new window. Whoever
+    // started the program with a position of its own (STARTUPINFO) has the last word.
+    STARTUPINFOW started{sizeof(started)};
+    GetStartupInfoW(&started);
     WINDOWPLACEMENT placement{sizeof(placement)};
-    if (LoadPlacement(&placement)) {
+    if (!(started.dwFlags & STARTF_USEPOSITION) && LoadPlacement(&placement)) {
         const bool maximised = placement.showCmd == SW_SHOWMAXIMIZED || (placement.flags & WPF_RESTORETOMAXIMIZED);
         placement.showCmd = SW_HIDE;
         SetWindowPlacement(hwnd_, &placement);

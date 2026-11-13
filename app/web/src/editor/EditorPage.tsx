@@ -85,6 +85,8 @@ function useKeys() {
       if (mod && k === 'z' && !typing) { e.preventDefault(); edit(e.shiftKey ? 'redo' : 'undo'); return; }
       if (mod && k === 'y' && !typing) { e.preventDefault(); edit('redo'); return; }
       if (typing || type === 'range' || target.closest?.('[data-own-keys], aside')) return;
+      // Alt with an arrow is back (App.tsx), not a nudge.
+      if (e.altKey) return;
       const sel = s.sel;
       if (e.key === 'Escape') { if (sel.part && sel.inst !== 'wallpaper') select(sel.inst, null); else select(null); return; }
       const inst = instOf(sel.inst);
