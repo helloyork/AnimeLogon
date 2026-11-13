@@ -58,3 +58,6 @@ target_include_directories(animelogon_tests PRIVATE ${PROJECT_SOURCE_DIR}/app/sr
 # alone as a layer, drawn by the logon screen's renderer.
 target_sources(animelogon_tests PRIVATE app_picture_tests.cpp ${PROJECT_SOURCE_DIR}/app/src/pictures.cpp)
 target_link_libraries(animelogon_tests PRIVATE animelogon_render animelogon_scene_host)
+
+# Finding an app's files and Workshop downloads in Steam's libraries (workshop.cpp uses it too).
+target_sources(animelogon_tests PRIVATE steam_library_tests.cpp ${PROJECT_SOURCE_DIR}/app/src/steam_library.cpp)

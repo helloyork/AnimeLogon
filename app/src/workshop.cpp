@@ -9,18 +9,19 @@
 #include "animelogon/text.h"
 
 #include "json.h"
+#include "steam_library.h"
 
 using namespace animelogon;
+using app::steam_library::Canonical;
 
 namespace app::workshop {
 
 namespace {
 
 constexpr size_t kMaxProjectBytes = 1024 * 1024;
-constexpr size_t kMaxVdfBytes = 1024 * 1024;
 
 // Wallpaper Engine's app id on Steam, the name of its folder of Workshop downloads.
-constexpr wchar_t kWorkshop[] = L"\\steamapps\\workshop\\content\\431960";
+constexpr uint32_t kAppId = 431960;
 constexpr wchar_t kMine[] = L"\\steamapps\\common\\wallpaper_engine\\projects\\myprojects";
 
 // What Wallpaper Engine plays as a video wallpaper, and what it saves previews as.
@@ -57,13 +58,6 @@ std::wstring OneLine(const std::wstring &text) {
     return std::wstring(Trim(out));
 }
 
-// The path as one spelling, to see that two name the same folder.
-std::wstring Canonical(std::wstring path) {
-    std::replace(path.begin(), path.end(), L'/', L'\\');
-    while (path.size() > 3 && path.back() == L'\\') path.pop_back();
-    return path;
-}
-
 bool IsDirectory(const std::wstring &path) {
     const DWORD a = GetFileAttributesW(path.c_str());
     return a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY);
@@ -78,60 +72,7 @@ bool FileSize(const std::wstring &path, uint64_t *bytes) {
     return true;
 }
 
-std::wstring RegistryText(HKEY root, const wchar_t *key, const wchar_t *value) {
-    wchar_t text[MAX_PATH * 2];
-    DWORD size = sizeof(text);
-    if (RegGetValueW(root, key, value, RRF_RT_REG_SZ, nullptr, text, &size) != ERROR_SUCCESS) return L"";
-    return text;
-}
-
 }  // namespace
-
-std::vector<std::wstring> LibraryFolders(std::string_view vdf) {
-    // VDF is quoted strings (with \\ and \" escapes), braces and // comments. A string followed
-    // by a string is a key and its value; a string followed by a brace opens a block.
-    struct Token {
-        bool text;
-        std::string value;  // the text, or "{" / "}"
-    };
-    std::vector<Token> tokens;
-    for (size_t i = 0; i < vdf.size();) {
-        const char c = vdf[i];
-        if (c == '"') {
-            std::string value;
-            for (++i; i < vdf.size() && vdf[i] != '"'; ++i) {
-                if (vdf[i] == '\\' && i + 1 < vdf.size()) ++i;
-                value += vdf[i];
-            }
-            ++i;
-            tokens.push_back({true, value});
-        } else if (c == '{' || c == '}') {
-            tokens.push_back({false, std::string(1, c)});
-            ++i;
-        } else if (c == '/' && i + 1 < vdf.size() && vdf[i + 1] == '/') {
-            while (i < vdf.size() && vdf[i] != '\n') ++i;
-        } else {
-            ++i;
-        }
-    }
-    std::vector<std::wstring> folders;
-    int depth = 0;
-    for (size_t i = 0; i < tokens.size(); ++i) {
-        if (!tokens[i].text) {
-            depth += tokens[i].value == "{" ? 1 : -1;
-            continue;
-        }
-        if (i + 1 >= tokens.size() || !tokens[i + 1].text) continue;  // a block's name
-        const std::string &key = tokens[i].value;
-        const bool numbered = !key.empty() && std::all_of(key.begin(), key.end(), [](char k) { return k >= '0' && k <= '9'; });
-        if (_stricmp(key.c_str(), "path") == 0 || (depth == 1 && numbered)) {
-            const std::wstring path = Canonical(FromUtf8(tokens[i + 1].value));
-            if (!path.empty()) folders.push_back(path);
-        }
-        ++i;  // the value
-    }
-    return folders;
-}
 
 std::vector<Folder> FoldersUnder(const std::vector<std::wstring> &libraries) {
     std::vector<Folder> folders;
@@ -144,7 +85,7 @@ std::vector<Folder> FoldersUnder(const std::vector<std::wstring> &libraries) {
     };
     for (const std::wstring &library : libraries) {
         const std::wstring root = Canonical(library);
-        add(root + kWorkshop, Source::Workshop);
+        add(steam_library::WorkshopContentPath(root, kAppId), Source::Workshop);
         add(root + kMine, Source::Mine);
     }
     return folders;
@@ -207,22 +148,6 @@ Found Scan(const std::vector<Folder> &folders) {
     return found;
 }
 
-std::vector<Folder> Folders() {
-    std::wstring steam = RegistryText(HKEY_CURRENT_USER, L"Software\\Valve\\Steam", L"SteamPath");
-    if (steam.empty()) steam = RegistryText(HKEY_LOCAL_MACHINE, L"SOFTWARE\\WOW6432Node\\Valve\\Steam", L"InstallPath");
-    if (steam.empty()) steam = RegistryText(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Valve\\Steam", L"InstallPath");
-    if (steam.empty()) return {};
-    steam = Canonical(steam);
-    // Steam itself is the first library; the others are listed in its libraryfolders.vdf (in
-    // steamapps\ since 2021, in config\ as well).
-    std::vector<std::wstring> libraries{steam};
-    for (const wchar_t *list : {L"\\steamapps\\libraryfolders.vdf", L"\\config\\libraryfolders.vdf"}) {
-        std::vector<uint8_t> bytes;
-        if (!secure::ReadFileBytes(steam + list, &bytes, kMaxVdfBytes)) continue;
-        for (const std::wstring &l : LibraryFolders(std::string_view((const char *)bytes.data(), bytes.size())))
-            libraries.push_back(l);
-    }
-    return FoldersUnder(libraries);
-}
+std::vector<Folder> Folders() { return FoldersUnder(steam_library::Libraries()); }
 
 }  // namespace app::workshop
