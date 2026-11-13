@@ -1,5 +1,7 @@
 #include "otherdisplays.h"
 
+#include <objbase.h>
+
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -214,8 +216,9 @@ OtherDisplays::~OtherDisplays() {
     if (job_) job_->cancelled.store(true);
 }
 
-void OtherDisplays::Prepare(const plan::Plan &plan, animelogon::OtherDisplays mode) {
+void OtherDisplays::Prepare(const plan::Plan &plan, animelogon::OtherDisplays mode, float wakeSeconds) {
     Clear();
+    wakeSeconds_ = wakeSeconds;
     Start(plan, mode);
 }
 
@@ -343,7 +346,7 @@ void OtherDisplays::Live(bool woken, float progress) {
     }
 }
 
-bool OtherDisplays::Parked(float appearSeconds) {
+bool OtherDisplays::Parked() {
     if (!woken_) {
         Clear();
         return false;
@@ -352,7 +355,8 @@ bool OtherDisplays::Parked(float appearSeconds) {
     while (AdoptOne()) {
     }
     const ULONGLONG now = GetTickCount64();
-    const float span = std::max(appearSeconds, 0.01f) * 1000.0f;
+    // A cut has no length: what comes late comes at once.
+    const float span = std::max(wakeSeconds_, 0.001f) * 1000.0f;
     bool fading = false;
     for (Window &w : windows_) {
         if (!w.shown) {

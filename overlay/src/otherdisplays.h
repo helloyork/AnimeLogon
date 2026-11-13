@@ -40,16 +40,17 @@ public:
     OtherDisplays &operator=(const OtherDisplays &) = delete;
 
     // Once the screen is covered: takes down any still left from before and starts making this
-    // appearance's.
-    void Prepare(const plan::Plan &plan, animelogon::OtherDisplays mode);
+    // appearance's. `wakeSeconds` is how long its wake transition takes (0 for a cut).
+    void Prepare(const plan::Plan &plan, animelogon::OtherDisplays mode, float wakeSeconds);
 
     // Once a tick while the screen is up. `woken` once somebody has arrived; `progress` is how
     // far the wake transition has gone, 0 at the wake to 1 when it is over.
     void Live(bool woken, float progress);
 
-    // Once a tick on the password screen a wake left behind. Late stills fade in over
-    // `appearSeconds`. True while one is fading in: the caller should tick again soon.
-    bool Parked(float appearSeconds);
+    // Once a tick on the password screen a wake left behind. A still made too late for the
+    // transition fades in over the transition's length. True while one is fading in: the caller
+    // should tick again soon.
+    bool Parked();
 
     // Takes every still down: the password screen is over.
     void Clear();
@@ -81,6 +82,7 @@ private:
     size_t adopted_ = 0;  // how many of job_'s stills are in windows
     std::vector<Window> windows_;
     animelogon::OtherDisplays mode_ = animelogon::OtherDisplays::Blur;
+    float wakeSeconds_ = 0.0f;
     std::vector<RECT> layout_;  // every display, primary first, as the stills were made for
     bool woken_ = false;
     bool reported_ = false;

@@ -122,6 +122,14 @@ export function SettingsPage() {
               )}
             </Row>
           )}
+          {several && (
+            <Row title="唤醒后其他屏幕">
+              {() => (
+                <Select label="唤醒后其他屏幕" value={set.otherDisplays} onChange={v => global('otherDisplays', v)}
+                  options={choices([['blur', '模糊的壁纸'], ['picture', '壁纸'], ['black', '黑屏']])} />
+              )}
+            </Row>
+          )}
         </Group>
 
         <Group title="声音">

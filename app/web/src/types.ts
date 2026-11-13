@@ -30,6 +30,7 @@ export interface Settings {
   screens: Record<string, string>;  // monitor key -> theme id, in per-monitor mode
   components: boolean;
   componentDisplays: 'auto' | 'primary' | 'all';
+  otherDisplays: 'blur' | 'picture' | 'black';  // what the other displays show from the wake until sign-in
   media: boolean;
   clock: { hours: 'auto' | '12' | '24'; ampm: boolean; date: 'weekday' | 'long' | 'none'; language: string };
   audio: { enabled: boolean; device: string; volume: number; video: boolean; videoVolume: number };

@@ -127,12 +127,17 @@ void Wake(const wchar_t *how) {
     ALOG(L"wake: %s -- fading out", how);
 }
 
-// How long the wake transition takes, and how far it has gone: 0 at the wake, 1 once it is over.
-// The other displays' stills keep in step with it (otherdisplays.h).
-float WakeSeconds() { return kFadeSeconds; }
-float WakeProgress(ULONGLONG now) {
+// How long the wake transition takes: the primary display's theme's (plan.h), none for a cut.
+float WakeSeconds(const plan::Plan &plan) {
+    return plan.wake == animelogon::WakeStyle::Cut ? 0.0f : plan.wakeSeconds;
+}
+
+// How far it has gone: 0 at the wake, 1 once it is over. The screen's own transition and the
+// other displays' stills (otherdisplays.h) both go by this.
+float WakeProgress(const plan::Plan &plan, ULONGLONG now) {
     if (!g_overlay.woke) return 0.0f;
-    return std::min(1.0f, (float)(now - g_overlay.fadeStart) / 1000.0f / WakeSeconds());
+    const float seconds = WakeSeconds(plan);
+    return seconds > 0.0f ? std::min(1.0f, (float)(now - g_overlay.fadeStart) / 1000.0f / seconds) : 1.0f;
 }
 
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
@@ -276,7 +281,7 @@ bool WaitForLogonScreen(Presenter &presenter, Scenes &scenes, bool *dismissed) {
             if (!secure || (s.signedIn && !s.locked && !g_overlay.lockNotified)) {
                 *dismissed = false;
             } else {
-                Sleep(g_otherDisplays.Parked(WakeSeconds()) ? 16 : 200);
+                Sleep(g_otherDisplays.Parked() ? 16 : 200);
                 continue;
             }
         }
@@ -703,7 +708,7 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
         ALOG(L"overlay: live on %zu display(s), %llu ms after the logon screen", targets.size(),
              GetTickCount64() - g_overlay.seenAt);
     }
-    if (!done && !opt.windowed) g_otherDisplays.Prepare(plan, settings.otherDisplays);
+    if (!done && !opt.windowed) g_otherDisplays.Prepare(plan, settings.otherDisplays, WakeSeconds(plan));
 
     // --- frame loop --------------------------------------------------------------------
     HANDLE timer = CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
@@ -784,8 +789,7 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
         // (plan.h): fading, growing as it fades, sliding up off the display, or at once.
         float opacity = 1.0f, leaveScale = 1.0f, leaveRise = 0.0f;
         if (g_overlay.woke) {
-            const float seconds = plan.wake == animelogon::WakeStyle::Cut ? 0.0f : plan.wakeSeconds;
-            const float k = seconds > 0.0f ? (float)(now - g_overlay.fadeStart) / 1000.0f / seconds : 1.0f;
+            const float k = WakeProgress(plan, now);
             const float c = std::min(k, 1.0f), smooth = c * c * (3.0f - 2.0f * c);
             switch (plan.wake) {
             case animelogon::WakeStyle::Zoom:
@@ -803,7 +807,7 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
             }
             presenter.SetLeave(leaveScale, leaveRise);
         }
-        if (!opt.windowed) g_otherDisplays.Live(g_overlay.woke, WakeProgress(now));
+        if (!opt.windowed) g_otherDisplays.Live(g_overlay.woke, WakeProgress(plan, now));
 
         // A video that stopped decoding is replaced before this tick's picture is composed, so
         // the built-in wallpaper is drawn in its place at once.

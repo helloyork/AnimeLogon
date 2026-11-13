@@ -503,6 +503,9 @@ bool Library::SetGlobal(const std::wstring &key, const std::wstring &value) {
     } else if (key == L"componentDisplays") {
         ComponentDisplays d;
         if ((ok = Parse(value, &d))) set_.componentDisplays = d;
+    } else if (key == L"otherDisplays") {
+        OtherDisplays d;
+        if ((ok = Parse(value, &d))) set_.otherDisplays = d;
     } else if (key == L"media") {
         ok = flag(&set_.media);
     } else if (key == L"monitorMode") {
@@ -591,6 +594,7 @@ void Library::WriteLibrary(json::Writer &w) const {
     for (const auto &[monitor, theme] : set_.screens) w.Member(monitor, theme);
     w.EndObject();
     w.Member(L"components", set_.components).Member(L"componentDisplays", ToString(set_.componentDisplays));
+    w.Member(L"otherDisplays", ToString(set_.otherDisplays));
     w.Member(L"media", set_.media);
     w.Key(L"clock").BeginObject();
     w.Member(L"hours", ToString(set_.clock.hours)).Member(L"ampm", set_.clock.ampm);
