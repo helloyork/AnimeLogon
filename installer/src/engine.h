@@ -27,8 +27,9 @@ std::wstring DefaultInstallDir();
 // components to `targetDir`, which must lie inside Program Files, and deletes config.exe there
 // (the settings app of earlier versions), bakes the background, writes
 // default settings (the default theme) unless settings.ini already names a theme, registers
-// the uninstall entry, installs the service and only then applies the Windows lock-screen
-// changes; a failure there undoes them. Ends with the Start-menu shortcut (needs COM), and adds
+// the uninstall entry, installs the service, switches off other programs that draw the logon
+// screen (others.h) and only then applies the Windows lock-screen changes; a failure there
+// undoes them. Ends with the Start-menu shortcut (needs COM), and adds
 // to the message when the settings app will not find the WebView2 runtime.
 Report Install(const std::wstring &targetDir);
 

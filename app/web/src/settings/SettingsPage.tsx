@@ -4,7 +4,7 @@
 import { useId, useState, type ReactNode } from 'react';
 import { UacShield } from '../icons';
 import { send } from '../native';
-import { global, perMonitor, themeOf, useStore } from '../store';
+import { global, perMonitor, switchOn, themeOf, useStore } from '../store';
 import { Button, cx, Select, Slider, Switch, type Choice } from '../ui/controls';
 
 // The control in a row is named by the row's title.
@@ -51,6 +51,7 @@ export function SettingsPage() {
   const s = useStore();
   const set = s.lib!.settings, c = set.clock;
   const several = s.env.monitors.length > 1;
+  const others = s.env.others.filter(o => o.on).map(o => o.name).join('、');
   return (
     <main className="scroll">
       <div className="page narrow">
@@ -60,14 +61,20 @@ export function SettingsPage() {
 
         {/* The switch for the whole program comes first. */}
         <Group>
-          <Row title="启用 AnimeLogon" description="关闭后锁屏恢复 Windows 默认，主题和设置保留。">
+          <Row title="启用 AnimeLogon" description={!s.env.on && others ? `${others} 正在使用，启用 AnimeLogon 将停用它。` : '关闭后锁屏恢复 Windows 默认，主题和设置保留。'}>
             {() => (
               <>
                 <UacShield />
-                <Switch label="启用 AnimeLogon" checked={s.env.on} onChange={v => send('switch', { on: v })} />
+                <Switch label="启用 AnimeLogon" checked={s.env.on} onChange={v => (v ? switchOn() : send('switch', { on: false }))} />
               </>
             )}
           </Row>
+          {/* Both on: one of them has to go. */}
+          {s.env.on && others && (
+            <Row sub title={`${others} 也已启用`} description="两者同时启用时会争用登录界面。">
+              {() => <Button size="sm" shield onClick={() => send('switch', { on: true })}>{`停用 ${others}`}</Button>}
+            </Row>
+          )}
         </Group>
 
         <Group title="时钟">

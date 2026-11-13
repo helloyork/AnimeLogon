@@ -14,6 +14,8 @@ export interface Monitor {
 export interface Environment {
   on: boolean;         // AnimeLogon is turned on (service and Windows' lock screen off)
   installed: boolean;
+  // Other programs that draw the logon screen; switching AnimeLogon on switches them off.
+  others: { name: string; on: boolean }[];
   version: string;     // this program's version, as its version resource gives it
   user: string;        // the name Windows' sign-in screen greets this person by
   accountPicture: boolean;  // they have an account picture, served as `account`

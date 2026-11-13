@@ -5,6 +5,7 @@
 #include <cstring>
 
 #include "animelogon/background.h"
+#include "animelogon/others.h"
 #include "animelogon/paths.h"
 #include "animelogon/secure.h"
 #include "animelogon/settings.h"
@@ -20,6 +21,15 @@ TEST(ParseIntRejectsGarbage) {
     CHECK(!ParseInt(L"4x", &v));
     CHECK(!ParseInt(L"", &v));
     CHECK(!ParseInt(L"99999999999999999999", &v));
+}
+
+// The settings app asks without administrator rights, whatever is installed here.
+TEST(OtherLogonProgramsAreFoundWithoutRights) {
+    const std::vector<others::Program> found = others::Installed();
+    for (const others::Program &p : found) CHECK(!p.name.empty() && p.name.size() <= 80);
+    bool anyOn = false;
+    for (const others::Program &p : found) anyOn = anyOn || p.on;
+    CHECK(others::AnyOn() == anyOn);
 }
 
 TEST(HashKeyIsStable) {

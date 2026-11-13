@@ -19,6 +19,7 @@ import {
   screenTheme,
   setState,
   shapeOf,
+  switchOn,
   themeOf,
   usedOn,
   useStore,
@@ -36,6 +37,7 @@ const moving = (t: ThemeEntry) => t.wallpaperKind === 'video' || (t.wallpaperKin
 export function LibraryPage() {
   const s = useStore();
   const lib = s.lib!;
+  const others = s.env.others.filter(o => o.on).map(o => o.name).join('、');
   return (
     <main className="scroll">
       <div className="page">
@@ -56,8 +58,15 @@ export function LibraryPage() {
         {s.env.installed && !s.env.on && (
           <div className="notice" role="status">
             <Warning16Regular />
-            <span>AnimeLogon 已关闭，锁屏显示的是 Windows 默认画面。</span>
-            <Button size="sm" shield onClick={() => send('switch', { on: true })}>启用</Button>
+            <span>{others ? `AnimeLogon 已关闭，锁屏由 ${others} 显示。` : 'AnimeLogon 已关闭，锁屏显示的是 Windows 默认画面。'}</span>
+            <Button size="sm" shield onClick={switchOn}>启用</Button>
+          </div>
+        )}
+        {s.env.installed && s.env.on && others && (
+          <div className="notice" role="status">
+            <Warning16Regular />
+            <span>{`${others} 也已启用。两者同时启用时会争用登录界面。`}</span>
+            <Button size="sm" shield onClick={() => send('switch', { on: true })}>{`停用 ${others}`}</Button>
           </div>
         )}
         {perMonitor() ? <Screens /> : <Current />}

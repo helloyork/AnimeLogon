@@ -16,6 +16,7 @@
 #include "animelogon/live.h"
 #include "animelogon/log.h"
 #include "animelogon/machine.h"
+#include "animelogon/others.h"
 #include "animelogon/paths.h"
 #include "animelogon/secure.h"
 #include "animelogon/settings.h"
@@ -331,6 +332,20 @@ Report Install(const std::wstring &targetDir) {
     }
     step(L"安装服务");
 
+    // Another program drawing the logon screen goes off before TurnOn records what Windows had.
+    std::wstring switchedOff;
+    for (const others::Program &p : others::Installed())
+        if (p.on) switchedOff = p.name;
+    e = others::TurnOff(paths::BackgroundPath());
+    if (e != ERROR_SUCCESS) {
+        machine::TurnOff();
+        machine::RemoveService();
+        return fail(WithError(L"无法停用 " + (switchedOff.empty() ? std::wstring(L"Shittim Logon") : switchedOff) +
+                                  L"，已撤销对系统的更改",
+                              e));
+    }
+    if (!switchedOff.empty()) r.steps.push_back(L"停用 " + switchedOff);
+
     e = machine::TurnOn(LauncherPath(targetDir), paths::BackgroundPath());
     if (e != ERROR_SUCCESS) {
         // TurnOn has already put Windows' lock screen back; the service goes with it.
@@ -346,6 +361,7 @@ Report Install(const std::wstring &targetDir) {
 
     r.ok = true;
     r.message = L"AnimeLogon 已安装。按 Win + L 锁定屏幕即可查看，或打开 AnimeLogon 设置导入视频或图片。";
+    if (!switchedOff.empty()) r.message += L"\n\n已停用 " + switchedOff + L"。";
     // The logon screen works without it; only the settings app needs it.
     if (!WebView2RuntimePresent(targetDir)) {
         ALOG(L"install: no WebView2 runtime");
@@ -425,15 +441,21 @@ Report Uninstall(bool keepData) {
         else step(L"删除程序文件");
     }
 
+    // Another program drawing the logon screen stays off: say where it comes back on.
+    std::wstring stillOff;
+    for (const others::Program &p : others::Installed())
+        if (!p.on) stillOff += L"\n\n" + p.name + L" 仍处于停用状态。如需使用，请在它的设置程序中重新启用。";
+
     if (problems.empty()) {
         r.ok = true;
-        r.message = L"AnimeLogon 已卸载。";
+        r.message = L"AnimeLogon 已卸载。" + stillOff;
         return r;
     }
     r.message = L"AnimeLogon 已卸载，但以下步骤未完成：";
     for (size_t i = 0; i < problems.size(); ++i) r.message += (i ? L"；" : L"") + problems[i];
     r.message += L"。";
     if (restored != ERROR_SUCCESS) r.message += L"原来的锁屏设置仍记录在注册表中，重新安装后再卸载即可恢复。";
+    r.message += stillOff;
     return r;
 }
 
