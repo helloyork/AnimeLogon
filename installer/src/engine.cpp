@@ -174,7 +174,10 @@ bool CloseRunningApp() {
 // Starts the icon in the notification area as the person whose desktop this is, not elevated as
 // the installer is: through Explorer's own ShellExecute, the way the shell starts what is
 // double-clicked.
+// Nothing is started where this desktop has no shell (a scripted install as SYSTEM, a service's
+// session): asking COM for the shell's windows there would start a server just to find none.
 HRESULT StartTrayOnDesktop(const std::wstring &targetDir) {
+    if (!GetShellWindow()) return S_FALSE;
     ComPtr<IShellWindows> windows;
     HRESULT hr = CoCreateInstance(CLSID_ShellWindows, nullptr, CLSCTX_LOCAL_SERVER, IID_PPV_ARGS(&windows));
     if (FAILED(hr)) return hr;
@@ -457,7 +460,8 @@ Report Install(const std::wstring &targetDir) {
     else ALOG(L"install: no Run entry for the icon (%lu)", e);
     // Now too, for whoever is signed in here.
     const HRESULT tray = StartTrayOnDesktop(targetDir);
-    if (FAILED(tray)) ALOG(L"install: the icon was not started (0x%08lx)", (unsigned long)tray);
+    if (tray == S_FALSE) ALOG(L"install: no shell on this desktop to start the icon in");
+    else if (FAILED(tray)) ALOG(L"install: the icon was not started (0x%08lx)", (unsigned long)tray);
 
     r.ok = true;
     r.message = L"AnimeLogon 已安装。按 Win + L 锁定屏幕即可查看，或打开 AnimeLogon 设置导入视频或图片。";
