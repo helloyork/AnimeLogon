@@ -167,9 +167,11 @@ function Screens() {
   );
 }
 
+// Copy, Rename and Delete carry the shield of an administrator's action; `hasIcons` keeps that
+// column on every item, so all the names start at the same place.
 export function ThemeMenuItems({ theme, onPage }: { theme: ThemeEntry; onPage?: boolean }) {
   return (
-    <MenuList>
+    <MenuList hasIcons>
       {!onPage && <MenuItem onClick={() => openTheme(theme.id)}>{tr('theme.customize')}</MenuItem>}
       {!onPage && <MenuItem onClick={() => setState({ lock: { theme: theme.id } })}>{tr('theme.lock_preview')}</MenuItem>}
       {!onPage && <MenuDivider />}
