@@ -31,7 +31,8 @@ std::wstring DefaultInstallDir();
 // changes; a failure there undoes them. Ends with the Start-menu shortcut and the Run entry that
 // shows the icon in the notification area at sign-in, and starts the icon for whoever is signed
 // in here (needs COM); adds to the message when the settings app will not find the WebView2
-// runtime. AnimeLogon's own windows on this desktop are closed before its files are replaced.
+// runtime. AnimeLogon's own windows on this desktop are closed before its files are replaced; a
+// file still in use elsewhere is moved aside and deleted at the next restart.
 Report Install(const std::wstring &targetDir);
 
 // Stops and removes the service, restores the Windows lock screen, removes the shortcut, the Run

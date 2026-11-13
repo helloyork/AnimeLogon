@@ -137,8 +137,8 @@ DWORD RemoveRunEntry() {
 // The settings app and the icon in the notification area run animelogon.exe, which cannot be
 // replaced or deleted while they do. Those on this desktop are asked to close, as at sign-out,
 // and waited for; a sandbox's are not AnimeLogon's own (their title names the sandbox, and they
-// run another copy). Another account's, signed in at the same time, are out of reach. Returns
-// whether the icon was among them.
+// run another copy). Another account's, signed in at the same time, are out of reach
+// (CopyComponent moves their file aside). Returns whether the icon was among them.
 bool CloseRunningApp() {
     std::vector<HWND> windows;
     EnumWindows(
@@ -291,6 +291,26 @@ bool SettingsNameATheme() {
     return NamesATheme(FromUtf8(std::string_view((const char *)bytes.data() + skip, bytes.size() - skip)));
 }
 
+// Copies a component over the installed one. One still running -- the settings app or the tray
+// icon in another account's session, which CloseRunningApp cannot reach -- is moved aside first
+// (a running program's file can be renamed, not replaced) and deleted at the next restart; it
+// goes on running until it ends, and the next start is the new one.
+DWORD CopyComponent(const std::wstring &from, const std::wstring &to) {
+    if (CopyFileW(from.c_str(), to.c_str(), FALSE)) return ERROR_SUCCESS;
+    const DWORD e = GetLastError();
+    if (e != ERROR_SHARING_VIOLATION && e != ERROR_ACCESS_DENIED) return e;
+    const std::wstring aside = to + L"." + std::to_wstring(GetTickCount64()) + L".old";
+    if (!MoveFileExW(to.c_str(), aside.c_str(), 0)) return e;
+    if (!CopyFileW(from.c_str(), to.c_str(), FALSE)) {
+        const DWORD again = GetLastError();
+        MoveFileExW(aside.c_str(), to.c_str(), 0);
+        return again;
+    }
+    MoveFileExW(aside.c_str(), nullptr, MOVEFILE_DELAY_UNTIL_REBOOT);
+    ALOG(L"%s was in use: the old copy goes at the next restart", to.c_str());
+    return ERROR_SUCCESS;
+}
+
 // Deletes an installed file now, or queues it for the next restart if it is in use.
 DWORD RemoveFileOrQueue(const std::wstring &path) {
     if (DeleteFileW(path.c_str())) return ERROR_SUCCESS;
@@ -395,8 +415,8 @@ Report Install(const std::wstring &targetDir) {
         const std::wstring to = targetDir + L"\\" + component;
         if (GetFileAttributesW(from.c_str()) == INVALID_FILE_ATTRIBUTES)
             return fail(std::wstring(L"缺少组件：") + component);
-        if (!CopyFileW(from.c_str(), to.c_str(), FALSE))
-            return fail(WithError(std::wstring(L"无法复制 ") + component, GetLastError()));
+        e = CopyComponent(from, to);
+        if (e != ERROR_SUCCESS) return fail(WithError(std::wstring(L"无法复制 ") + component, e));
     }
     for (const wchar_t *retired : kRetired) RemoveFileOrQueue(targetDir + L"\\" + retired);
     e = SceneReadAccess(targetDir,true);
