@@ -14,6 +14,8 @@ export interface Monitor {
 export interface Environment {
   on: boolean;         // AnimeLogon is turned on (service and Windows' lock screen off)
   installed: boolean;
+  // Installed without being switched on: the page is its setup wizard until it is (setup/SetupPage.tsx).
+  setupPending: boolean;
   // Other programs that draw the logon screen; switching AnimeLogon on switches them off.
   others: { name: string; on: boolean }[];
   version: string;     // this program's version, as its version resource gives it

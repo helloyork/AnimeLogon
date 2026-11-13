@@ -1,0 +1,12 @@
+/* The setup wizard (src/setup/SetupPage.tsx): a settings-like column, what switching on changes in
+   one card, and the step's button at the foot, on the right as a wizard's next button is. */
+.setup .pagehead .actions { align-items: center; gap: var(--s3); }
+.setup .pagehead .actions .t-cap { margin: 0; }
+.setup .pagehead .select { width: 180px; }
+.setup-intro { margin: 0 0 var(--s7); color: var(--text-2); }
+.setup-changes { margin: 0; padding: var(--s2) var(--s4) var(--s2) var(--s8); }
+.setup-changes li { padding: var(--s2) 0; }
+.setup-changes li + li { border-top: 1px solid var(--border); }
+.setup-foot { display: flex; align-items: center; gap: var(--s5); margin-top: var(--s7); }
+.setup-foot .t-cap { flex: 1; margin: 0; }
+.setup-foot .btn { flex: none; margin-left: auto; }

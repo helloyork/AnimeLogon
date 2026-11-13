@@ -51,6 +51,10 @@ std::vector<Blocker> CheckBeforeInstall(const std::wstring &targetDir);
 struct InstallOptions {
     bool desktopShortcut = false;
     std::wstring language;  // written as the machine's language; empty leaves it as it is
+    // Leaves switching on to the person, in the settings app (machine::SetupPending): Windows is
+    // not touched and no other program is switched off. A new install is marked so the settings
+    // app opens on its setup wizard; an update leaves AnimeLogon on or off as it was.
+    bool setupInApp = false;
     Progress progress;
 };
 
@@ -62,7 +66,8 @@ struct InstallOptions {
 // of earlier versions), bakes the background, writes default settings (the default theme) unless
 // settings.ini already names a theme, registers the uninstall entry, installs the service, switches
 // off other programs that draw the logon screen (others.h) and only then applies the Windows
-// lock-screen changes; a failure there undoes them. Ends with the shortcuts, the Run entry that
+// lock-screen changes; a failure there undoes them (with `setupInApp`, neither of those last two:
+// see InstallOptions). Ends with the shortcuts, the Run entry that
 // shows the icon at sign-in and the icon itself for whoever is signed in here (needs COM), and says
 // when the settings app will not find the WebView2 runtime.
 Report Install(const std::wstring &targetDir, const InstallOptions &options = {});

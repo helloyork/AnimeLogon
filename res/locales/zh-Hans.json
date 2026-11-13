@@ -121,6 +121,11 @@
   "filter.themes": "主题包 (*.altheme)",
   "filter.videos": "视频",
 
+  "firstrun.changes": "启用后",
+  "firstrun.done.start": "开始使用",
+  "firstrun.done.title": "AnimeLogon 已启用",
+  "firstrun.title": "欢迎使用 AnimeLogon",
+  "firstrun.until": "启用之前，AnimeLogon 不会改动锁屏和登录界面。关闭窗口后，下次打开会回到这一步。",
   "font.default": "默认（Segoe UI Variable）",
   "font.detail": "仅列出为所有用户安装的字体。",
   "font.search": "搜索字体",
@@ -172,6 +177,7 @@
   "inspector.y.detail": "组件中心到屏幕上边缘的距离。",
 
   "install.done": "AnimeLogon 已安装。按 Win + L 锁定屏幕即可查看，或从「开始」菜单打开 AnimeLogon 导入视频或图片。",
+  "install.done_setup_in_app": "AnimeLogon 已安装，尚未启用。打开 AnimeLogon，按提示启用。",
   "install.error.background": "无法写入登录背景",
   "install.error.copy": "无法写入 {name}",
   "install.error.data": "无法设置数据文件夹的权限",

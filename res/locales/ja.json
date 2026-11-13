@@ -121,6 +121,11 @@
   "filter.themes": "テーマ パッケージ (*.altheme)",
   "filter.videos": "動画",
 
+  "firstrun.changes": "有効にすると",
+  "firstrun.done.start": "使い始める",
+  "firstrun.done.title": "AnimeLogon を有効にしました",
+  "firstrun.title": "AnimeLogon へようこそ",
+  "firstrun.until": "有効にするまで、AnimeLogon はロック画面とサインイン画面を変更しません。ウィンドウを閉じた場合は、次に開いたときにこの手順に戻ります。",
   "font.default": "既定 (Segoe UI Variable)",
   "font.detail": "すべてのユーザー用にインストールされたフォントのみが表示されます。",
   "font.search": "フォントの検索",
@@ -172,6 +177,7 @@
   "inspector.y.detail": "画面の上端からコンポーネントの中心までの距離です。",
 
   "install.done": "AnimeLogon をインストールしました。Win + L キーを押すと表示されます。スタート メニューから AnimeLogon を開いて、動画や画像を取り込むこともできます。",
+  "install.done_setup_in_app": "AnimeLogon をインストールしましたが、まだ有効になっていません。AnimeLogon を開き、手順に従って有効にしてください。",
   "install.error.background": "サインイン画面の背景を書き込めませんでした",
   "install.error.copy": "{name} を書き込めませんでした",
   "install.error.data": "データ フォルダーのアクセス許可を設定できませんでした",
