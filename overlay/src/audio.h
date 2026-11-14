@@ -36,6 +36,11 @@ public:
 
     // Seconds of the video track played since it started (its own clock), if playing.
     bool TrackClock(double *seconds) const;
+    // What the video track is playing now: its last count samples, mixed to one channel and as
+    // loud as they reach the device, and their rate. False when no track is playing. Before anybody
+    // has signed in, Windows lets this sound through to the speakers but hands a loopback only
+    // silence, so the spectrum reads it from here (overlay.cpp).
+    bool Recent(std::vector<float> *mono, size_t count, float *rate);
 
     // Called every frame: finishes opening, feeds buffers, applies fades.
     void Tick();

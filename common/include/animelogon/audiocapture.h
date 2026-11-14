@@ -7,8 +7,12 @@
 // memory only; nothing is recorded or written. While the device plays nothing Windows hands over
 // no samples at all, and the thread counts that time as silence.
 //
-// On the logon screen while nobody is signed in, Windows hands a loopback only silence, however
-// loud the device plays; on a signed-in person's locked screen it hands over what is playing.
+// On the logon screen while nobody has signed in since the machine started, Windows hands a loopback
+// only silence, however loud the device plays; on a signed-in person's locked screen it hands over
+// what is playing. Giving the loopback the SoundEffects category -- the one that lets the logon
+// screen's own sound through then -- is no way round it: a loopback takes no category but Other
+// (Initialize fails with E_INVALIDARG). The logon screen reads its own sound track instead
+// (AudioSystem::Recent).
 #pragma once
 
 #include <windows.h>

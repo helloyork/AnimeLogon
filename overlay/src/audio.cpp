@@ -127,6 +127,7 @@ struct AudioSystem::Track {
     HANDLE file = INVALID_HANDLE_VALUE;
     uint64_t dataOffset = 0, dataBytes = 0;
     uint64_t cursor = 0;  // next byte of the data chunk to queue
+    uint64_t startFrame = 0;  // the frame it started playing from
     IXAudio2SourceVoice *voice = nullptr;
     std::vector<uint8_t> buffers[kBuffers];
     int nextBuffer = 0;
@@ -307,7 +308,8 @@ bool AudioSystem::PlayVideoTrack(const std::wstring &wavPath, double position, f
     const uint64_t frames = t->dataBytes / kFrameBytes;
     const double loop = (double)frames / kRate;
     const double within = loop > 0 ? std::fmod(std::max(0.0, position), loop) : 0.0;
-    t->cursor = std::min<uint64_t>((uint64_t)(within * kRate), frames - 1) * kFrameBytes;
+    t->startFrame = std::min<uint64_t>((uint64_t)(within * kRate), frames - 1);
+    t->cursor = t->startFrame * kFrameBytes;
     t->startPosition = position;
     t->voice->SetVolume(0.0f);
     if (!t->Feed()) return failed(L"the file could not be read", E_FAIL);
@@ -343,6 +345,37 @@ void AudioSystem::Resume() {
         track_->voice->Start(0);
         track_->paused = false;
     }
+}
+
+bool AudioSystem::Recent(std::vector<float> *mono, size_t count, float *rate) {
+    if (!track_ || track_->stopping || track_->paused || !master_ || !count) return false;
+    Track &t = *track_;
+    XAUDIO2_VOICE_STATE st{};
+    t.voice->GetState(&st, 0);
+    const uint64_t frames = t.dataBytes / kFrameBytes;
+    if (!st.SamplesPlayed || !frames) return false;
+    count = (size_t)std::min<uint64_t>(count, frames);
+    // The count frames up to the one playing now, across the loop's seam if need be.
+    const uint64_t now = (t.startFrame + st.SamplesPlayed) % frames;
+    uint64_t at = (now + frames - count) % frames;
+    std::vector<int16_t> pcm(count * 2);
+    for (size_t done = 0; done < count;) {
+        const size_t run = (size_t)std::min<uint64_t>(count - done, frames - at);
+        LARGE_INTEGER where;
+        where.QuadPart = (LONGLONG)(t.dataOffset + at * kFrameBytes);
+        DWORD got = 0;
+        if (!SetFilePointerEx(t.file, where, nullptr, FILE_BEGIN) ||
+            !ReadFile(t.file, pcm.data() + done * 2, (DWORD)(run * kFrameBytes), &got, nullptr) || got != run * kFrameBytes)
+            return false;
+        done += run;
+        at = (at + run) % frames;
+    }
+    // As loud as it reaches the device: its fade, its volume and the output's.
+    const float scale = t.gain * (float)settings_.videoTrack.volume / 100.0f * (float)settings_.volume / 100.0f / 65536.0f;
+    mono->resize(count);
+    for (size_t i = 0; i < count; ++i) (*mono)[i] = ((float)pcm[i * 2] + (float)pcm[i * 2 + 1]) * scale;
+    *rate = (float)kRate;
+    return true;
 }
 
 bool AudioSystem::TrackClock(double *seconds) const {

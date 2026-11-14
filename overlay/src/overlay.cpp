@@ -622,7 +622,8 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
     animelogon::AudioCapture capture;
     animelogon::spectrum::Analyzer analyzer;
     animelogon::spectrum::Frame heard;
-    std::vector<float> samples;
+    std::vector<float> samples, ownSound;
+    bool readingTrack = false;  // said once in the log
     if (listening) capture.Start(AudioSystem::ListeningDevice);
     const double refresh = RefreshSeconds();
     if (!opt.windowed && !done) {
@@ -795,9 +796,27 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
         // is open they hear silence. Drawn again only while their bands move.
         bool listened = false;
         if (listening && draw && !emergency) {
-            float rate = 0.0f;
-            if (capture.Latest(&samples, &rate)) analyzer.Run(samples.data(), samples.size(), rate, now / 1000.0, &heard);
-            else heard = {{}, 0.0f, false, now / 1000.0};
+            float rate = 0.0f, ownRate = 0.0f;
+            const bool device = capture.Latest(&samples, &rate);
+            // Before anybody has signed in since the machine started, Windows lets the logon screen's
+            // own sound track through to the speakers but hands a listener only silence. When the
+            // device gives much less than the track plays, the spectrum reads the track itself.
+            auto loudness = [](const std::vector<float> &v) {
+                double sum = 0.0;
+                for (float x : v) sum += (double)x * x;
+                return v.empty() ? 0.0 : sum / (double)v.size();
+            };
+            const bool own = audio.Recent(&ownSound, animelogon::spectrum::Analyzer::SizeFor(48000.0f), &ownRate) &&
+                             (!device || loudness(samples) < 0.25 * loudness(ownSound));
+            if (own) {
+                if (!readingTrack) ALOG(L"spectrum: the device gives a listener less than the sound track plays -- reading the track itself");
+                readingTrack = true;
+                analyzer.Run(ownSound.data(), ownSound.size(), ownRate, now / 1000.0, &heard);
+            } else if (device) {
+                analyzer.Run(samples.data(), samples.size(), rate, now / 1000.0, &heard);
+            } else {
+                heard = {{}, 0.0f, false, now / 1000.0};
+            }
             layer.SetAudio(heard);
             listened = layer.Moving();
         }
