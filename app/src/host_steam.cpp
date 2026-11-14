@@ -64,6 +64,17 @@ json::Value Failure(const wchar_t *error) {
     return v;
 }
 
+// The age ratings the page asks to see, as the helper names them; without one it shows Everyone only.
+void Ratings(json::Writer &w, const json::Value &list) {
+    std::vector<std::wstring> names;
+    for (const json::Value &r : list.Items())
+        if (steam_workshop::IsRating(r.Str()) && std::find(names.begin(), names.end(), r.Str()) == names.end()) names.push_back(r.Str());
+    if (names.empty()) return;
+    w.Key(L"ratings").BeginArray();
+    for (const std::wstring &name : names) w.String(name);
+    w.EndArray();
+}
+
 // Tags as the page sends them: a few short names, which Steam matches as they are.
 void Tags(json::Writer &w, const wchar_t *key, const json::Value &list) {
     if (!list.IsArray()) return;
@@ -143,7 +154,7 @@ bool Host::OnSteamMessage(const std::wstring &op, const json::Value &m) {
             Tags(w, L"requiredTags", m[L"requiredTags"]);
             Tags(w, L"excludedTags", m[L"excludedTags"]);
             w.Member(L"matchAnyTag", m[L"matchAnyTag"].Bool());
-            w.Member(L"includeMature", m[L"includeMature"].Bool());
+            Ratings(w, m[L"ratings"]);
             w.Member(L"page", (int)std::clamp(m[L"page"].Num(1), 1.0, 100000.0));
             w.Member(L"perPage", (int)std::clamp(m[L"perPage"].Num(50), 1.0, 50.0));
         });
@@ -399,7 +410,9 @@ void Host::SendSteamItems() {
             w.Key(L"progress").BeginObject().Member(L"done", d->second.first).Member(L"total", d->second.second).EndObject();
         w.Key(L"descriptors").BeginArray();
         for (const std::wstring &d : s.item.descriptors) w.String(d);
-        w.EndArray().EndObject();
+        w.EndArray();
+        w.Member(L"rating", s.item.rating);
+        w.EndObject();
     }
     w.EndArray().EndObject();
     Send(w);

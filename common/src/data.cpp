@@ -208,6 +208,7 @@ const wchar_t *LabelOf(Source source) {
     case Source::Battery: return L"电量";
     case Source::Media: return L"正在播放";
     case Source::Until: return L"倒计时";
+    case Source::Audio: return L"音频";
     }
     return L"";
 }

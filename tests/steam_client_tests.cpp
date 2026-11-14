@@ -94,8 +94,8 @@ TEST(SteamClientMatchesAnswersThatComeOutOfOrder) {
     CHECK(WriteText(dir + L"\\upload\\theme.altheme", "package"));
     CHECK(WriteText(dir + L"\\fixture.json",
                     R"({"running":true,"uploadMs":900,"downloadMs":300,"nextItemId":"4000000000","items":[
-                       {"id":"3100000001","title":"Night","tags":["Video"],"subscriptions":5,"fileSize":10},
-                       {"id":"3100000002","title":"Library","tags":["Picture"],"subscriptions":9,"fileSize":20}]})"));
+                       {"id":"3100000001","title":"Night","tags":["Video","Everyone"],"subscriptions":5,"fileSize":10},
+                       {"id":"3100000002","title":"Library","tags":["Picture","Everyone"],"subscriptions":9,"fileSize":20}]})"));
     // The helper takes the environment the settings app runs in.
     SetEnvironmentVariableW(L"ANIMELOGON_FAKE_STEAM", (dir + L"\\fixture.json").c_str());
     HANDLE woken = CreateEventW(nullptr, FALSE, FALSE, nullptr);

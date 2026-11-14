@@ -3,8 +3,9 @@
 // (elements and their attributes) plus settings the person can adjust; the settings' values
 // come from a theme and from settings.ini. Nothing in a component computes: an attribute is either a literal, or "$id"
 // for the value of one of its settings, and text may name data such as {time} or
-// {battery.percent} (data.h). A bar shows a fraction such as {media.progress}, and a panel,
-// line, text or bar may be drawn only `when` a condition on the data holds. Beyond the
+// {battery.percent} (data.h). A bar shows a fraction such as {media.progress}, a spectrum the
+// sound the output device plays (spectrum.h), and a panel, line, text, bar or spectrum may be
+// drawn only `when` a condition on the data holds. Beyond the
 // component's own settings, any attribute that shapes how an element looks can be adjusted by
 // hand, element by element; those values come from the same places.
 //
@@ -65,7 +66,8 @@ bool IsSettingId(const std::wstring &id);
 // --- adjusting one attribute of one element ----------------------------------------------
 //
 // Elements are named by where they are: p1 is the first panel, p1.l2.t1 the first text on its
-// second line, p1.l2.r1 the first bar on it, p1.s1 its first shadow, p1.b its backdrop. An adjustment is stored under the
+// second line, p1.l2.r1 the first bar on it, p1.l2.a1 the first spectrum on it, p1.s1 its first
+// shadow, p1.b its backdrop. An adjustment is stored under the
 // element's name and the attribute's, as in p1.l1.t1.weight, and wins over the skin's own
 // value for that attribute.
 
@@ -109,9 +111,40 @@ enum class Case { None, Upper, Lower };
 // rounded corners around it.
 enum class Shape { Glow, Plate };
 
-// A text, or a bar: what a line holds, in order.
+// How a spectrum draws its bands: as bars, as a line through their tops, or as the area under
+// that line.
+enum class Mode { Bars, Line, Area };
+// Which way the bands reach from where they start: up from the bottom, down from the top, or
+// both ways from the middle.
+enum class Direction { Up, Down, Both };
+// Where the bass is: at the left end, at the right, or in the middle with the treble at both ends.
+enum class Bass { Left, Right, Middle };
+// How a spectrum's colour goes from `color` to `end-color`: not at all, from left to right, or
+// from where the bands start to where they reach.
+enum class Gradient { None, Horizontal, Vertical };
+
+// A <spectrum>'s own attributes. Its length, corner radius, colour, opacity and the space before
+// it are a Text's, as a bar's are.
+struct Spectrum {
+    int bands = 64;
+    float low = 40.0f, high = 16000.0f;  // Hz
+    float sensitivity = 1.0f, smoothing = 0.5f;
+    Mode mode = Mode::Bars;
+    Direction direction = Direction::Up;
+    Bass bass = Bass::Left;
+    float height = 1.0f;   // em, as far as a band reaches
+    float gap = 0.35f;     // between bars, as a share of each band's part of the length
+    float floor = 0.05f;   // a band at rest, as a share of the height
+    float stroke = 0.06f;  // em: the width of a line
+    uint32_t endColor = 0xFFFFFFFF;
+    Gradient gradient = Gradient::None;
+    float idleOpacity = 1.0f;  // while nothing is heard, times the opacity
+    float peak = 0.0f;         // the opacity of a mark held above each bar, times the opacity
+};
+
+// A text, a bar or a spectrum: what a line holds, in order.
 struct Text {
-    std::wstring name;   // t1, r1 ...: where it is among the line's texts or its bars
+    std::wstring name;   // t1, r1, a1 ...: where it is among the line's texts, bars or spectra
     std::optional<data::Condition> when;
     bool shown = true;   // false: left out entirely, as if the line did not hold it
     std::wstring value;  // may name data: {time}, {date} ...; a bar's is one fraction
@@ -133,6 +166,9 @@ struct Text {
     float radius = 0.5f;                     // of the thickness: 0.5 rounds the ends fully
     uint32_t track = 0xFFFFFFFF;             // the part not yet filled
     float trackOpacity = 0.25f;
+
+    bool spectrum = false;  // a spectrum: `audio`, and length, radius, color, opacity and space
+    Spectrum audio;
 };
 
 struct Line {
@@ -173,6 +209,8 @@ struct Resolved {
 };
 
 Resolved Resolve(const Skin &skin, const Values &values);
+// Whether a panel holds a spectrum, so the logon screen has to listen to its output device.
+bool Listens(const Resolved &skin);
 
 // The data a text may name.
 bool IsDataName(const std::wstring &name);

@@ -65,6 +65,23 @@ void ComponentLayer::SetData(const animelogon::data::Snapshot &snapshot) {
     for (auto &view : views_) view->SetData(snapshot);
 }
 
+void ComponentLayer::SetAudio(const animelogon::spectrum::Frame &frame) {
+    for (auto &view : views_)
+        if (view->Listens()) view->SetAudio(frame);
+}
+
+bool ComponentLayer::Listens() const {
+    for (const auto &view : views_)
+        if (view->Listens()) return true;
+    return false;
+}
+
+bool ComponentLayer::Moving() const {
+    for (const auto &view : views_)
+        if (view->Moving()) return true;
+    return false;
+}
+
 bool ComponentLayer::Tick() {
     bool changed = false;
     for (auto &view : views_) changed = view->Tick() || changed;

@@ -11,6 +11,7 @@
 
 #include "animelogon/bitmap.h"
 #include "animelogon/components.h"
+#include "animelogon/package.h"
 #include "animelogon/paths.h"
 #include "animelogon/secure.h"
 #include "animelogon/skin.h"
@@ -201,15 +202,68 @@ TEST(WorkshopItemsComeFromTheHelpersSubscribedAnswer) {
     CHECK(json::Parse(LR"({"id":5,"ok":true,"details":true,"items":[
         {"id":"3100000001","state":{"subscribed":true,"installed":true,"needsUpdate":false,"downloading":false,"downloadPending":false},
          "folder":"D:\\Steam\\3100000001","sizeOnDisk":182000000,"timeStamp":1762000000,"title":"Night","timeUpdated":1762000000,
-         "preview":"https://images.steamusercontent.com/ugc/1/","descriptors":["violenceGore"]},
-        {"id":"3100000002","state":{"subscribed":true,"installed":false,"needsUpdate":false,"downloading":false,"downloadPending":true}},
+         "preview":"https://images.steamusercontent.com/ugc/1/","descriptors":["violenceGore"],"rating":"Mature"},
+        {"id":"3100000002","state":{"subscribed":true,"installed":false,"needsUpdate":false,"downloading":false,"downloadPending":true},
+         "rating":"Adult"},
         {"id":"not a number","state":{}}]})", &answer));
     const std::vector<sw::Item> items = sw::FromSubscribed(answer);
     CHECK(items.size() == 2);
     CHECK(items[0].id == L"3100000001" && items[0].installed && !items[0].downloading && items[0].folder == L"D:\\Steam\\3100000001");
     CHECK(items[0].title == L"Night" && items[0].timeUpdated == 1762000000 && items[0].sizeOnDisk == 182000000);
-    CHECK(items[0].descriptors.size() == 1 && items[0].descriptors[0] == L"violenceGore");
+    CHECK(items[0].descriptors.size() == 1 && items[0].descriptors[0] == L"violenceGore" && items[0].rating == L"Mature");
     CHECK(!items[1].installed && items[1].downloading && items[1].title.empty() && items[1].timeUpdated == 0);
+    CHECK(items[1].rating.empty());  // not one of the Workshop's ratings
+}
+
+TEST(PublishedTagsFollowTheThemeAndTheAuthorsRating) {
+    using Tags = std::vector<std::wstring>;
+    sw::TagFacts f;
+    f.video = true;
+    f.width = 3840;
+    f.height = 2160;
+    f.sound = true;
+    f.rating = L"Everyone";
+    CHECK(sw::TagsFor(f) == (Tags{L"Video", L"4K", L"Sound", L"Everyone"}));
+    // By height: 1440 is 1440p, just under is 1080p, under 1080 none.
+    f = {};
+    f.width = 2560;
+    f.height = 1440;
+    f.components = true;
+    f.customComponents = true;
+    f.rating = L"Questionable";
+    CHECK(sw::TagsFor(f) == (Tags{L"Picture", L"1440p", L"Components", L"Custom components", L"Questionable"}));
+    f.height = 1439;
+    CHECK(sw::TagsFor(f)[1] == L"1080p");
+    f.width = 1280;
+    f.height = 720;
+    f.components = f.customComponents = false;
+    f.rating = L"Mature";
+    CHECK(sw::TagsFor(f) == (Tags{L"Picture", L"Mature"}));
+    // Ultrawide from 2.2 times as wide as high.
+    f.width = 2376;
+    f.height = 1080;
+    CHECK(sw::TagsFor(f) == (Tags{L"Picture", L"1080p", L"Ultrawide", L"Mature"}));
+    f.width = 2375;
+    CHECK(sw::TagsFor(f) == (Tags{L"Picture", L"1080p", L"Mature"}));
+    // A rating that is not one of the Workshop's is left out, for the dialog to ask for.
+    f.rating = L"mature";
+    CHECK(sw::TagsFor(f) == (Tags{L"Picture", L"1080p"}));
+    CHECK(sw::IsRating(L"Everyone") && sw::IsRating(L"Questionable") && !sw::IsRating(L"") && !sw::IsRating(L"Adult"));
+}
+
+TEST(APackageCarriesComponentsOfItsOwnOnlyWithComponentEntries) {
+    auto entries = [](bool own) {
+        std::vector<package::Item> items{{"theme.xml", L"", std::vector<uint8_t>{'<', 't', '/', '>'}}};
+        if (own) items.push_back({"components/mine.xml", L"", std::vector<uint8_t>{'<', 'c', '/', '>'}});
+        std::vector<uint8_t> bytes;
+        std::wstring why;
+        CHECK(package::WriteToMemory(items, &bytes, &why));
+        package::Reader reader;
+        CHECK(reader.OpenBytes(std::move(bytes), &why));
+        return reader.Entries();
+    };
+    CHECK(sw::CarriesOwnComponents(entries(true)));
+    CHECK(!sw::CarriesOwnComponents(entries(false)));
 }
 
 TEST(WorkshopItemStateFollowsSteamTheFolderAndWorkshopIni) {

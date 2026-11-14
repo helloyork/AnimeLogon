@@ -61,6 +61,16 @@ export interface View {
 export function viewFor(key: string, step: number): View {
   const attr = key.split('.').pop() || '', panel = /^p\d+\.[^.]+$/.test(key);
   const plain = (unit: string, digits: number): View => ({ factor: 1, digits, unit: () => unit });
+  // A spectrum's (p1.l1.a1.gap): shares of something in percent, frequencies in hertz.
+  if (/\.a\d+\.[^.]+$/.test(key)) {
+    switch (attr) {
+      case 'gap': case 'floor': case 'idle-opacity': return { factor: 100, digits: 0, unit: () => '%' };
+      case 'peak': return { factor: 100, digits: 0, unit: v => (!v ? t('unit.none') : '%') };
+      case 'low': case 'high': return plain('Hz', 0);
+      case 'sensitivity': return plain(t('unit.times'), 2);
+      case 'stroke': return plain('em', 3);
+    }
+  }
   switch (attr) {
     case 'offset-x': return plain(t('unit.screen_width'), 1);
     case 'offset-y': return plain(t('unit.screen_height'), 1);

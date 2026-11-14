@@ -11,6 +11,7 @@ import {
   ChevronRight12Regular,
   Clock16Regular,
   CopyArrowRight16Regular,
+  DeviceEq16Regular,
   Image16Regular,
   MoreHorizontal16Regular,
   MusicNote216Regular,
@@ -87,6 +88,7 @@ const BUILT_IN_ICONS: Record<string, ReactNode> = {
   battery: <Battery1016Regular />,
   media: <MusicNote216Regular />,
   countdown: <Timer16Regular />,
+  spectrum: <DeviceEq16Regular />,
 };
 
 /* --- the panel --- */
@@ -289,7 +291,7 @@ function InstanceView({ inst }: { inst: Instance }) {
               </div>
             </Section>
           )}
-          {single && (
+          {single && holdsText(inst, 'p1') && (
             <Section value="layout" title={tr('inspector.layout')} sections={sections}>
               <LayoutFields inst={inst} pk="p1" />
             </Section>
@@ -355,7 +357,7 @@ function PartView({ inst, partKey }: { inst: Instance | SceneControls; partKey: 
             {inst.id === 'wallpaper' && <PanelField instId={inst.id} pk={pt.key} attr="align" />}
           </div>
         </Section>
-        {inst.id !== 'wallpaper' && (
+        {inst.id !== 'wallpaper' && holdsText(inst as Instance, pt.key) && (
           <Section value="layout" title={tr('inspector.layout')} sections={sections}>
             <LayoutFields inst={inst as Instance} pk={pt.key} />
           </Section>
@@ -398,6 +400,9 @@ function PanelField({ instId, pk, attr }: { instId: string; pk: string; attr: st
 // in it, and how far each line is from the one above. Counting the marker in centres the date
 // under the whole first line, and the stage's snap lines then take the panel's full width. The
 // same values are also on each text's own page.
+// Whether a panel's lines hold any text: one that holds only a spectrum has nothing to line up.
+const holdsText = (inst: Instance, pk: string) => (inst.parts || []).some(p => p.key.startsWith(pk + '.l') && /\.t\d+$/.test(p.key));
+
 function LayoutFields({ inst, pk }: { inst: Instance; pk: string }) {
   const draft = useDraft(inst.id);
   const rows: { label: string; a: Part['adjustments'][number] }[] = [];

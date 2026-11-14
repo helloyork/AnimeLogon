@@ -1,7 +1,8 @@
 // Draws a skin with Direct2D. Each panel's text is laid out when its words change -- once a
 // minute for a clock, when the data changes, and every second for a playback position -- into a
 // cached bitmap; drawing composites the bitmaps with their shadows. Bars are laid out with the
-// text, as inline objects.
+// text, as inline objects. A spectrum takes its room in the line the same way, but its bands move
+// with the sound, so they are drawn again every frame, into a second bitmap beside the text's.
 #pragma once
 
 #include <windows.h>
@@ -9,11 +10,13 @@
 #include <dwrite.h>
 #include <wrl/client.h>
 
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "animelogon/clock.h"
 #include "animelogon/skin.h"
+#include "animelogon/spectrum.h"
 
 namespace animelogon {
 
@@ -27,6 +30,16 @@ public:
     void Set(const skin::Resolved &skin, const ClockStyle &style, const RegionalFormat &format);
     // The battery and what is playing, for the next Tick.
     void SetData(const data::Snapshot &snapshot);
+
+    // What the output device is playing, for the spectra: once a frame on the logon screen. Each
+    // spectrum's bands follow it as quickly as its smoothing allows. Until the first frame they
+    // lie at rest.
+    void SetAudio(const spectrum::Frame &frame);
+    // Every spectrum straight at `frame`'s levels, as previews show them.
+    void SettleAudio(const spectrum::Frame &frame);
+    // Whether a panel holds a spectrum; whether one is still moving, so must be drawn again.
+    bool Listens() const { return !spectra_.empty(); }
+    bool Moving() const;
 
     // Reads the time; returns true when the words changed. `utc` is the same moment as UTC
     // FILETIME ticks, for playback positions; 0 reads the clock.
@@ -73,6 +86,16 @@ private:
         bool plate = false;
         D2D1_ELLIPSE backdropArea{};
         D2D1_ROUNDED_RECT plateArea{};
+        // The spectra, where they are in `text`'s pixels, and `live`, a bitmap of its size that
+        // they are drawn into each frame.
+        struct Spectrum {
+            size_t audio = 0;        // in spectra_
+            size_t line = 0, text = 0;
+            D2D1_RECT_F box{};
+            Microsoft::WRL::ComPtr<ID2D1Brush> fill, peak;
+        };
+        std::vector<Spectrum> spectra;
+        Microsoft::WRL::ComPtr<ID2D1Bitmap1> live;
     };
     struct Slot {
         UINT width = 0, height = 0;
@@ -90,6 +113,18 @@ private:
             DWRITE_TEXT_RANGE range;
         };
         std::vector<Run> runs;
+        // Where each spectrum's room was drawn, once the line has been: its top left, in the
+        // target's pixels.
+        struct Room {
+            size_t text;
+            std::shared_ptr<D2D1_POINT_2F> at;
+        };
+        std::vector<Room> rooms;
+    };
+    // A spectrum in the skin, and its bands as they move.
+    struct Audio {
+        size_t panel = 0, line = 0, text = 0;
+        spectrum::Bands bands;
     };
 
     bool Build(Built &built, size_t panel, UINT width, UINT height);
@@ -102,6 +137,11 @@ private:
     // `words`, cut short with an ellipsis where they are wider than the text's `max`.
     std::wstring Fit(const skin::Text &text, const std::wstring &words, float px) const;
     void Figures(IDWriteTextLayout *layout, const skin::Text &text, DWRITE_TEXT_RANGE range) const;
+    // What a spectrum asks of each frame: its own bands, or for one with the bass in the middle,
+    // each band shown twice.
+    static spectrum::Shape ShapeOf(const skin::Text &text);
+    bool Brushes(Built::Spectrum &place, const skin::Text &text);
+    void DrawSpectrum(const Built::Spectrum &place, const skin::Text &text, float px);
 
     skin::Resolved skin_;
     ClockStyle style_;
@@ -114,8 +154,11 @@ private:
     data::Snapshot data_;
     unsigned dataVersion_ = 0, dataShown_ = 0;
     bool everySecond_ = false;  // a text or bar follows a playback position
+    std::vector<Audio> spectra_;
 
     Microsoft::WRL::ComPtr<ID2D1DeviceContext> dc_;
+    Microsoft::WRL::ComPtr<ID2D1Factory> factory_;
+    Microsoft::WRL::ComPtr<ID2D1StrokeStyle> round_;  // round caps and joins, for lines
     Microsoft::WRL::ComPtr<IDWriteFactory> write_;
     std::vector<Microsoft::WRL::ComPtr<ID2D1Effect>> shadows_;
     std::vector<Slot> slots_;

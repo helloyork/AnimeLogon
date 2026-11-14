@@ -64,8 +64,9 @@ bool ParseDate(const std::wstring &text, Date *out);
 // Text: words for a text ({time}, {media.title}). Fraction: 0..1 for a bar. State: one of a few
 // words, only for conditions (battery.state).
 enum class Kind { Text, Fraction, State };
-// Which source a name belongs to, so the settings app can say what a component shows.
-enum class Source { Clock, Battery, Media, Until };
+// Which source a name belongs to, so the settings app can say what a component shows. Audio has no
+// names: it is what a <spectrum> shows, the sound the output device plays (spectrum.h).
+enum class Source { Clock, Battery, Media, Until, Audio };
 
 struct Variable {
     const wchar_t *name;

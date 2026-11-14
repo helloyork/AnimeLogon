@@ -94,6 +94,72 @@ private:
     float lead_, length_, height_, axis_, fraction_;
 };
 
+// A spectrum's room in a line. DirectWrite lays it out like a character -- as wide as the spectrum
+// and as tall, standing on the line's baseline -- and the panel's bitmap keeps it empty: the bands
+// move with the sound, so they are drawn every frame apart from the text (SkinView::Draw). Drawing
+// the line only says where the room was put. A line's stroke reaches past the room by half its
+// width, and `overhang` says so, so that the panel's bitmap is large enough for it.
+class Room : public IDWriteInlineObject {
+public:
+    Room(float lead, float width, float height, float overhang, std::shared_ptr<D2D1_POINT_2F> at)
+        : lead_(lead), width_(width), height_(height), overhang_(overhang), at_(std::move(at)) {}
+
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id, void **out) override {
+        if (id == __uuidof(IUnknown) || id == __uuidof(IDWriteInlineObject)) {
+            *out = static_cast<IDWriteInlineObject *>(this);
+            AddRef();
+            return S_OK;
+        }
+        *out = nullptr;
+        return E_NOINTERFACE;
+    }
+    ULONG STDMETHODCALLTYPE AddRef() override { return ++refs_; }
+    ULONG STDMETHODCALLTYPE Release() override {
+        const ULONG left = --refs_;
+        if (!left) delete this;
+        return left;
+    }
+
+    HRESULT STDMETHODCALLTYPE Draw(void *, IDWriteTextRenderer *, FLOAT x, FLOAT y, BOOL, BOOL, IUnknown *) override {
+        *at_ = D2D1::Point2F(x + lead_, y);
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE GetMetrics(DWRITE_INLINE_OBJECT_METRICS *m) override {
+        *m = {lead_ + width_, height_, height_, FALSE};
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE GetOverhangMetrics(DWRITE_OVERHANG_METRICS *o) override {
+        *o = {overhang_, overhang_, overhang_, overhang_};
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE GetBreakConditions(DWRITE_BREAK_CONDITION *before, DWRITE_BREAK_CONDITION *after) override {
+        *before = *after = DWRITE_BREAK_CONDITION_NEUTRAL;
+        return S_OK;
+    }
+
+private:
+    virtual ~Room() = default;
+    std::atomic<ULONG> refs_{1};
+    float lead_, width_, height_, overhang_;
+    std::shared_ptr<D2D1_POINT_2F> at_;
+};
+
+// Bezier segments through `points`, from the first (where the figure already is) to the last: a
+// Catmull-Rom curve, kept between `top` and `bottom` so that it never swings past the room.
+void Through(ID2D1GeometrySink *sink, const std::vector<D2D1_POINT_2F> &points, bool backwards, float top, float bottom) {
+    const size_t n = points.size();
+    auto at = [&](ptrdiff_t i) {
+        i = std::clamp<ptrdiff_t>(i, 0, (ptrdiff_t)n - 1);
+        return points[backwards ? n - 1 - (size_t)i : (size_t)i];
+    };
+    for (ptrdiff_t i = 0; i + 1 < (ptrdiff_t)n; ++i) {
+        const D2D1_POINT_2F p0 = at(i - 1), p1 = at(i), p2 = at(i + 1), p3 = at(i + 2);
+        const D2D1_POINT_2F c1 = D2D1::Point2F(p1.x + (p2.x - p0.x) / 6.0f, std::clamp(p1.y + (p2.y - p0.y) / 6.0f, top, bottom));
+        const D2D1_POINT_2F c2 = D2D1::Point2F(p2.x - (p3.x - p1.x) / 6.0f, std::clamp(p2.y - (p3.y - p1.y) / 6.0f, top, bottom));
+        sink->AddBezier(D2D1::BezierSegment(c1, c2, p2));
+    }
+}
+
 // A text that sits above or below its line's baseline (`rise`): DirectWrite has no baseline shift,
 // so the text is laid out on its own and placed in the line like a character, as a bar is. Its box
 // is the text's own, raised, so the line makes room for it; its ink is the text's ink.
@@ -159,7 +225,6 @@ private:
     float width_ = 0.0f, height_ = 0.0f, baseline_ = 0.0f;
     DWRITE_OVERHANG_METRICS ink_{};
 };
-
 // A text's words: "{media.position}" and "{media.progress}" move every second while playing.
 bool FollowsPlayback(const std::wstring &value) {
     return value.find(L"{media.position}") != std::wstring::npos || value.find(L"{media.progress}") != std::wstring::npos;
@@ -184,7 +249,7 @@ bool SkinView::Init(ID2D1Device *device) {
     if (SUCCEEDED(hr))
         hr = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
                                  reinterpret_cast<IUnknown **>(write_.GetAddressOf()));
-    for (size_t i = 0; i < kShadows && SUCCEEDED(hr); ++i) {
+    for (size_t i = 0; i < 2 * kShadows && SUCCEEDED(hr); ++i) {  // for the text, then for the spectra
         ComPtr<ID2D1Effect> shadow;
         hr = dc_->CreateEffect(CLSID_D2D1Shadow, &shadow);
         shadows_.push_back(shadow);
@@ -196,15 +261,23 @@ bool SkinView::Init(ID2D1Device *device) {
     }
     dc_->SetUnitMode(D2D1_UNIT_MODE_PIXELS);
     dc_->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
+    dc_->GetFactory(&factory_);
+    if (factory_)
+        factory_->CreateStrokeStyle(D2D1::StrokeStyleProperties(D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND,
+                                                                D2D1_CAP_STYLE_ROUND, D2D1_LINE_JOIN_ROUND),
+                                    nullptr, 0, &round_);
     return true;
 }
 
 void SkinView::Release() {
     slots_.clear();
     shadows_.clear();
+    round_.Reset();
+    factory_.Reset();
     write_.Reset();
     dc_.Reset();
     words_.clear();
+    spectra_.clear();
     version_ = 0;
 }
 
@@ -213,9 +286,15 @@ void SkinView::Set(const skin::Resolved &skin, const ClockStyle &style, const Re
     style_ = style;
     format_ = FormatFor(format, style.locale);
     everySecond_ = false;
-    for (const skin::Panel &p : skin_.panels)
-        for (const skin::Line &l : p.lines)
-            for (const skin::Text &t : l.texts) everySecond_ = everySecond_ || FollowsPlayback(t.value);
+    spectra_.clear();
+    for (size_t p = 0; p < skin_.panels.size(); ++p)
+        for (size_t l = 0; l < skin_.panels[p].lines.size(); ++l) {
+            const skin::Line &line = skin_.panels[p].lines[l];
+            for (size_t t = 0; t < line.texts.size(); ++t) {
+                everySecond_ = everySecond_ || FollowsPlayback(line.texts[t].value);
+                if (line.texts[t].spectrum) spectra_.push_back({p, l, t, {}});
+            }
+        }
     words_.clear();
     ++version_;
     Tick();
@@ -224,6 +303,26 @@ void SkinView::Set(const skin::Resolved &skin, const ClockStyle &style, const Re
 void SkinView::SetData(const data::Snapshot &snapshot) {
     data_ = snapshot;
     ++dataVersion_;
+}
+
+spectrum::Shape SkinView::ShapeOf(const skin::Text &text) {
+    const skin::Spectrum &a = text.audio;
+    const int bands = std::clamp(a.bands, 1, 256);
+    return {a.bass == skin::Bass::Middle ? (bands + 1) / 2 : bands, a.low, a.high, a.sensitivity, a.smoothing};
+}
+
+void SkinView::SetAudio(const spectrum::Frame &frame) {
+    for (Audio &a : spectra_) a.bands.Follow(frame, ShapeOf(skin_.panels[a.panel].lines[a.line].texts[a.text]));
+}
+
+void SkinView::SettleAudio(const spectrum::Frame &frame) {
+    for (Audio &a : spectra_) a.bands.Settle(frame, ShapeOf(skin_.panels[a.panel].lines[a.line].texts[a.text]));
+}
+
+bool SkinView::Moving() const {
+    for (const Audio &a : spectra_)
+        if (a.bands.Moving()) return true;
+    return false;
 }
 
 bool SkinView::Tick() {
@@ -260,7 +359,8 @@ bool SkinView::Tick(const SYSTEMTIME &now, uint64_t utc) {
                 std::wstring w;
                 if (lineShown && t.shown && holds(t.when)) {
                     double f = 0.0;
-                    if (!t.bar) w = Cased(FillText(t.value, format_, style_, now, &context), t.textCase, format_.locale);
+                    if (t.spectrum) w = L"~";  // shown; what it shows is drawn every frame
+                    else if (!t.bar) w = Cased(FillText(t.value, format_, style_, now, &context), t.textCase, format_.locale);
                     else if (t.value.size() > 2 && data::FractionOf(t.value.substr(1, t.value.size() - 2), context, &f))
                         w = std::to_wstring((int)std::lround(f * 10000.0));  // in ten-thousandths
                 }
@@ -345,8 +445,8 @@ bool SkinView::Lay(Line &line, const skin::Panel &, const skin::Line &source,
     // line, like a bar, by one character.
     std::vector<std::wstring> words(given.size());
     for (size_t i = 0; i < source.texts.size() && i < given.size(); ++i)
-        words[i] = source.texts[i].bar ? given[i] : Fit(source.texts[i], given[i], px);
-    auto apart = [](const skin::Text &t) { return t.bar || t.rise != 0.0f; };
+        words[i] = source.texts[i].bar || source.texts[i].spectrum ? given[i] : Fit(source.texts[i], given[i], px);
+    auto apart = [](const skin::Text &t) { return t.bar || t.spectrum || t.rise != 0.0f; };
     std::wstring s;
     std::vector<Run> runs;
     float largest = 0.0f;  // the largest text beside a bar, which it is centred on
@@ -355,15 +455,17 @@ bool SkinView::Lay(Line &line, const skin::Panel &, const skin::Line &source,
         const skin::Text &t = source.texts[i];
         runs.push_back({&t, (UINT32)s.size(), apart(t) ? 1u : (UINT32)words[i].size(), runs.empty() ? 0.0f : t.space * px});
         s += apart(t) ? std::wstring(1, (wchar_t)0xFFFC) : words[i];
-        if (!t.bar) largest = std::max(largest, t.size);
+        if (!t.bar && !t.spectrum) largest = std::max(largest, t.size);
     }
     line.layout.Reset();
     line.runs.clear();
+    line.rooms.clear();
     if (runs.empty()) return true;  // nothing to say on this line
     for (const Run &r : runs) line.runs.push_back({(size_t)(r.text - source.texts.data()), {r.start, r.length}});
 
-    // The layout's own font is the first text's; a bar has none.
-    const auto firstText = std::find_if(runs.begin(), runs.end(), [](const Run &r) { return !r.text->bar; });
+    // The layout's own font is the first text's; a bar or a spectrum has none.
+    const auto firstText =
+        std::find_if(runs.begin(), runs.end(), [](const Run &r) { return !r.text->bar && !r.text->spectrum; });
     const skin::Text &first = firstText != runs.end() ? *firstText->text : *runs.front().text;
     const std::wstring &locale = format_.locale;
     ComPtr<IDWriteTextFormat> format;
@@ -379,6 +481,15 @@ bool SkinView::Lay(Line &line, const skin::Panel &, const skin::Line &source,
     for (const Run &r : runs) {
         const skin::Text &t = *r.text;
         const DWRITE_TEXT_RANGE range{r.start, r.length};
+        if (t.spectrum) {
+            const float overhang = t.audio.mode == skin::Mode::Bars ? 0.0f : std::ceil(t.audio.stroke * px / 2.0f) + 1.0f;
+            auto at = std::make_shared<D2D1_POINT_2F>(D2D1::Point2F(-kUnbounded, -kUnbounded));
+            ComPtr<IDWriteInlineObject> room;
+            room.Attach(new Room(r.lead, std::max(1.0f, t.length * px), std::max(1.0f, t.audio.height * px), overhang, at));
+            line.layout->SetInlineObject(room.Get(), range);
+            line.rooms.push_back({(size_t)(r.text - source.texts.data()), std::move(at)});
+            continue;
+        }
         if (t.bar) {
             const size_t index = (size_t)(r.text - source.texts.data());
             const float fraction = std::clamp((float)std::wcstod(words[index].c_str(), nullptr) / 10000.0f, 0.0f, 1.0f);
@@ -532,6 +643,26 @@ bool SkinView::Build(Built &built, size_t index, UINT width, UINT height) {
     dc_->SetTarget(nullptr);
     if (FAILED(hr)) return false;
 
+    // The spectra's rooms, now that drawing the lines has put them somewhere, and a bitmap the
+    // size of the text's to draw their bands into each frame.
+    for (size_t i = 0; i < lines.size(); ++i)
+        for (const Line::Room &room : lines[i].rooms) {
+            if (room.at->x <= -kUnbounded) continue;  // not drawn
+            const skin::Text &t = panel.lines[i].texts[room.text];
+            Built::Spectrum place;
+            for (size_t k = 0; k < spectra_.size(); ++k)
+                if (spectra_[k].panel == index && spectra_[k].line == i && spectra_[k].text == room.text) place.audio = k;
+            place.line = i;
+            place.text = room.text;
+            place.box = D2D1::RectF(room.at->x, room.at->y, room.at->x + std::max(1.0f, t.length * px),
+                                    room.at->y + std::max(1.0f, t.audio.height * px));
+            if (Brushes(place, t)) built.spectra.push_back(std::move(place));
+        }
+    if (!built.spectra.empty() && FAILED(dc_->CreateBitmap(size, nullptr, 0, &props, &built.live))) {
+        built.spectra.clear();
+        built.live.Reset();
+    }
+
     const float anchorX = (column == 0 ? margin : column == 1 ? w / 2.0f : w - margin) + panel.offsetX / 100.0f * w;
     const float anchorY = (row == 0 ? margin : row == 1 ? h / 2.0f : h - margin) + panel.offsetY / 100.0f * h;
     const float refY = row == 0 ? top : row == 1 ? (top + lastBaseline) / 2.0f : lastBaseline;
@@ -578,6 +709,15 @@ bool SkinView::Build(Built &built, size_t index, UINT width, UINT height) {
         const Line &l = lines[i];
         if (!l.layout) continue;
         for (const Line::Run &r : l.runs) {
+            const auto place = std::find_if(built.spectra.begin(), built.spectra.end(), [&](const Built::Spectrum &s) {
+                return s.line == i && s.text == r.text;
+            });
+            if (place != built.spectra.end()) {  // its room, rather than the line's height
+                built.bounds.push_back({pk + L".l" + std::to_wstring(i + 1) + L"." + panel.lines[i].texts[r.text].name,
+                                        D2D1::RectF(built.at.x + place->box.left, built.at.y + place->box.top,
+                                                    built.at.x + place->box.right, built.at.y + place->box.bottom)});
+                continue;
+            }
             DWRITE_HIT_TEST_METRICS hit{};
             UINT32 count = 0;
             if (FAILED(l.layout->HitTestTextRange(r.range.startPosition, r.range.length, 0.0f, 0.0f, &hit, 1, &count)) ||
@@ -623,6 +763,148 @@ bool SkinView::Build(Built &built, size_t index, UINT width, UINT height) {
     return true;
 }
 
+bool SkinView::Brushes(Built::Spectrum &place, const skin::Text &text) {
+    const skin::Spectrum &a = text.audio;
+    const D2D1_RECT_F &box = place.box;
+    const D2D1_COLOR_F from = ColorOf(text.color, 1.0f), to = ColorOf(a.endColor, 1.0f);
+    // Left to right, or from where the bands start toward where they reach: up from the bottom,
+    // down from the top, or out both ways from the middle.
+    D2D1_POINT_2F start = D2D1::Point2F(box.left, box.bottom), end = D2D1::Point2F(box.left, box.top);
+    std::vector<D2D1_GRADIENT_STOP> stops{{0.0f, from}, {1.0f, to}};
+    if (a.gradient == skin::Gradient::Horizontal) {
+        start = D2D1::Point2F(box.left, box.top);
+        end = D2D1::Point2F(box.right, box.top);
+    } else if (a.direction == skin::Direction::Down) {
+        std::swap(start, end);
+    } else if (a.direction == skin::Direction::Both) {
+        stops = {{0.0f, to}, {0.5f, from}, {1.0f, to}};
+    }
+    auto make = [&](ComPtr<ID2D1Brush> *out) {
+        if (a.gradient == skin::Gradient::None) {
+            ComPtr<ID2D1SolidColorBrush> solid;
+            if (FAILED(dc_->CreateSolidColorBrush(from, &solid))) return false;
+            *out = solid;
+            return true;
+        }
+        ComPtr<ID2D1GradientStopCollection> collection;
+        ComPtr<ID2D1LinearGradientBrush> linear;
+        if (FAILED(dc_->CreateGradientStopCollection(stops.data(), (UINT32)stops.size(), &collection)) ||
+            FAILED(dc_->CreateLinearGradientBrush(D2D1::LinearGradientBrushProperties(start, end), collection.Get(), &linear)))
+            return false;
+        *out = linear;
+        return true;
+    };
+    return make(&place.fill) && make(&place.peak);
+}
+
+void SkinView::DrawSpectrum(const Built::Spectrum &place, const skin::Text &text, float px) {
+    const skin::Spectrum &a = text.audio;
+    const spectrum::Bands &bands = spectra_[place.audio].bands;
+    // While nothing is heard it fades to its idle opacity.
+    const float idle = std::clamp(a.idleOpacity, 0.0f, 1.0f);
+    const float alpha = std::clamp(text.opacity, 0.0f, 1.0f) * (idle + (1.0f - idle) * bands.presence());
+    if (alpha <= 0.0f) return;
+    const int n = std::clamp(a.bands, 1, 256);
+    const std::vector<float> &levels = bands.levels(), &peaks = bands.peaks();
+    // The band shown at position j: in order from the left, reversed with the bass at the right,
+    // and with the bass in the middle each band twice, mirrored about it.
+    auto bandAt = [&](int j) {
+        if (a.bass == skin::Bass::Right) return (size_t)(n - 1 - j);
+        if (a.bass == skin::Bass::Middle) return (size_t)(std::abs(2 * j - (n - 1)) / 2);
+        return (size_t)j;
+    };
+    // How far a band reaches, as a share of the height: its rest, and above it its level.
+    const float rest = std::clamp(a.floor, 0.0f, 1.0f);
+    auto reach = [&](const std::vector<float> &of, size_t k) {
+        return rest + (1.0f - rest) * std::clamp(k < of.size() ? of[k] : 0.0f, 0.0f, 1.0f);
+    };
+    const D2D1_RECT_F &box = place.box;
+    const float width = box.right - box.left, height = box.bottom - box.top, slot = width / (float)n;
+    const float middle = (box.top + box.bottom) / 2.0f;
+    // Where a band reaching `share` of the height spans, top to bottom.
+    auto span = [&](float share, float *top, float *bottom) {
+        const float h = share * height;
+        if (a.direction == skin::Direction::Down) *top = box.top, *bottom = box.top + h;
+        else if (a.direction == skin::Direction::Both) *top = middle - h / 2.0f, *bottom = middle + h / 2.0f;
+        else *top = box.bottom - h, *bottom = box.bottom;
+    };
+    place.fill->SetOpacity(alpha);
+
+    if (a.mode == skin::Mode::Bars) {
+        const float bar = std::max(1.0f, slot * (1.0f - std::clamp(a.gap, 0.0f, 0.95f)));
+        const float corner = std::clamp(text.radius, 0.0f, 0.5f) * bar;
+        for (int j = 0; j < n; ++j) {
+            const float x = box.left + (float)j * slot + (slot - bar) / 2.0f;
+            float top = 0.0f, bottom = 0.0f;
+            span(reach(levels, bandAt(j)), &top, &bottom);
+            const float r = std::min(corner, (bottom - top) / 2.0f);
+            dc_->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(x, top, x + bar, bottom), r, r), place.fill.Get());
+        }
+        if (a.peak <= 0.0f || !place.peak) return;
+        // A short mark just beyond each bar's highest recent reach, kept inside the room.
+        place.peak->SetOpacity(alpha * std::clamp(a.peak, 0.0f, 1.0f));
+        const float mark = std::max(1.5f, std::min(bar * 0.45f, height * 0.05f)), lift = std::max(1.0f, mark * 0.8f);
+        const float r = std::min(corner, mark / 2.0f);
+        auto draw = [&](float x, float y0) {
+            y0 = std::clamp(y0, box.top, box.bottom - mark);
+            dc_->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(x, y0, x + bar, y0 + mark), r, r), place.peak.Get());
+        };
+        for (int j = 0; j < n; ++j) {
+            const float x = box.left + (float)j * slot + (slot - bar) / 2.0f;
+            float top = 0.0f, bottom = 0.0f;
+            span(reach(peaks, bandAt(j)), &top, &bottom);
+            if (a.direction != skin::Direction::Down) draw(x, top - lift - mark);
+            if (a.direction != skin::Direction::Up) draw(x, bottom + lift);
+        }
+        return;
+    }
+
+    // A line through the bands' tops (and, both ways, their bottoms), flat to the room's ends.
+    if (!factory_) return;
+    std::vector<D2D1_POINT_2F> upper((size_t)n + 2), lower((size_t)n + 2);
+    for (int j = 0; j < n; ++j) {
+        float top = 0.0f, bottom = 0.0f;
+        span(reach(levels, bandAt(j)), &top, &bottom);
+        const float x = box.left + ((float)j + 0.5f) * slot;
+        upper[(size_t)j + 1] = D2D1::Point2F(x, a.direction == skin::Direction::Down ? bottom : top);
+        lower[(size_t)j + 1] = D2D1::Point2F(x, bottom);
+    }
+    for (std::vector<D2D1_POINT_2F> *edge : {&upper, &lower}) {
+        (*edge)[0] = D2D1::Point2F(box.left, (*edge)[1].y);
+        edge->back() = D2D1::Point2F(box.right, (*edge)[(size_t)n].y);
+    }
+    const bool both = a.direction == skin::Direction::Both, area = a.mode == skin::Mode::Area;
+    ComPtr<ID2D1PathGeometry> path;
+    ComPtr<ID2D1GeometrySink> sink;
+    if (FAILED(factory_->CreatePathGeometry(&path)) || FAILED(path->Open(&sink))) return;
+    if (area) {
+        // The area between the line and where the bands start, or between the two lines.
+        const float base = a.direction == skin::Direction::Down ? box.top : box.bottom;
+        if (both) {
+            sink->BeginFigure(upper.front(), D2D1_FIGURE_BEGIN_FILLED);
+            Through(sink.Get(), upper, false, box.top, box.bottom);
+            sink->AddLine(lower.back());
+            Through(sink.Get(), lower, true, box.top, box.bottom);
+        } else {
+            sink->BeginFigure(D2D1::Point2F(box.left, base), D2D1_FIGURE_BEGIN_FILLED);
+            sink->AddLine(upper.front());
+            Through(sink.Get(), upper, false, box.top, box.bottom);
+            sink->AddLine(D2D1::Point2F(box.right, base));
+        }
+        sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+    } else {
+        for (const std::vector<D2D1_POINT_2F> *edge : {&upper, &lower}) {
+            if (edge == &lower && !both) break;
+            sink->BeginFigure(edge->front(), D2D1_FIGURE_BEGIN_HOLLOW);
+            Through(sink.Get(), *edge, false, box.top, box.bottom);
+            sink->EndFigure(D2D1_FIGURE_END_OPEN);
+        }
+    }
+    if (FAILED(sink->Close())) return;
+    if (area) dc_->FillGeometry(path.Get(), place.fill.Get());
+    else dc_->DrawGeometry(path.Get(), place.fill.Get(), std::max(1.0f, a.stroke * px), round_.Get());
+}
+
 std::vector<SkinView::Bound> SkinView::Bounds(size_t slot) const {
     std::vector<Bound> out;
     if (slot < slots_.size())
@@ -664,6 +946,18 @@ bool SkinView::Draw(ID2D1Bitmap1 *target, UINT width, UINT height, size_t slot, 
         s.version = version_;
         s.width = width;
         s.height = height;
+    }
+    // The spectra's bands as they are now, each panel's into its own bitmap, so that the panel's
+    // shadows and its way in apply to them as to its text.
+    for (size_t i = 0; i < s.panels.size(); ++i) {
+        const Built &b = s.panels[i];
+        if (!b.live) continue;
+        dc_->SetTarget(b.live.Get());
+        dc_->BeginDraw();
+        dc_->Clear(D2D1::ColorF(0, 0, 0, 0));
+        for (const Built::Spectrum &place : b.spectra)
+            DrawSpectrum(place, skin_.panels[i].lines[place.line].texts[place.text], b.px);
+        if (FAILED(dc_->EndDraw())) ALOG(L"skin: could not draw the spectrum of panel %zu", i);
     }
     dc_->SetTarget(target);
     dc_->BeginDraw();
@@ -720,16 +1014,22 @@ bool SkinView::Draw(ID2D1Bitmap1 *target, UINT width, UINT height, size_t slot, 
                            nullptr);
         if (b.backdrop && b.plate) dc_->FillRoundedRectangle(b.plateArea, b.backdrop.Get());
         else if (b.backdrop) dc_->FillEllipse(b.backdropArea, b.backdrop.Get());
-        for (size_t n = 0; n < panel.shadows.size() && n < shadows_.size(); ++n) {
-            const skin::Shadow &sh = panel.shadows[n];
-            ID2D1Effect *effect = shadows_[n].Get();
-            const D2D1_COLOR_F c = ColorOf(sh.color, sh.opacity);
-            effect->SetInput(0, b.text.Get());
-            effect->SetValue(D2D1_SHADOW_PROP_BLUR_STANDARD_DEVIATION, std::max(0.5f, sh.blur * b.px));
-            effect->SetValue(D2D1_SHADOW_PROP_COLOR, D2D1::Vector4F(c.r, c.g, c.b, c.a));
-            dc_->DrawImage(effect, D2D1::Point2F(b.at.x + std::round(sh.x * b.px), b.at.y + std::round(sh.y * b.px)));
+        // The text and the spectra each have shadow effects of their own.
+        for (size_t layer = 0; layer < 2; ++layer) {
+            ID2D1Bitmap1 *image = layer ? b.live.Get() : b.text.Get();
+            if (!image) continue;
+            for (size_t n = 0; n < panel.shadows.size() && n < kShadows && layer * kShadows + n < shadows_.size(); ++n) {
+                const skin::Shadow &sh = panel.shadows[n];
+                ID2D1Effect *effect = shadows_[layer * kShadows + n].Get();
+                const D2D1_COLOR_F c = ColorOf(sh.color, sh.opacity);
+                effect->SetInput(0, image);
+                effect->SetValue(D2D1_SHADOW_PROP_BLUR_STANDARD_DEVIATION, std::max(0.5f, sh.blur * b.px));
+                effect->SetValue(D2D1_SHADOW_PROP_COLOR, D2D1::Vector4F(c.r, c.g, c.b, c.a));
+                dc_->DrawImage(effect, D2D1::Point2F(b.at.x + std::round(sh.x * b.px), b.at.y + std::round(sh.y * b.px)));
+            }
         }
         dc_->DrawImage(b.text.Get(), b.at);
+        if (b.live) dc_->DrawImage(b.live.Get(), b.at);
         if (layered) dc_->PopLayer();
         dc_->SetTransform(D2D1::IdentityMatrix());
     }

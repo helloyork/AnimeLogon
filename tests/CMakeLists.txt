@@ -102,3 +102,10 @@ target_include_directories(animelogon_tests PRIVATE ${PROJECT_SOURCE_DIR}/steam/
 if(TARGET animelogon_steam)
     target_sources(animelogon_tests PRIVATE steam_client_tests.cpp)
 endif()
+
+# The audio spectrum: its bands read out of sound the test makes, the format's <spectrum>, and
+# drawing it with the logon screen's renderer; and the logon screen listening to the output device,
+# where the machine has one.
+target_sources(animelogon_tests PRIVATE spectrum_tests.cpp ${PROJECT_SOURCE_DIR}/overlay/src/audiocapture.cpp
+                                        ${PROJECT_SOURCE_DIR}/overlay/src/audio.cpp)
+target_link_libraries(animelogon_tests PRIVATE wtsapi32)

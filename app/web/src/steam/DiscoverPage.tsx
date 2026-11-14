@@ -1,14 +1,15 @@
 // 发现: the Steam Workshop inside the app, in the Steam edition only. It works the way Wallpaper
 // Engine's own Workshop browser does: a search and a sort at the top (popular over a time range,
-// newest, most subscribed, top rated), a bar of filters (type, resolution, sound, components, and
-// mature content, hidden until the person shows it), a grid of previews that loads more as it is
+// newest, most subscribed, top rated), a bar of filters (type, resolution, sound, components, the
+// theme's own components, and the age ratings shown, Everyone only until the person shows more), a
+// grid of previews that loads more as it is
 // scrolled, and the item chosen open beside it, where it is subscribed to, downloaded and installed
 // into the library. A small button opens the Workshop in Steam itself.
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ArrowClockwise16Regular, Checkmark12Filled, Dismiss16Regular, Image24Regular, Open16Regular, Search16Regular, Warning16Regular } from '@fluentui/react-icons';
 import { t, tn, type Key } from '../i18n';
 import { setTab } from '../store';
-import { Button, cx, IconButton, Progress, Select, Switch } from '../ui/controls';
+import { Button, cx, IconButton, Progress, Select } from '../ui/controls';
 import { BBText } from './bbcode';
 import { count, date, percent, size } from './format';
 import {
@@ -21,6 +22,7 @@ import {
   install,
   loadMore,
   openInSteam,
+  RATING_TAGS,
   RESOLUTION_TAGS,
   search,
   setFilters,
@@ -29,13 +31,15 @@ import {
   subscribeTo,
   TYPE_TAGS,
   useSteam,
+  AGES,
+  type Age,
   type Days,
   type Filters,
   type Sort,
   type SteamStatus,
   type WorkshopEntry,
 } from './state';
-import { descriptorLabel, tagLabel } from './tags';
+import { descriptorLabel, ratingBadge, tagLabel } from './tags';
 
 const SORTS: Sort[] = ['trend', 'recent', 'subscribed', 'rating'];
 const DAYS: Days[] = [1, 7, 30, 90, 365, 0];
@@ -102,14 +106,11 @@ function Toolbar({ filters: f, disabled }: { filters: Filters; disabled: boolean
           onChange={v => setFilters({ resolution: v })} />
         <Toggle on={f.sound} disabled={disabled} onChange={sound => setFilters({ sound })}>{tagLabel('Sound')}</Toggle>
         <Toggle on={f.components} disabled={disabled} onChange={components => setFilters({ components })}>{tagLabel('Components')}</Toggle>
+        <Toggle on={f.custom} disabled={disabled} onChange={custom => setFilters({ custom })}>{tagLabel('Custom components')}</Toggle>
         <span className="disc-sep" aria-hidden="true" />
-        <label className="disc-mature">
-          <Switch checked={f.mature} disabled={disabled} labelledBy="disc-mature" onChange={mature => setFilters({ mature })} />
-          <span className="disc-mature-text">
-            <span id="disc-mature">{t('discover.mature')}</span>
-            <span className="t-cap3">{t('discover.mature.detail')}</span>
-          </span>
-        </label>
+        <Select size="sm" label={t('discover.age')} className="disc-age" disabled={disabled} value={f.age}
+          options={opt(AGES, v => `discover.age.${v}` as Key)} onChange={v => setFilters({ age: v as Age })} />
+        <span className="t-cap3 disc-age-note">{t('discover.age.detail')}</span>
       </div>
     </div>
   );
@@ -228,7 +229,7 @@ function Card({ item, chosen }: { item: WorkshopEntry; chosen: boolean }) {
       <button type="button" className={cx('dcard', chosen && 'on')} data-item={item.id} aria-pressed={chosen} title={item.title} onClick={() => choose(chosen ? null : item.id)}>
         <span className="dpic">
           <Preview url={item.preview} />
-          {item.descriptors.length > 0 && <span className="dbadge">{t('discover.mature_short')}</span>}
+          {ratingBadge(item.rating) && <span className="dbadge">{ratingBadge(item.rating)}</span>}
         </span>
         <span className="dname ellipsis">{item.title}</span>
         <span className="t-cap3 ellipsis num">{meta}</span>
@@ -285,10 +286,16 @@ function Detail({ item }: { item: WorkshopEntry }) {
               <dd className="num">{date(item.timeUpdated)}</dd>
             </>
           )}
-          {item.tags.length > 0 && (
+          {item.rating && (
+            <>
+              <dt>{t('discover.age')}</dt>
+              <dd>{tagLabel(item.rating)}</dd>
+            </>
+          )}
+          {item.tags.some(tag => !RATING_TAGS.includes(tag)) && (
             <>
               <dt>{t('discover.tags')}</dt>
-              <dd>{item.tags.map(tagLabel).join(t('list.join'))}</dd>
+              <dd>{item.tags.filter(tag => !RATING_TAGS.includes(tag)).map(tagLabel).join(t('list.join'))}</dd>
             </>
           )}
           {item.descriptors.length > 0 && (

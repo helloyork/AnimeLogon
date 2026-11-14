@@ -211,6 +211,7 @@ std::vector<Item> FromSubscribed(const json::Value &answer) {
         item.timeUpdated = (long long)std::max(0.0, v[L"timeUpdated"].Num());
         for (const json::Value &d : v[L"descriptors"].Items())
             if (d.IsString()) item.descriptors.push_back(d.Str());
+        if (IsRating(v[L"rating"].Str())) item.rating = v[L"rating"].Str();
         out.push_back(std::move(item));
     }
     return out;
@@ -318,6 +319,30 @@ Reuse StagedReuse(const std::vector<std::wstring> &dirs) {
         FindClose(find);
     }
     return r;
+}
+
+// --- publishing ------------------------------------------------------------------------------------
+
+bool IsRating(std::wstring_view name) {
+    return std::any_of(std::begin(kRatings), std::end(kRatings), [&](const wchar_t *r) { return name == r; });
+}
+
+std::vector<std::wstring> TagsFor(const TagFacts &facts) {
+    std::vector<std::wstring> tags{facts.video ? L"Video" : L"Picture"};
+    if (facts.height >= 2160) tags.push_back(L"4K");
+    else if (facts.height >= 1440) tags.push_back(L"1440p");
+    else if (facts.height >= 1080) tags.push_back(L"1080p");
+    // At least 2.2 times as wide as high, in whole numbers: width * 5 >= height * 11.
+    if (facts.width > 0 && facts.height > 0 && (long long)facts.width * 5 >= (long long)facts.height * 11) tags.push_back(L"Ultrawide");
+    if (facts.sound) tags.push_back(L"Sound");
+    if (facts.components) tags.push_back(L"Components");
+    if (facts.customComponents) tags.push_back(L"Custom components");
+    if (IsRating(facts.rating)) tags.push_back(facts.rating);
+    return tags;
+}
+
+bool CarriesOwnComponents(const std::vector<package::Entry> &entries) {
+    return std::any_of(entries.begin(), entries.end(), [](const package::Entry &e) { return e.kind == package::Kind::Component; });
 }
 
 }  // namespace app::steam_workshop
