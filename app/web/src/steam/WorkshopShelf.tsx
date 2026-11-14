@@ -12,6 +12,7 @@ import { applyFlow, openDialog, openTheme, perMonitor, setTab, shapeOf, themeOf,
 import { Button, cx, IconButton } from '../ui/controls';
 import { percent } from './format';
 import { askShelf, install, openInSteam, setPicked, togglePick, useSteam, type ShelfItem } from './state';
+import { ratingBadge } from './tags';
 
 const installable = (i: ShelfItem) => i.state === 'notInstalled' || i.state === 'update';
 
@@ -101,6 +102,8 @@ function ShelfCard({ item: i, picked }: { item: ShelfItem; picked: boolean }) {
   ) : (
     <span className="dpic-none" aria-hidden="true"><Image24Regular /></span>
   );
+  // Not for everyone: said on the picture, as on the discover page.
+  const badge = ratingBadge(i.rating) && <span className="dbadge">{ratingBadge(i.rating)}</span>;
   const meta = (
     <div className="meta">
       <div className="nm ellipsis">{i.title || theme?.name || i.id}</div>
@@ -116,18 +119,18 @@ function ShelfCard({ item: i, picked }: { item: ShelfItem; picked: boolean }) {
         // Installed: a theme like the others, put on the logon screen by a click.
         <button type="button" className="hit" aria-pressed={used.length > 0}
           onClick={() => { if (used.length && !perMonitor()) return; applyFlow(theme.id); }}>
-          <div className="thumb">{picture}</div>
+          <div className="thumb">{picture}{badge}</div>
           {meta}
         </button>
       ) : installable(i) ? (
         // Not installed: a click chooses it, to install with the others chosen.
         <button type="button" className="hit" role="checkbox" aria-checked={picked} onClick={() => togglePick(i.id)}>
-          <div className="thumb">{picture}</div>
+          <div className="thumb">{picture}{badge}</div>
           {meta}
         </button>
       ) : (
         <div className="hit still">
-          <div className="thumb">{picture}</div>
+          <div className="thumb">{picture}{badge}</div>
           {meta}
         </div>
       )}

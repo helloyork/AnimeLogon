@@ -17,6 +17,7 @@
 .select.disc-sort { width: 136px; min-width: 0; }
 .select.disc-days { width: 128px; min-width: 0; }
 .select.disc-type, .select.disc-res { width: 128px; min-width: 0; }
+.select.disc-age { width: 168px; min-width: 0; }
 .disc-steam { margin-left: auto; }
 .disc-sep { width: 1px; height: 20px; margin: 0 var(--s2); background: var(--border-strong); }
 
@@ -24,9 +25,8 @@
 .btn.toggle[aria-pressed=true] { background: var(--surface-hover); border-color: var(--accent); }
 .btn.toggle > svg { width: 12px; height: 12px; }
 
-/* Mature content: the switch, what it does, and why it starts off. */
-.disc-mature { display: flex; align-items: center; gap: var(--s2); min-width: 0; font-size: 13px; line-height: 20px; cursor: pointer; }
-.disc-mature-text { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: var(--s2); min-width: 0; }
+/* The age ratings shown, and why it starts at Everyone. */
+.disc-age-note { min-width: 0; }
 
 .disc-body { position: relative; flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
 .disc-body.with-detail { grid-template-columns: minmax(0, 1fr) 380px; }
@@ -75,7 +75,7 @@
 .dcard:focus-visible .dpic { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* No preview, or one that could not be fetched. */
 .dpic-none { position: absolute; inset: 0; display: grid; place-items: center; color: var(--text-3); background: var(--surface-3); }
-/* Shown only while mature content is: what this one is marked as. */
+/* An item not rated Everyone: its rating, over its picture. */
 .dbadge {
   position: absolute;
   left: 6px;

@@ -15,6 +15,8 @@
 #include <string_view>
 #include <vector>
 
+#include "animelogon/package.h"
+
 #include "json.h"
 
 namespace app::steam_workshop {
@@ -79,6 +81,7 @@ struct Item {
     long long timeUpdated = 0;   // Steam's time of its last update; 0 when unknown
     unsigned long long sizeOnDisk = 0;
     std::vector<std::wstring> descriptors;
+    std::wstring rating;         // its age rating as the helper decides it, or empty when unknown
 };
 
 // The items of a `subscribed` answer (steam/PROTOCOL.md).
@@ -134,5 +137,30 @@ struct Reuse {
     }
 };
 Reuse StagedReuse(const std::vector<std::wstring> &dirs);
+
+// --- publishing ------------------------------------------------------------------------------------
+
+// The Workshop's age ratings (steam/PROTOCOL.md "Tags"), mildest first.
+inline constexpr const wchar_t *kRatings[] = {L"Everyone", L"Questionable", L"Mature"};
+bool IsRating(std::wstring_view name);
+
+// What a theme is, for the tags it is published with.
+struct TagFacts {
+    bool video = false;            // a video wallpaper rather than a picture
+    int width = 0, height = 0;     // the wallpaper's size in pixels
+    bool sound = false;            // the wallpaper has sound
+    bool components = false;       // the theme shows at least one component
+    bool customComponents = false; // the package carries components of its own (CarriesOwnComponents)
+    std::wstring rating;           // one of kRatings, as the author chose
+};
+
+// Every tag of steam/tags.json the theme has, in the list's order: its type, its resolution by
+// height (1080p from 1080, 1440p from 1440, 4K from 2160) and Ultrawide from 2.2 times as wide as
+// high, Sound, Components, Custom components, and its rating (left out when it is not one).
+std::vector<std::wstring> TagsFor(const TagFacts &facts);
+
+// Whether an .altheme carries components of its own (components/<name>.xml), rather than using only
+// the built-in ones, which theme.xml names by id.
+bool CarriesOwnComponents(const std::vector<animelogon::package::Entry> &entries);
 
 }  // namespace app::steam_workshop

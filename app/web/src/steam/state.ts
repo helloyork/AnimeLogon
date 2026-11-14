@@ -28,6 +28,7 @@ export interface WorkshopEntry {
   preview: string;
   tags: string[];
   descriptors: string[];
+  rating: string;       // the age rating the helper gives it: Everyone, Questionable or Mature
   votesUp: number;
   votesDown: number;
   score: number;
@@ -56,6 +57,7 @@ export interface ShelfItem {
   timeUpdated: number;
   progress?: { done: number; total: number };
   descriptors: string[];
+  rating: string;       // as WorkshopEntry's, or empty when Steam's servers did not say
 }
 
 export interface Shelf {
@@ -67,6 +69,14 @@ export interface Shelf {
 export type Sort = 'trend' | 'recent' | 'subscribed' | 'rating';
 // A time range of the popular items, in days; 0 for all time.
 export type Days = 1 | 7 | 30 | 90 | 365 | 0;
+// The age ratings shown: Everyone only, Questionable as well, or all of them, Mature included.
+export type Age = 'everyone' | 'questionable' | 'mature';
+export const AGES: Age[] = ['everyone', 'questionable', 'mature'];
+const SHOWN: Record<Age, string[]> = {
+  everyone: ['Everyone'],
+  questionable: ['Everyone', 'Questionable'],
+  mature: ['Everyone', 'Questionable', 'Mature'],
+};
 
 export interface Filters {
   text: string;
@@ -76,16 +86,19 @@ export interface Filters {
   resolution: string;  // a tag of TAGS.resolution, or empty
   sound: boolean;
   components: boolean;
-  mature: boolean;     // items with content descriptors shown too; off until the person turns it on
+  custom: boolean;     // with components of its own
+  age: Age;            // Everyone only until the person shows more, on every start of the app
 }
 
-export const DEFAULT_FILTERS: Filters = { text: '', sort: 'trend', days: 7, type: '', resolution: '', sound: false, components: false, mature: false };
+export const DEFAULT_FILTERS: Filters = {
+  text: '', sort: 'trend', days: 7, type: '', resolution: '', sound: false, components: false, custom: false, age: 'everyone',
+};
 
 export interface Results {
   seq: number;           // the query these are the answer to; 0 before the first
   items: WorkshopEntry[];
   total: number;
-  hidden: number;        // left out for their content descriptors, over every page so far
+  hidden: number;        // left out for their rating (none, or a content descriptor), over every page so far
   next: number | null;   // the page to ask for next
   loading: boolean;
   error: { code: string; message: string } | null;
@@ -142,12 +155,12 @@ let emptyRun = 0;
 
 function query(page: number) {
   const f = state.filters;
-  const required = [f.type, f.resolution, f.sound ? 'Sound' : '', f.components ? 'Components' : ''].filter(Boolean);
+  const required = [f.type, f.resolution, f.sound ? 'Sound' : '', f.components ? 'Components' : '', f.custom ? 'Custom components' : ''].filter(Boolean);
   // Popular over all time is the most subscribed: Steam ranks by trend over a number of days only.
   const sort: Sort = f.sort === 'trend' && f.days === 0 ? 'subscribed' : f.sort;
   send('steamQuery', {
     seq: state.results.seq, sort, trendDays: f.days || 7, text: f.text.trim(), requiredTags: required,
-    matchAnyTag: false, includeMature: f.mature, page, perPage: PER_PAGE,
+    matchAnyTag: false, ratings: SHOWN[f.age], page, perPage: PER_PAGE,
   });
 }
 
@@ -174,10 +187,10 @@ export function setFilters(patch: Partial<Filters>) {
   else search();
 }
 export function clearFilters() {
-  set({ filters: { ...DEFAULT_FILTERS, mature: state.filters.mature } });
+  set({ filters: { ...DEFAULT_FILTERS, age: state.filters.age } });
   search();
 }
-export const filtered = (f: Filters) => !!(f.text.trim() || f.type || f.resolution || f.sound || f.components);
+export const filtered = (f: Filters) => !!(f.text.trim() || f.type || f.resolution || f.sound || f.components || f.custom);
 
 export function choose(id: string | null) {
   set({ chosen: id });
@@ -298,3 +311,4 @@ export const shelfItem = (id: string) => state.shelf?.items.find(i => i.id === i
 // Every tag group's names, for the filters and for the publish dialog to come.
 export const TYPE_TAGS: string[] = TAGS.type;
 export const RESOLUTION_TAGS: string[] = TAGS.resolution;
+export const RATING_TAGS: string[] = TAGS.rating;
