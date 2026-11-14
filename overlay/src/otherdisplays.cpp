@@ -14,6 +14,7 @@
 #include "animelogon/resolve.h"
 #include "animelogon/text.h"
 #include "bake.h"
+#include "events.h"
 #include "screen.h"
 
 namespace {
@@ -398,7 +399,7 @@ bool OtherDisplays::Parked() {
 
 void OtherDisplays::Check() {
     // Windows' shutdown screen is never under anything of ours.
-    if (screen::ShutdownUnderway()) {
+    if (screen::ShutdownUnderway() || events::IsSet(events::kGoingDown)) {
         if (!stopped_) ALOG(L"other displays: Windows is shutting down -- the stills are taken down");
         stopped_ = true;
         if (job_) job_->cancelled.store(true);

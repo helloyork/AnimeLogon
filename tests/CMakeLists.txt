@@ -20,6 +20,10 @@ add_dependencies(animelogon_tests scene)
 # The overlay's plan and its reading of still wallpapers need nothing but animelogon_common.
 target_sources(animelogon_tests PRIVATE overlay_tests.cpp ${PROJECT_SOURCE_DIR}/overlay/src/plan.cpp
                                         ${PROJECT_SOURCE_DIR}/overlay/src/picture.cpp)
+# Keeping off Windows' shutdown, restart and update screens.
+target_sources(animelogon_tests PRIVATE shutdown_tests.cpp ${PROJECT_SOURCE_DIR}/overlay/src/screen.cpp
+                                        ${PROJECT_SOURCE_DIR}/overlay/src/winlogonwatch.cpp)
+target_link_libraries(animelogon_tests PRIVATE wtsapi32 advapi32)
 # Which of the other displays get a still after a wake, what each is cut from, and the blur.
 target_sources(animelogon_tests PRIVATE stills_tests.cpp ${PROJECT_SOURCE_DIR}/overlay/src/stills.cpp)
 target_include_directories(animelogon_tests PRIVATE ${PROJECT_SOURCE_DIR}/overlay/src)

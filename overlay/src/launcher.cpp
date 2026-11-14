@@ -20,6 +20,8 @@
 
 #include "events.h"
 #include "livedata.h"
+#include "sessionrecord.h"
+#include "winlogonwatch.h"
 
 namespace {
 
@@ -27,6 +29,10 @@ SERVICE_STATUS_HANDLE g_statusHandle = nullptr;
 SERVICE_STATUS g_status{};
 std::atomic<bool> g_stop{false};
 HANDLE g_stopEvent = nullptr;
+// Raised while Windows shuts down or restarts (events.h); overlays stay off the screen.
+HANDLE g_goingDownEvent = nullptr;
+// Set by the service handler after a resume from sleep or hibernation, handled by Supervise.
+std::atomic<bool> g_resumed{false};
 // Set once the settings app or uninstaller has asked for the sign-in background setting back.
 std::atomic<bool> g_restored{false};
 constexpr ULONGLONG kSignInCheckMs = 60000;
@@ -38,7 +44,12 @@ constexpr DWORD kOverlayExitDismissed = 3;
 
 void SetState(DWORD state, DWORD wait = 0) {
     g_status.dwCurrentState = state;
-    g_status.dwControlsAccepted = state == SERVICE_RUNNING ? SERVICE_ACCEPT_STOP | SERVICE_ACCEPT_SHUTDOWN : 0;
+    // Pre-shutdown comes once the signed-in user is gone and while Windows Update installs, so the
+    // overlay is off the screen before Windows' progress screen comes up; plain shutdown comes only
+    // after that phase is over, minutes later.
+    g_status.dwControlsAccepted = state == SERVICE_RUNNING ? SERVICE_ACCEPT_STOP | SERVICE_ACCEPT_SHUTDOWN |
+                                                                SERVICE_ACCEPT_PRESHUTDOWN | SERVICE_ACCEPT_POWEREVENT
+                                                          : 0;
     g_status.dwWaitHint = wait;
     g_status.dwCheckPoint = (state == SERVICE_START_PENDING || state == SERVICE_STOP_PENDING)
                                 ? g_status.dwCheckPoint + 1
@@ -66,8 +77,20 @@ DWORD FindWinlogon(DWORD session) {
     return found;
 }
 
+// Somebody is signed in to `session`.
+bool SignedIn(DWORD session) {
+    if (session == 0xFFFFFFFF) return false;
+    LPWSTR user = nullptr;
+    DWORD n = 0;
+    if (!WTSQuerySessionInformationW(WTS_CURRENT_SERVER_HANDLE, session, WTSUserName, &user, &n)) return false;
+    const bool in = user && user[0];
+    WTSFreeMemory(user);
+    return in;
+}
+
 // Spawns overlay.exe onto WinSta0\Winlogon in `session`, by borrowing winlogon's token.
-HANDLE SpawnOverlay(DWORD session, bool dismissed) {
+// `hadUser`: somebody has been signed in to the session (sessionrecord.h).
+HANDLE SpawnOverlay(DWORD session, bool dismissed, bool hadUser) {
     const DWORD winlogon = FindWinlogon(session);
     if (!winlogon) return nullptr;
     HANDLE proc = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, winlogon);
@@ -81,6 +104,7 @@ HANDLE SpawnOverlay(DWORD session, bool dismissed) {
         si.lpDesktop = const_cast<wchar_t *>(L"WinSta0\\Winlogon");
         std::wstring cmd = L"\"" + OverlayPath() + L"\"";
         if (dismissed) cmd += L" --dismissed";
+        if (hadUser) cmd += L" --had-user";
         LPVOID env = nullptr;
         CreateEnvironmentBlock(&env, primary, FALSE);
         PROCESS_INFORMATION pi{};
@@ -119,9 +143,44 @@ void Supervise() {
     LiveData live;
     live.Start();
 
+    // Winlogon's word that the machine is going down (winlogonwatch.h).
+    winlogonwatch::Watch winlogon;
+    winlogon.Start([](DWORD) {
+        if (g_goingDownEvent && WaitForSingleObject(g_goingDownEvent, 0) != WAIT_OBJECT_0) {
+            SetEvent(g_goingDownEvent);
+            ALOG(L"launcher: Windows is going down -- overlays stay off the screen");
+        }
+    });
+    // The console session's history, and a handle to its winlogon.exe, which is signalled when the
+    // session ends: session ids are handed out again.
+    sessionrecord::Record record;
+    HANDLE sessionWinlogon = nullptr;
+
     while (WaitForSingleObject(g_stopEvent, 0) != WAIT_OBJECT_0) {
         const DWORD session = WTSGetActiveConsoleSessionId();
         const ULONGLONG now = GetTickCount64();
+
+        if (g_resumed.exchange(false)) {
+            record.Forget();
+            if (g_goingDownEvent) ResetEvent(g_goingDownEvent);
+            ALOG(L"launcher: resumed from sleep or hibernation -- the session history is cleared");
+        }
+        const bool ended = sessionWinlogon && WaitForSingleObject(sessionWinlogon, 0) == WAIT_OBJECT_0;
+        switch (record.Update(session, SignedIn(session), ended)) {
+        case sessionrecord::Record::Change::NewSession:
+            if (sessionWinlogon) CloseHandle(sessionWinlogon);
+            sessionWinlogon = nullptr;
+            if (const DWORD pid = session != 0xFFFFFFFF ? FindWinlogon(session) : 0)
+                sessionWinlogon = OpenProcess(SYNCHRONIZE, FALSE, pid);
+            break;
+        case sessionrecord::Record::Change::EmptiedInPlace:
+            ALOG(L"launcher: session %lu's user was signed out and the session has not ended -- a shutdown "
+                 L"or restart; no overlay is started in it",
+                 session);
+            break;
+        default:
+            break;
+        }
 
         // Windows hides the background behind the credential screen for any account whose
         // setting says so; accounts appear and settings change, so this is checked again.
@@ -157,8 +216,8 @@ void Supervise() {
             saidPaused = paused;
             if (paused) ALOG(L"launcher: paused -- not starting the overlay");
         }
-        if (!child && !paused && session != 0xFFFFFFFF && now >= nextTry) {
-            child = SpawnOverlay(session, dismissed);
+        if (!child && !paused && session != 0xFFFFFFFF && now >= nextTry && !record.EmptiedInPlace()) {
+            child = SpawnOverlay(session, dismissed, record.HadUser());
             childSession = child ? session : 0xFFFFFFFF;
             spawnedAt = now;
             if (!child) nextTry = now + (backoff = backoff ? (backoff * 2 > 30000 ? 30000 : backoff * 2) : 2000);
@@ -167,6 +226,8 @@ void Supervise() {
         WaitForSingleObject(g_stopEvent, 100);
     }
     live.Stop();
+    winlogon.Stop();
+    if (sessionWinlogon) CloseHandle(sessionWinlogon);
 
     if (child) {
         // Ask the overlay to leave, then wait briefly before ending it.
@@ -176,13 +237,26 @@ void Supervise() {
     }
 }
 
-DWORD WINAPI HandlerEx(DWORD control, DWORD, LPVOID, LPVOID) {
+DWORD WINAPI HandlerEx(DWORD control, DWORD eventType, LPVOID, LPVOID) {
     switch (control) {
+    case SERVICE_CONTROL_PRESHUTDOWN:
+        // Windows Update installs in this phase, behind its own progress screen. Take the overlay
+        // off the screen and stop now; a service that accepts pre-shutdown and does not stop holds
+        // the shutdown up for the service manager's whole pre-shutdown timeout.
+        ALOG(L"launcher: pre-shutdown -- taking the overlay off the screen and stopping");
+        if (g_goingDownEvent) SetEvent(g_goingDownEvent);
+        SetState(SERVICE_STOP_PENDING, 5000);
+        g_stop = true;
+        if (g_stopEvent) SetEvent(g_stopEvent);
+        return NO_ERROR;
     case SERVICE_CONTROL_STOP:
     case SERVICE_CONTROL_SHUTDOWN:
         SetState(SERVICE_STOP_PENDING, 5000);
         g_stop = true;
         if (g_stopEvent) SetEvent(g_stopEvent);
+        return NO_ERROR;
+    case SERVICE_CONTROL_POWEREVENT:
+        if (eventType == PBT_APMRESUMEAUTOMATIC || eventType == PBT_APMRESUMESUSPEND) g_resumed = true;
         return NO_ERROR;
     case SERVICE_CONTROL_INTERROGATE:
         return NO_ERROR;
@@ -212,11 +286,17 @@ void WINAPI ServiceMain(DWORD argc, LPWSTR *argv) {
     SetState(SERVICE_START_PENDING, 3000);
     g_stopEvent = events::Create(events::kStop);
     ResetEvent(g_stopEvent);
+    g_goingDownEvent = events::Create(events::kGoingDown);
+    ResetEvent(g_goingDownEvent);
     SetState(SERVICE_RUNNING);
     Supervise();
     if (g_stopEvent) {
         CloseHandle(g_stopEvent);
         g_stopEvent = nullptr;
+    }
+    if (g_goingDownEvent) {
+        CloseHandle(g_goingDownEvent);
+        g_goingDownEvent = nullptr;
     }
     SetState(SERVICE_STOPPED);
 }
@@ -230,6 +310,8 @@ int wmain(int argc, wchar_t **argv) {
             ALOG(L"launcher: supervising from the console (Ctrl+C to stop)");
             g_stopEvent = events::Create(events::kStop);
             ResetEvent(g_stopEvent);
+            g_goingDownEvent = events::Create(events::kGoingDown);
+            ResetEvent(g_goingDownEvent);
             Supervise();
             return 0;
         }

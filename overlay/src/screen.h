@@ -32,6 +32,7 @@ struct GateInput {
     Session session;
     bool hadUser = false;          // somebody was signed in to this session earlier
     bool shutdown = false;         // ShutdownUnderway()
+    bool goingDown = false;        // the launcher's events::kGoingDown is raised
     bool lockNotified = false;     // WTS_SESSION_LOCK arrived and no unlock since
 };
 
@@ -39,6 +40,29 @@ enum class Gate {
     Hold,
     GoLive,
     SignedOutInPlace,  // a shutdown or restart signed the user out; never cover it
+    GoingDown,         // Windows is shutting down or restarting; never cover it
+};
+
+// When to lower events::kGoingDown again: a shutdown somebody cancelled leaves them at their own
+// unlocked desktop, which no shutdown, restart or update screen does. Twenty seconds of that and
+// the flag goes, so the next lock is covered as usual.
+class CancelWatch {
+public:
+    static constexpr ULONGLONG kCancelledMs = 20000;
+    // True once, when the flag should be lowered.
+    bool Update(bool goingDown, bool atDesktop, ULONGLONG now) {
+        if (!goingDown || !atDesktop) {
+            since_ = 0;
+            return false;
+        }
+        if (!since_) since_ = now;
+        if (now - since_ < kCancelledMs) return false;
+        since_ = 0;
+        return true;
+    }
+
+private:
+    ULONGLONG since_ = 0;
 };
 
 // The session's lock flag can lag the desktop by seconds; the lock notification usually

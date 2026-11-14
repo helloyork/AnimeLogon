@@ -82,6 +82,7 @@ bool ShutdownUnderway() {
 
 Gate Decide(const GateInput &in) {
     if (!in.secure || !in.session.console) return Gate::Hold;
+    if (in.goingDown) return Gate::GoingDown;
     if (in.shutdown) return Gate::Hold;
     // A session that had a user and now has none, still on the console, is a shutdown or
     // restart: signing out ends the session and draws the next logon screen in a new one.
