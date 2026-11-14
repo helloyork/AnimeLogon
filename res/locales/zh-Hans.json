@@ -215,6 +215,8 @@
   "font.search": "搜索字体",
 
   "inspector.add": "添加组件",
+  "inspector.blur": "模糊",
+  "inspector.blur.detail": "壁纸的高斯模糊半径，以屏幕高度的百分比计；为 0 时不模糊，组件不受影响。登录界面的背景也随之调整。",
   "inspector.brightness": "亮度",
   "inspector.brightness.detail": "壁纸在锁屏上的显示亮度，组件不受影响。降低亮度可提高组件在浅色壁纸上的可读性，登录界面的背景也随之调整。",
   "inspector.by": "作者 {author}",

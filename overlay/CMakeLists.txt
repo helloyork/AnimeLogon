@@ -19,6 +19,7 @@ animelogon_add_executable(overlay
         src/staticcover.cpp
         src/stills.cpp
         src/otherdisplays.cpp
+        src/gpublur.cpp
     DESCRIPTION "AnimeLogon Lock Screen"
     LIBS animelogon_render animelogon_scene_host d3d11 dxgi dcomp dwmapi d2d1 dwrite dxguid mf mfplat mfreadwrite mfuuid windowscodecs xaudio2 mmdevapi
          wtsapi32 shcore runtimeobject)
@@ -27,6 +28,11 @@ animelogon_compile_shader(overlay ${CMAKE_CURRENT_SOURCE_DIR}/shaders/video.hlsl
     VS vs_5_0 g_vs video_vs.h)
 animelogon_compile_shader(overlay ${CMAKE_CURRENT_SOURCE_DIR}/shaders/video.hlsl
     PS ps_5_0 g_ps video_ps.h)
+# The wallpaper blur's passes (src/gpublur.h).
+animelogon_compile_shader(overlay ${CMAKE_CURRENT_SOURCE_DIR}/shaders/blur.hlsl VS vs_5_0 g_blur_vs blur_vs.h)
+animelogon_compile_shader(overlay ${CMAKE_CURRENT_SOURCE_DIR}/shaders/blur.hlsl Box ps_5_0 g_blur_box blur_box.h)
+animelogon_compile_shader(overlay ${CMAKE_CURRENT_SOURCE_DIR}/shaders/blur.hlsl Gauss ps_5_0 g_blur_gauss blur_gauss.h)
+animelogon_compile_shader(overlay ${CMAKE_CURRENT_SOURCE_DIR}/shaders/blur.hlsl Up ps_5_0 g_blur_up blur_up.h)
 
 animelogon_add_executable(launcher
     SOURCES src/launcher.cpp src/livedata.cpp

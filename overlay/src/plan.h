@@ -44,6 +44,7 @@ struct Wallpaper {
     animelogon::Scaling fit = animelogon::Scaling::Fill;
     // How bright it is drawn (settings.h kBrightness): the theme's, whatever stands in for it.
     float brightness = animelogon::kBrightness;
+    float blur = 0.0f;  // as a percentage of the display's height (blur.h)
 };
 
 struct Component {

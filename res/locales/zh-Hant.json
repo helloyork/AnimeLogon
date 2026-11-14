@@ -215,6 +215,8 @@
   "font.search": "搜尋字型",
 
   "inspector.add": "新增元件",
+  "inspector.blur": "模糊",
+  "inspector.blur.detail": "桌布的高斯模糊半徑，以螢幕高度的百分比計算；為 0 時不模糊，元件不受影響。登入畫面的背景也會隨之調整。",
   "inspector.brightness": "亮度",
   "inspector.brightness.detail": "桌布在鎖定畫面上的顯示亮度，元件不受影響。降低亮度可提高元件在淺色桌布上的可讀性，登入畫面的背景也會隨之調整。",
   "inspector.by": "作者 {author}",

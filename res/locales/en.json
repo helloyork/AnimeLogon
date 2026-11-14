@@ -215,6 +215,8 @@
   "font.search": "Search fonts",
 
   "inspector.add": "Add component",
+  "inspector.blur": "Blur",
+  "inspector.blur.detail": "How much the wallpaper is blurred: the radius of a Gaussian blur as a share of the screen's height. 0 leaves it sharp; components are not affected, and the sign-in screen's background follows.",
   "inspector.brightness": "Brightness",
   "inspector.brightness.detail": "How bright the wallpaper is on the lock screen; components are not affected. Lowering it makes components easier to read on a light wallpaper, and the sign-in screen's background follows.",
   "inspector.by": "By {author}",

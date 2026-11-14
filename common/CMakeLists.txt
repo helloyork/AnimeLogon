@@ -2,6 +2,7 @@
 add_library(animelogon_common STATIC
     src/background.cpp
     src/bitmap.cpp
+    src/blur.cpp
     src/clock.cpp
     src/components.cpp
     src/data.cpp

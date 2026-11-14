@@ -12,7 +12,9 @@
 
 #include "animelogon/log.h"
 #include "animelogon/text.h"
+#include "animelogon/blur.h"
 #include "componentlayer.h"
+#include "gpublur.h"
 #include "layout.h"
 #include "picture.h"
 #include "video_ps.h"
@@ -139,7 +141,14 @@ bool Presenter::CreateShaders() {
     s.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
     s.AddressU = s.AddressV = s.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
     s.MaxLOD = D3D11_FLOAT32_MAX;
-    return SUCCEEDED(device_->CreateSamplerState(&s, &sampler_));
+    if (FAILED(device_->CreateSamplerState(&s, &sampler_))) return false;
+    // Without the blur the logon screen still works: a theme that asks for it is drawn sharp.
+    blur_ = std::make_unique<GpuBlur>();
+    if (!blur_->Create(device_.Get())) {
+        ALOG(L"present: the wallpaper blur is unavailable -- blurred wallpapers are drawn sharp");
+        blur_.reset();
+    }
+    return true;
 }
 
 bool Presenter::LoadStill(const std::wstring &path) {
@@ -319,6 +328,7 @@ void Presenter::DrawVideo(const VideoPlayer::Frame &frame, int width, int height
 }
 
 void Presenter::ReleaseDevice() {
+    blur_.reset();
     images_.clear();
     gradients_.clear();
     stillView_.Reset();
@@ -557,9 +567,24 @@ bool Presenter::Render(const std::vector<Picture> &pictures, float dim, float op
             p.offset[1] = m.offsetY;
         }
         context_->UpdateSubresource(constants_.Get(), 0, nullptr, &p, 0, 0);
+        // A blurred wallpaper is drawn into the blur's own picture first, then blurred into the
+        // window. Not the still: it was baked blurred (bake.h).
+        const float sigma = placed && pic.kind != Picture::Kind::Still
+                                ? animelogon::blur::Sigma(t.wallpaper.blur, (int)w.height)
+                                : 0.0f;
+        ID3D11RenderTargetView *drawTo = nullptr;
+        if (sigma > 0.0f && blur_) {
+            drawTo = blur_->Begin(w.width, w.height, sigma);
+            if (!drawTo && !blurFailed_) {
+                ALOG(L"present: no room for the wallpaper blur at %ux%u -- drawn sharp", w.width, w.height);
+                blurFailed_ = true;
+            }
+        }
+        const bool blurred = drawTo != nullptr;
+        if (!blurred) drawTo = rtv.Get();
         D3D11_VIEWPORT vp{0.0f, 0.0f, (float)w.width, (float)w.height, 0.0f, 1.0f};
         context_->RSSetViewports(1, &vp);
-        ID3D11RenderTargetView *targets[] = {rtv.Get()};
+        ID3D11RenderTargetView *targets[] = {drawTo};
         context_->OMSetRenderTargets(1, targets, nullptr);
         context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         context_->IASetInputLayout(nullptr);
@@ -574,6 +599,7 @@ bool Presenter::Render(const std::vector<Picture> &pictures, float dim, float op
         ID3D11ShaderResourceView *none[4] = {};
         context_->PSSetShaderResources(0, 4, none);
         context_->OMSetRenderTargets(0, nullptr, nullptr);
+        if (blurred) blur_->End(context_.Get(), rtv.Get());
         if (components_ && t.showComponents && !componentsFailed_ && componentOpacity_ > 0.0f &&
             i < componentsPerTarget_.size() && !componentsPerTarget_[i].empty()) {
             ComPtr<IDXGISurface> surface;

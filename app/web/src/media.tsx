@@ -1,6 +1,6 @@
 // Wallpapers that move play in the page: a video from the wallpaper store, or a scene's frames,
 // which the native side renders in its sandbox and hands over one at a time.
-import { useEffect, useRef, type CSSProperties } from 'react';
+import { useEffect, useId, useRef, useState, type CSSProperties } from 'react';
 import { calm } from './motion';
 import { ORIGIN, send, videoUrl } from './native';
 import { setState } from './store';
@@ -10,14 +10,33 @@ const OBJECT_FIT: Record<Fit, CSSProperties['objectFit']> = { fill: 'cover', fit
 
 const fill: CSSProperties = { position: 'absolute', inset: 0, width: '100%', height: '100%', display: 'block', pointerEvents: 'none' };
 
-// A video wallpaper, muted and looping, at the theme's `brightness` as the logon screen draws it
-// (the pictures around it, drawn natively, already are). Its first frame comes in softly over the still under it;
+// A video wallpaper, muted and looping, at the theme's `brightness` and `blur` as the logon screen
+// draws it (the pictures around it, drawn natively, already are). Its first frame comes in softly over the still under it;
 // once a video fails to play, the page shows stills from then on. `playing` fires again each time
 // the loop jumps back to the start (and after any stall), so the fade belongs to the first start
 // of each video only: replayed at the seam, it showed the still through for a moment.
-export function WallpaperVideo({ wallpaper, fit, brightness = 1, fade = true, onPlaying, style }: { wallpaper: string; fit: Fit; brightness?: number; fade?: boolean; onPlaying?: () => void; style?: CSSProperties }) {
+export function WallpaperVideo({ wallpaper, fit, brightness = 1, blur = 0, fade = true, onPlaying, style }: { wallpaper: string; fit: Fit; brightness?: number; blur?: number; fade?: boolean; onPlaying?: () => void; style?: CSSProperties }) {
   const ref = useRef<HTMLVideoElement>(null);
   const faded = useRef('');
+  const filterId = 'blur' + useId().replace(/[^a-zA-Z0-9]/g, '');
+  // The blur's standard deviation is a share of the height of the display the element stands for.
+  const [height, setHeight] = useState(0);
+  useEffect(() => {
+    const v = ref.current;
+    if (!v || !blur) return;
+    const watch = new ResizeObserver(() => setHeight(v.clientHeight));
+    watch.observe(v);
+    setHeight(v.clientHeight);
+    return () => watch.disconnect();
+  }, [blur]);
+  const sigma = blur > 0 ? (blur / 100) * height : 0;
+  // Filling the element, the edges are held as the logon screen holds them: an SVG blur whose
+  // colours are divided by their coverage, so nothing fades towards the edges. With bars (fit), the
+  // picture is blurred over the black around it, as there.
+  const filters = [
+    sigma > 0 ? (fit === 'fit' ? `blur(${sigma.toFixed(2)}px)` : `url(#${filterId})`) : '',
+    brightness < 1 ? `brightness(${brightness})` : '',
+  ].filter(Boolean).join(' ');
   useEffect(() => {
     const v = ref.current;
     if (!v) return;
@@ -25,6 +44,15 @@ export function WallpaperVideo({ wallpaper, fit, brightness = 1, fade = true, on
     v.play().catch(() => {});
   }, [wallpaper]);
   return (
+    <>
+    {sigma > 0 && fit !== 'fit' && (
+      <svg width="0" height="0" aria-hidden="true" style={{ position: 'absolute' }}>
+        <filter id={filterId} x="0" y="0" width="1" height="1" colorInterpolationFilters="sRGB">
+          <feGaussianBlur stdDeviation={sigma.toFixed(2)} edgeMode="duplicate" />
+          <feComponentTransfer><feFuncA type="table" tableValues="1 1" /></feComponentTransfer>
+        </filter>
+      </svg>
+    )}
     <video
       ref={ref}
       src={videoUrl(wallpaper)}
@@ -33,7 +61,7 @@ export function WallpaperVideo({ wallpaper, fit, brightness = 1, fade = true, on
       playsInline
       preload="auto"
       aria-hidden="true"
-      style={{ ...fill, objectFit: OBJECT_FIT[fit] || 'cover', ...(brightness < 1 ? { filter: `brightness(${brightness})` } : {}), ...style }}
+      style={{ ...fill, objectFit: OBJECT_FIT[fit] || 'cover', ...(filters ? { filter: filters } : {}), ...style }}
       onPlaying={e => {
         if (faded.current !== wallpaper) {
           faded.current = wallpaper;
@@ -43,6 +71,7 @@ export function WallpaperVideo({ wallpaper, fit, brightness = 1, fade = true, on
       }}
       onError={() => setState({ noVideo: true })}
     />
+    </>
   );
 }
 

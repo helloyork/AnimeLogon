@@ -64,6 +64,7 @@ export interface ThemeEntry {
   wallpaperRef: string;
   fit: Fit;
   brightness: number;       // how bright the wallpaper is drawn, 0.1 to 1
+  blur: number;             // how much it is blurred, a percentage of the display's height, 0 to 5
   wake: Wake;
   wakeSeconds: number;
   sceneStatic: boolean;
@@ -183,6 +184,9 @@ export interface OpenTheme {
   brightness: number;
   brightnessModified: boolean;
   ownBrightness: number;
+  blur: number;
+  blurModified: boolean;
+  ownBlur: number;
   wake: Wake;
   wakeModified: boolean;
   wakeSeconds: number;

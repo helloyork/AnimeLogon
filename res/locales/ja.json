@@ -215,6 +215,8 @@
   "font.search": "フォントの検索",
 
   "inspector.add": "コンポーネントの追加",
+  "inspector.blur": "ぼかし",
+  "inspector.blur.detail": "壁紙のぼかし (ガウスぼかしの半径) です。画面の高さに対する割合で指定し、0 でぼかしません。コンポーネントには影響せず、サインイン画面の背景も合わせて変わります。",
   "inspector.brightness": "明るさ",
   "inspector.brightness.detail": "ロック画面での壁紙の明るさです。コンポーネントには影響しません。下げると明るい壁紙の上でもコンポーネントが読みやすくなり、サインイン画面の背景も合わせて変わります。",
   "inspector.by": "作成者: {author}",

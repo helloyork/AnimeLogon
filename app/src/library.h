@@ -101,7 +101,7 @@ public:
     bool RemoveInstance(const std::wstring &instance);
     // Gives each theme of `targets` the open theme's components as they are now: the same
     // components, shown or hidden alike, with the same values. A target keeps its wallpaper, its fit,
-    // its brightness and its wake transition; the components and adjustments it had are replaced. The targets do
+    // its brightness and blur and its wake transition; the components and adjustments it had are replaced. The targets do
     // not follow later edits, and this is no step to undo on the open theme's page. Returns how
     // many themes changed, or -1, changing nothing, when settings.ini would grow past
     // kMaxSettingsBytes.
@@ -113,6 +113,8 @@ public:
     bool SetWakeSeconds(float seconds, int gesture);
     // How bright the open theme's wallpaper is drawn, kBrightnessMin to 1.
     bool SetBrightness(float brightness, int gesture);
+    // How much the open theme's wallpaper is blurred, 0 to kBlurMax (a percentage of the height).
+    bool SetBlur(float blur, int gesture);
     bool Reset();
     bool Undo();
     bool Redo();

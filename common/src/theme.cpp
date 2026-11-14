@@ -111,6 +111,8 @@ private:
             else if (name == L"fit") fit = &value;
             else if (name == L"brightness") {
                 if (!ParseBrightness(value, &theme_->brightness)) return Fail(e, L"a bad brightness " + value);
+            } else if (name == L"blur") {
+                if (!ParseBlur(value, &theme_->blur)) return Fail(e, L"a bad blur " + value);
             } else return Fail(e, L"unknown attribute " + name + L" on <wallpaper>");
         }
         if (!ref || !fit) return Fail(e, L"<wallpaper> needs ref and fit");
@@ -282,6 +284,7 @@ Theme Edited(const Theme &theme, const ThemeOverrides &overrides, std::vector<st
     if (overrides.wake) e.wake = *overrides.wake;
     if (overrides.wakeSeconds) e.wakeSeconds = *overrides.wakeSeconds;
     if (overrides.brightness) e.brightness = *overrides.brightness;
+    if (overrides.blur) e.blur = *overrides.blur;
     for (const auto &[id, o] : overrides.instances) {
         Instance *instance = nullptr;
         for (Instance &i : e.components)
@@ -315,6 +318,7 @@ std::string Normalize(const Theme &theme) {
     wallpaper.attributes = {{L"ref", theme.wallpaper}, {L"fit", ToString(theme.fit)}};
     // Like <wake>, only when it is not the default.
     if (theme.brightness != kBrightness) wallpaper.attributes.emplace_back(L"brightness", Format(L"%g", theme.brightness));
+    if (theme.blur > 0.0f) wallpaper.attributes.emplace_back(L"blur", Format(L"%g", theme.blur));
     root.children.push_back(std::move(wallpaper));
     // Written only when it is not the default, so a theme that never set it stays as it was.
     if (theme.wake != WakeStyle::Fade || theme.wakeSeconds != kWakeSeconds) {

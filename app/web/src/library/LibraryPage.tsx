@@ -135,7 +135,7 @@ export function ThemePicture({ t, width, playing }: { t: ThemeEntry; width: numb
   return (
     <>
       <img src={thumbUrl(t.id, t.revision, width, s.tick)} alt="" draggable={false} />
-      {play && t.wallpaperKind === 'video' && <WallpaperVideo key={t.wallpaperRef} wallpaper={t.wallpaperRef} fit={t.fit} brightness={t.brightness} />}
+      {play && t.wallpaperKind === 'video' && <WallpaperVideo key={t.wallpaperRef} wallpaper={t.wallpaperRef} fit={t.fit} brightness={t.brightness} blur={t.blur} />}
       {play && t.wallpaperKind === 'scene' && <SceneFrames theme={t.id} width={width} moving />}
       {play && s.lib!.settings.components && <img src={layerUrl(t.id, t.revision, width, s.tick)} alt="" draggable={false} />}
     </>
