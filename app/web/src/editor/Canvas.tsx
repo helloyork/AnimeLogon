@@ -27,7 +27,7 @@ import {
   askPreview,
   type Lift,
 } from '../preview';
-import { getState, instOf, multiPanel, panelKey, ratioLabel, screenOf, select, setState, shapeOf, spanning, useStore } from '../store';
+import { displayName, getState, instOf, multiPanel, panelKey, ratioLabel, screenOf, select, setState, shapeOf, spanning, useStore, wallSlices } from '../store';
 import type { Bound } from '../types';
 import { cx } from '../ui/controls';
 import { setDraft } from './draft';
@@ -390,7 +390,7 @@ export function Canvas() {
               <SceneFrames theme={t.id} width={pv.width} height={pv.height} moving={motion() && !scene.static} refresh={pv.rev}
                 onBounds={rects => { pv.bounds = pv.bounds.filter(b => b.instance !== 'wallpaper').concat(rects as Bound[]); redraw(); }} />
             )}
-            {video && <WallpaperVideo key={wallpaper.ref} wallpaper={wallpaper.ref} fit={t.fit} brightness={t.brightness} blur={t.blur} />}
+            {video && <WallpaperVideo key={wallpaper.ref} wallpaper={wallpaper.ref} fit={t.fit} brightness={t.brightness} blur={t.blur} slices={wallSlices()} />}
             {pv.url && <Picture url={pv.url} hidden={!!lifted} />}
             {lifted && <img className="layer" src={lifted.base} alt="" draggable={false} />}
             {pv.url && motion() && pv.spectra.length > 0 && (
@@ -433,7 +433,7 @@ export function Canvas() {
       {/* Which display's shape the stage has; other shapes are in the toolbar's lock screen preview. */}
       <div className="stage-foot">
         <Desktop16Regular />
-        <span>{spanning() ? tr('settings.monitors.span') : `${m.name} · ${ratioLabel(m.width, m.height)}`}</span>
+        <span>{spanning() ? tr('settings.monitors.span') : `${displayName(m)} · ${ratioLabel(m.width, m.height)}`}</span>
         {!s.lib!.settings.components && <span>· {tr('canvas.components_off')}</span>}
       </div>
     </div>

@@ -18,6 +18,7 @@
 #include <string>
 #include <vector>
 
+#include "animelogon/blur.h"
 #include "animelogon/clock.h"
 #include "animelogon/components.h"
 #include "animelogon/monitors.h"
@@ -459,6 +460,77 @@ TEST(AppPicturesDrawTheWallpaperAtTheThemesBrightness) {
                     brightest = std::max(brightest, everything.bgra[((size_t)y * everything.width + x) * 4 + 2]);
     CHECK(brightest > 200);
     if (SUCCEEDED(co)) CoUninitialize();
+}
+
+// Spanning, the wallpaper's blur is drawn as the logon screen draws it on each display: every
+// display's part of the wall blurred on its own, its edges held, by the sigma the main display's
+// height gives -- on the side display too, though it is shorter. Nothing crosses from one display to
+// the next, and the side display is not blurred by its own height. One display: the whole picture,
+// by its height.
+TEST(AppPicturesBlurEachDisplayOfAWallOnItsOwn) {
+    Settings s;
+    s.monitorMode = MonitorMode::Span;
+    // 1920 x 1080 main, 1280 x 1024 beside it 56 lower: 384 x 216 and 256 x 205 of a 640 x 216 wall.
+    const std::vector<app::Screen> wall = app::Wall(s, TwoDisplays(), 640, 216);
+    CHECK(wall.size() == 2 && wall[0].primary && !wall[1].primary);
+    CHECK(std::fabs(app::WallSigma(2.8f, wall, 216) - blur::Sigma(2.8f, 216)) < 1e-4f);
+    CHECK(std::fabs(app::WallSigma(2.8f, {}, 180) - blur::Sigma(2.8f, 180)) < 1e-4f);
+    // The main display named second still gives its height.
+    const std::vector<app::Screen> swapped{wall[1], wall[0]};
+    CHECK(std::fabs(app::WallSigma(2.8f, swapped, 216) - blur::Sigma(2.8f, 216)) < 1e-4f);
+
+    // White on the main display, black on the side one, a grey strip in the corner no display shows,
+    // with a mark in the middle of each display so that the blur has something to spread.
+    const UINT W = 640, H = 216;
+    std::vector<uint8_t> picture((size_t)W * H * 4, 0);
+    auto put = [&](std::vector<uint8_t> &p, UINT w, UINT x, UINT y, uint8_t v) {
+        uint8_t *px = &p[((size_t)y * w + x) * 4];
+        px[0] = px[1] = px[2] = v;
+        px[3] = 255;
+    };
+    for (UINT y = 0; y < H; ++y)
+        for (UINT x = 0; x < W; ++x) put(picture, W, x, y, x < 384 ? 255 : y < 11 ? 128 : 0);
+    for (UINT y = 90; y < 126; ++y)
+        for (UINT x = 170; x < 214; ++x) put(picture, W, x, y, 0);
+    for (UINT y = 90; y < 126; ++y)
+        for (UINT x = 490; x < 534; ++x) put(picture, W, x, y, 255);
+    std::vector<uint8_t> blurred = picture;
+    app::BlurWallpaper(blurred.data(), W, H, 2.8f, wall);
+
+    // Each display's part is exactly that part blurred alone by the main display's sigma.
+    const float sigma = blur::Sigma(2.8f, 216);
+    for (const app::Screen &screen : wall) {
+        const UINT w = (UINT)(screen.rect.right - screen.rect.left), h = (UINT)(screen.rect.bottom - screen.rect.top);
+        std::vector<uint8_t> alone((size_t)w * h * 4);
+        for (UINT y = 0; y < h; ++y)
+            memcpy(&alone[(size_t)y * w * 4], &picture[(((size_t)screen.rect.top + y) * W + screen.rect.left) * 4], (size_t)w * 4);
+        blur::Apply(alone.data(), (int)w, (int)h, 4, sigma);
+        bool same = true;
+        for (UINT y = 0; y < h && same; ++y)
+            same = memcmp(&alone[(size_t)y * w * 4], &blurred[(((size_t)screen.rect.top + y) * W + screen.rect.left) * 4], (size_t)w * 4) == 0;
+        CHECK(same);
+    }
+    // At the seam, the main display's last column stays white and the side display's first black.
+    CHECK(blurred[((size_t)150 * W + 383) * 4] == 255 && blurred[((size_t)150 * W + 384) * 4] == 0);
+    // The side display's mark spreads as far as the main display's sigma takes it, not its own.
+    std::vector<uint8_t> ownHeight((size_t)256 * 205 * 4);
+    for (UINT y = 0; y < 205; ++y)
+        memcpy(&ownHeight[(size_t)y * 256 * 4], &picture[(((size_t)11 + y) * W + 384) * 4], (size_t)256 * 4);
+    blur::Apply(ownHeight.data(), 256, 205, 4, blur::Sigma(2.8f, 205));
+    bool differs = false;
+    for (UINT y = 0; y < 205 && !differs; ++y)
+        differs = memcmp(&ownHeight[(size_t)y * 256 * 4], &blurred[(((size_t)11 + y) * W + 384) * 4], (size_t)256 * 4) != 0;
+    CHECK(differs);
+    // The corner no display shows is blurred too, as one piece of the whole picture.
+    std::vector<uint8_t> whole = picture;
+    blur::Apply(whole.data(), (int)W, (int)H, 4, sigma);
+    CHECK(memcmp(&whole[((size_t)5 * W + 500) * 4], &blurred[((size_t)5 * W + 500) * 4], 4) == 0);
+
+    // One display: the whole picture by its own height, as before.
+    std::vector<uint8_t> one = picture, plain = picture;
+    app::BlurWallpaper(one.data(), W, H, 2.8f, {});
+    blur::Apply(plain.data(), (int)W, (int)H, 4, blur::Sigma(2.8f, (int)H));
+    CHECK(one == plain);
 }
 
 // The wallpaper is blurred, the components over it stay sharp.

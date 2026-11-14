@@ -86,11 +86,13 @@ private:
     // types of `kind` (importable.h); with `wallpaper`, a picture or video as a wallpaper alone,
     // for the open theme.
     void Import(bool wallpaper, importable::Kind kind = importable::Kind::Any);
-    // One import at a time: while one runs, another is refused and the page told why. True when
-    // refused. The page also disables its import commands while the busy bar is up.
-    bool RefuseWhileImporting();
-    // Asked when the window is closed during an import, which closing cancels: true to close.
-    bool CloseCancelsImport();
+    // One import or export at a time: while one runs, another is refused and the page told why.
+    // True when refused. The page also disables its import and export commands while the busy bar
+    // is up.
+    bool RefuseWhileBusy();
+    // Asked when the window is closed during an import or an export, which closing cancels: true
+    // to close.
+    bool CloseCancels(bool exporting);
     // Stages each file on `worker_`, then installs all of them on one prompt (FinishImport).
     // With `wallpaper` there is one file, a wallpaper alone for the open theme.
     void StartImport(std::vector<ImportJob> jobs, bool wallpaper);
@@ -106,7 +108,10 @@ private:
     void CopyTheme(const std::wstring &id, const std::wstring &name);
     void RenameTheme(const std::wstring &id, const std::wstring &name);
     void RemoveTheme(const std::wstring &id);
+    // Writes the theme as an .altheme on `exporter_` (the video's sound encoded, everything packed),
+    // the busy bar up meanwhile; FinishExport says how it went.
     void ExportTheme(const std::wstring &id);
+    void FinishExport();
     void Switch(bool on);
     // Installs `theme` as a new theme (and runs `then` on the same command line); its new id, or empty.
     std::wstring CommitTheme(const animelogon::theme::Theme &theme, const std::wstring &then = L"");
@@ -168,6 +173,13 @@ private:
     animelogon::data::Snapshot LockData(bool *ready);
     // Where the displays are in a picture `width` x `height` when spanning; empty otherwise.
     std::vector<Screen> Wall(UINT width, UINT height) const { return app::Wall(library_.settings(), monitors_, width, height); }
+    // The displays as they are now. In a sandbox, a made-up arrangement can stand in for them
+    // (displays.txt in the sandbox's folder), so that several displays can be tried on a machine
+    // with one; never outside a sandbox.
+    static std::vector<animelogon::MonitorInfo> Displays();
+    // The displays were added, taken away, moved or set to another resolution or scale while the
+    // window is open: read again, and the page told, which draws its pictures again.
+    void DisplaysChanged();
 
     HWND hwnd_ = nullptr;
     int show_ = SW_SHOWNORMAL;
@@ -224,7 +236,16 @@ private:
     std::vector<ImportJob> importJobs_;
     std::vector<staging::Result> importResults_;
     bool importWallpaper_ = false;
-    bool askingToClose_ = false;  // CloseCancelsImport's question is up
+    bool askingToClose_ = false;  // CloseCancels's question is up
+
+    // An export, written on `exporter_`. The worker writes only the atomics and, before it says it is
+    // done, exportOk_ and exportError_. Cancelled (from the busy bar, or by closing the window), it
+    // stops before packing if it can, and the file it wrote is deleted either way.
+    std::thread exporter_;
+    std::atomic<bool> exporting_{false};
+    std::atomic<bool> exportCancel_{false};
+    std::atomic<bool> exportOk_{false};
+    std::wstring exportPath_, exportError_;
 
     // Wallpaper Engine's folders, each mapped to a host name before the page loads (WebView2
     // applies a mapping only to pages loaded after it is made), and the last look in them; the

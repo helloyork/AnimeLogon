@@ -131,6 +131,36 @@ bool StrengthOf(const skin::Skin &skin, const std::vector<skin::Part> &parts, co
     return false;
 }
 
+// A setting that is all there is to one value: it feeds a single attribute and nothing else, as the
+// spectrum's settings each feed one attribute of its <spectrum>. That value is offered in one place,
+// with the setting, and not again among the parts, where its own range competed with the setting's
+// and won unseen. The setting's field shows the value in effect, takes every value either of them
+// takes (the wider range, the options of both), and writes the setting, or the value itself where
+// only the value takes what is asked or the theme sets the value itself (Library::SetValue). Placing
+// settings (Folded) and switches (StrengthOf) are offered as before, and a setting that feeds
+// several values (a font, the colour of several texts) leaves them among the parts. Only a setting
+// whose field is the same kind of control as the value's: a number and a slider, two choices, two
+// colours, two lists of colours, two fonts.
+const skin::Adjustment *StandsFor(const skin::Skin &skin, const std::vector<skin::Part> &parts, const skin::Setting &setting) {
+    skin::Control control;
+    switch (setting.kind) {
+    case skin::SettingKind::Number: control = skin::Control::Slider; break;
+    case skin::SettingKind::Choice: control = skin::Control::Choice; break;
+    case skin::SettingKind::Color: control = skin::Control::Color; break;
+    case skin::SettingKind::Colors: control = skin::Control::Colors; break;
+    case skin::SettingKind::Font: control = skin::Control::Font; break;
+    default: return nullptr;
+    }
+    if (Folded(skin, setting.id)) return nullptr;
+    const std::vector<std::wstring> keys = skin::AdjustmentsOf(skin, setting.id);
+    // A weight is chosen from named weights on the page, not as the number a setting would be.
+    if (keys.size() != 1 || EndsWith(keys[0], L".weight")) return nullptr;
+    for (const skin::Part &p : parts)
+        for (const skin::Adjustment &a : p.adjustments)
+            if (a.key == keys[0]) return a.control == control ? &a : nullptr;
+    return nullptr;
+}
+
 // How the slider under a strength switch is labelled: a backdrop's or a shadow's opacity is how
 // strong it is; anything else goes by the attribute's own name.
 std::wstring StrengthLabel(const skin::Adjustment &a) {
@@ -413,7 +443,20 @@ bool Library::SetValue(const std::wstring &instance, const std::wstring &key, co
     const theme::Theme edited = Edited(open_);
     const theme::Instance *i = edited.Find(instance);
     skin::Skin skin;
-    if (!i || !LoadSkin(i->ref, &skin) || !skin::Accepts(skin, key, value)) return false;
+    if (!i || !LoadSkin(i->ref, &skin)) return false;
+    // A setting offered in place of the one value it feeds (StandsFor) writes that value where the
+    // setting does not take what is asked (a narrower range, fewer options), and where the theme
+    // itself sets the value, which wins over any setting.
+    const std::vector<skin::Part> parts = skin.Find(key) ? skin::Parts(skin) : std::vector<skin::Part>();
+    if (const skin::Setting *setting = skin.Find(key))
+        if (const skin::Adjustment *only = StandsFor(skin, parts, *setting)) {
+            const theme::Theme theirs = Own(open_);
+            const theme::Instance *own = theirs.Find(instance);
+            const bool themeSetsIt = own && own->sets.count(only->key);
+            if ((themeSetsIt || !skin::IsValue(*setting, value)) && skin::Accepts(skin, only->key, value))
+                return SetValue(instance, only->key, value, gesture);
+        }
+    if (!skin::Accepts(skin, key, value)) return false;
     // What the theme gives `key` without this edit.
     ThemeOverrides without = set_.OverridesFor(open_);
     without.instances[instance].values.erase(key);
@@ -983,21 +1026,41 @@ void Library::WriteOpen(json::Writer &w) const {
             };
 
             // What is offered with a setting rather than among the parts: the value a strength
-            // switch turns on and off, and whether a part is shown where a switch says so (the
-            // page lists those switches under Content). A part shown or hidden by hand against its
-            // switch stays among the parts, so that it can be put back. Any other value a switch
-            // feeds (a weight that a bold switch sets on several texts) stays among the parts too;
-            // turning the switch clears it there (SetValue).
+            // switch turns on and off, the one value a setting is all there is to (StandsFor), and
+            // whether a part is shown where a switch says so (the page lists those switches under
+            // Content). A part shown or hidden by hand against its switch stays among the parts, so
+            // that it can be put back. Any other value a switch feeds (a weight that a bold switch
+            // sets on several texts) stays among the parts too; turning the switch clears it there
+            // (SetValue).
             std::set<std::wstring> withSetting, shownBySwitch;
             w.Key(L"settings").BeginArray();
             for (const skin::Setting &s : skin.settings) {
+                const skin::Adjustment *only = StandsFor(skin, parts, s);
                 w.BeginObject();
                 w.Member(L"id", s.id).Member(L"kind", KindName(s.kind)).Member(L"label", i18n::Label(s.label));
-                w.Member(L"detail", i18n::Label(s.detail)).Member(L"value", skin::ValueOf(s, i.sets));
-                w.Member(L"modified", mine.count(s.id) > 0).Member(L"folded", Folded(skin, s.id));
+                w.Member(L"detail", i18n::Label(s.detail)).Member(L"folded", Folded(skin, s.id));
                 w.Member(L"content", Content(skin, s));
-                w.Member(L"min", s.min).Member(L"max", s.max).Member(L"step", s.step);
-                WriteOptions(w, s.options);
+                if (!only) {
+                    w.Member(L"value", skin::ValueOf(s, i.sets)).Member(L"modified", mine.count(s.id) > 0);
+                    w.Member(L"min", s.min).Member(L"max", s.max).Member(L"step", s.step);
+                    WriteOptions(w, s.options);
+                } else {
+                    // The value in effect: set by hand or by the theme, else the setting's. Putting
+                    // the setting back puts back both (the page's reset clears `adjusts` too).
+                    withSetting.insert(only->key);
+                    w.Member(L"adjusts", only->key);
+                    w.Member(L"value", i.sets.count(only->key) ? skin::Effective(skin, i.sets, *only) : skin::ValueOf(s, i.sets));
+                    w.Member(L"modified", mine.count(s.id) > 0 || mine.count(only->key) > 0);
+                    const bool number = s.kind == skin::SettingKind::Number;
+                    w.Member(L"min", number ? std::min(s.min, only->min) : s.min);
+                    w.Member(L"max", number ? std::max(s.max, only->max) : s.max);
+                    w.Member(L"step", number && only->step > 0 ? std::min(s.step, only->step) : s.step);
+                    std::vector<skin::Option> options = s.options;
+                    for (const skin::Option &more : only->options)
+                        if (std::none_of(options.begin(), options.end(), [&](const skin::Option &x) { return x.value == more.value; }))
+                            options.push_back(more);
+                    WriteOptions(w, options);
+                }
                 Strength strength;
                 if (StrengthOf(skin, parts, s, &strength)) {
                     withSetting.insert(strength.adjustment->key);

@@ -110,14 +110,17 @@ function Page() {
   return s.tab === 'settings' ? <SettingsPage /> : themePage ? <EditorPage /> : <LibraryPage />;
 }
 
+// An import or an export under way, with Cancel. An export does not say how far it is, so its bar
+// only moves (a percent below 0).
 function BusyBar() {
   const { busy } = useStore();
   if (!busy) return null;
+  const known = busy.percent >= 0;
   return (
     <div className="busy" role="status">
       <span className="t-cap ellipsis">{busy.label}</span>
-      <Progress value={busy.percent} label={busy.label} />
-      <span className="t-cap num">{busy.percent}%</span>
+      <Progress value={known ? busy.percent : null} label={busy.label} />
+      {known && <span className="t-cap num">{busy.percent}%</span>}
       <Button size="sm" onClick={() => send('cancelImport')}>{t('button.cancel')}</Button>
     </div>
   );

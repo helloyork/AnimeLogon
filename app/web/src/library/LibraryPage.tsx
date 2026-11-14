@@ -10,11 +10,13 @@ import {
   applyFlow,
   copyFlow,
   deleteFlow,
+  displayName,
   importFlow,
   kindName,
   openDialog,
   openTheme,
   perMonitor,
+  placeOf,
   renameFlow,
   resetFlow,
   screenTheme,
@@ -202,7 +204,7 @@ function Screens() {
               </button>
               <figcaption>
                 <span className="ellipsis">{t.name}</span>
-                <span className="t-cap3 ellipsis">{(m.primary ? tr('monitor.primary', { name: m.name }) : m.name) + (showOn(m.primary) ? '' : ' · ' + tr('library.no_components'))}</span>
+                <span className="t-cap3 ellipsis">{displayName(m) + ' · ' + placeOf(m) + (showOn(m.primary) ? '' : ' · ' + tr('library.no_components'))}</span>
               </figcaption>
             </figure>
           );
@@ -215,6 +217,8 @@ function Screens() {
 // Copy, Rename and Delete carry the shield of an administrator's action; `hasIcons` keeps that
 // column on every item, so all the names start at the same place. `extra` comes last.
 export function ThemeMenuItems({ theme, onPage, extra }: { theme: ThemeEntry; onPage?: boolean; extra?: ReactNode }) {
+  // One export or import at a time: not offered while the busy bar is up.
+  const { busy } = useStore();
   return (
     <MenuList hasIcons>
       {!onPage && <MenuItem onClick={() => openTheme(theme.id)}>{tr('theme.customize')}</MenuItem>}
@@ -222,7 +226,7 @@ export function ThemeMenuItems({ theme, onPage, extra }: { theme: ThemeEntry; on
       {!onPage && <MenuDivider />}
       <MenuItem icon={<UacShield />} onClick={() => copyFlow(theme.id)}>{tr('theme.copy')}</MenuItem>
       {!theme.builtIn && <MenuItem icon={<UacShield />} onClick={() => renameFlow(theme.id)}>{tr('theme.rename')}</MenuItem>}
-      <MenuItem onClick={() => send('export', { theme: theme.id })}>{tr('theme.export')}</MenuItem>
+      <MenuItem disabled={!!busy} onClick={() => send('export', { theme: theme.id })}>{tr('theme.export')}</MenuItem>
       {theme.modifications > 0 && <MenuItem onClick={() => resetFlow(theme.id)}>{tr('theme.reset')}</MenuItem>}
       {!theme.builtIn && <MenuDivider />}
       {!theme.builtIn && <MenuItem icon={<UacShield />} onClick={() => deleteFlow(theme.id)}>{tr('theme.delete')}</MenuItem>}

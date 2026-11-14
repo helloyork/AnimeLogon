@@ -247,9 +247,10 @@ function InstanceView({ inst }: { inst: Instance }) {
   // How it looks first, then what it shows: switches that only show or hide parts of it.
   const own = (inst.settings || []).filter(st => !st.folded && !st.content);
   const content = (inst.settings || []).filter(st => !st.folded && st.content);
-  // Everything the component's reset puts back: its settings, the values its switches turn on, its parts.
+  // Everything the component's reset puts back: its settings, the values its switches turn on and the
+  // values its settings stand for, its parts.
   const keys = [
-    ...(inst.settings || []).flatMap(st => (st.strength ? [st.id, st.strength.key] : [st.id])),
+    ...(inst.settings || []).flatMap(st => [st.id, ...(st.strength ? [st.strength.key] : []), ...(st.adjusts ? [st.adjusts] : [])]),
     ...(inst.parts || []).flatMap(p => p.adjustments.map(a => a.key)),
   ];
   const single = (inst.panels ?? 1) === 1;

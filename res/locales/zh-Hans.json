@@ -1,4 +1,8 @@
 {
+  "app.close_exporting": "导出尚未完成",
+  "app.close_exporting.close": "关闭并取消导出",
+  "app.close_exporting.detail": "关闭窗口将取消导出，未完成的文件不会保留。",
+  "app.close_exporting.keep": "继续导出",
   "app.close_importing": "导入尚未完成",
   "app.close_importing.close": "关闭并取消导入",
   "app.close_importing.detail": "关闭窗口将取消导入，已处理的内容不会保留。",
@@ -12,6 +16,7 @@
   "app.sandbox_title": "AnimeLogon（沙盒 · {folder}）",
 
   "busy.count": "（{i}/{n}）",
+  "busy.exporting": "正在导出「{name}」",
   "busy.processing": "正在处理「{name}」",
   "busy.reading": "正在读取「{name}」",
   "busy.transcoding": "正在转码「{name}」",
@@ -583,7 +588,12 @@
 
   "monitor.all": "所有屏幕",
   "monitor.name": "显示器 {n}",
-  "monitor.primary": "{name}（主）",
+  "monitor.place.above": "主显示器上方",
+  "monitor.place.below": "主显示器下方",
+  "monitor.place.left": "主显示器左侧",
+  "monitor.place.main": "主显示器",
+  "monitor.place.right": "主显示器右侧",
+  "monitor.with_place": "{name}（{place}）",
 
   "msg.applied": "已套用「{name}」，下次锁屏生效",
   "msg.cancelled": "已取消",
@@ -596,6 +606,8 @@
   "msg.delete_failed": "无法删除此主题，其文件可能正被登录界面占用。请稍后重试。",
   "msg.deleted": "已删除「{name}」",
   "msg.deleted_partly": "已删除「{name}」，但其壁纸或组件可能正被登录界面占用，暂时无法删除。",
+  "msg.export_busy": "主题包正在导出，请在导出完成后重试。",
+  "msg.export_cancelled": "已取消导出",
   "msg.exported": "已导出到 {path}",
   "msg.import_busy": "另一项导入正在进行，请在其完成或取消后重试。",
   "msg.import_cancelled": "已取消导入",

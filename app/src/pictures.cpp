@@ -247,8 +247,7 @@ bool Pictures::Theme(const theme::Theme &theme, UINT width, UINT height, Draw dr
         // At the theme's brightness and blur, as the logon screen draws it; the components over it
         // are neither darkened nor blurred.
         animelogon::ApplyBrightness(drawn.bgra.data(), drawn.bgra.size() / 4, 4, theme.brightness);
-        animelogon::blur::Apply(drawn.bgra.data(), (int)width, (int)height, 4,
-                                animelogon::blur::Sigma(theme.blur, (int)height));
+        BlurWallpaper(drawn.bgra.data(), width, height, theme.blur, screens ? *screens : std::vector<Screen>());
     }
     if (draw != Draw::WallpaperOnly) {
         const RECT all{0, 0, (LONG)width, (LONG)height};
@@ -305,6 +304,37 @@ bool Pictures::Theme(const theme::Theme &theme, UINT width, UINT height, Draw dr
     }
     *out = std::move(drawn);
     return true;
+}
+
+void BlurWallpaper(uint8_t *bgra, UINT width, UINT height, float percent, const std::vector<Screen> &screens) {
+    if (percent <= 0 || !width || !height) return;
+    const float sigma = WallSigma(percent, screens, height);
+    if (screens.empty()) {
+        animelogon::blur::Apply(bgra, (int)width, (int)height, 4, sigma);
+        return;
+    }
+    Picture whole;
+    whole.width = width;
+    whole.height = height;
+    whole.bgra.assign(bgra, bgra + (size_t)width * height * 4);
+    // Each display's part, on the picture: displays never overlap.
+    const RECT all{0, 0, (LONG)width, (LONG)height};
+    std::vector<RECT> parts;
+    uint64_t covered = 0;
+    for (const Screen &s : screens) {
+        RECT r{};
+        if (!IntersectRect(&r, &s.rect, &all)) continue;
+        parts.push_back(r);
+        covered += (uint64_t)(r.right - r.left) * (r.bottom - r.top);
+    }
+    // Where the displays leave part of the wall's bounds bare, that part is blurred as one piece.
+    if (covered < (uint64_t)width * height) animelogon::blur::Apply(bgra, (int)width, (int)height, 4, sigma);
+    for (const RECT &r : parts) {
+        Picture part = Crop(whole, r);
+        animelogon::blur::Apply(part.bgra.data(), (int)part.width, (int)part.height, 4, sigma);
+        for (UINT y = 0; y < part.height; ++y)
+            memcpy(bgra + (((size_t)r.top + y) * width + r.left) * 4, &part.bgra[(size_t)y * part.width * 4], (size_t)part.width * 4);
+    }
 }
 
 std::vector<uint8_t> Bmp(const Picture &picture) {

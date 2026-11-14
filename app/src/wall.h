@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 
+#include "animelogon/blur.h"
 #include "animelogon/monitors.h"
 #include "animelogon/settings.h"
 
@@ -23,6 +24,7 @@ namespace app {
 struct Screen {
     RECT rect{};
     bool components = true;
+    bool primary = false;  // the main display, whose height a spanning wall's blur is measured by
 };
 
 inline bool Spanning(const animelogon::Settings &settings, const std::vector<animelogon::MonitorInfo> &monitors) {
@@ -61,9 +63,26 @@ inline std::vector<Screen> Wall(const animelogon::Settings &settings, const std:
         s.rect = {(LONG)std::lround((m.rect.left - wall.left) * sx), (LONG)std::lround((m.rect.top - wall.top) * sy),
                   (LONG)std::lround((m.rect.right - wall.left) * sx), (LONG)std::lround((m.rect.bottom - wall.top) * sy)};
         s.components = everywhere || m.primary;
+        s.primary = m.primary;
         screens.push_back(s);
     }
     return screens;
+}
+
+// The blur's standard deviation in a picture `height` pixels tall, for a theme's blur of `percent`
+// (blur.h): of the picture's height for one display; when spanning (`screens`), of the main
+// display's height on the wall, for every display, as the logon screen measures it so that the
+// displays of a wall match. The main display is the one marked, else the first (EnumerateMonitors
+// puts it first).
+inline float WallSigma(float percent, const std::vector<Screen> &screens, UINT height) {
+    if (screens.empty()) return animelogon::blur::Sigma(percent, (int)height);
+    const Screen *main = &screens.front();
+    for (const Screen &s : screens)
+        if (s.primary) {
+            main = &s;
+            break;
+        }
+    return animelogon::blur::Sigma(percent, (int)std::max<LONG>(0, main->rect.bottom - main->rect.top));
 }
 
 }  // namespace app

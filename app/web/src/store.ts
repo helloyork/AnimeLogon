@@ -3,10 +3,10 @@
 // here change it.
 import { useSyncExternalStore } from 'react';
 import { onCalmChange } from './motion';
-import { list, setLang, t } from './i18n';
+import { list, setLang, t, type Key } from './i18n';
 import { listen, send } from './native';
 import { onPreview, pv, requestPreviewAgain, resetPreview } from './preview';
-import type { Environment, FromNative, ImportKind, Instance, Library, OpenTheme, SceneControls, Workshop } from './types';
+import type { Environment, FromNative, ImportKind, Instance, Library, Monitor, OpenTheme, SceneControls, Workshop } from './types';
 
 export type Tab = 'mine' | 'discover' | 'settings';
 
@@ -107,9 +107,34 @@ export function closeDialog(id: number) {
 export const themeOf = (id: string) => state.lib?.themes.find(t => t.id === id);
 export const perMonitor = () => state.lib?.settings.monitorMode === 'per-monitor';
 export const spanning = () => state.lib?.settings.monitorMode === 'span' && state.env.monitors.length > 1;
-export function mainMonitor() {
+export function mainMonitor(): Monitor {
   const ms = state.env.monitors;
-  return ms.find(m => m.primary) || ms[0] || { key: '', name: t('monitor.name', { n: 1 }), model: '', left: 0, top: 0, width: 16, height: 9, primary: true };
+  return ms.find(m => m.primary) || ms[0] || { key: '', name: t('monitor.name', { n: 1 }), model: '', place: 'main', left: 0, top: 0, width: 16, height: 9, primary: true };
+}
+// Where a display is beside the main one: the main display, right of the main display…
+export const placeOf = (m: Monitor) => t(`monitor.place.${m.place}` as Key);
+// A display's name, with where it is when another display has the same name.
+export function displayName(m: Monitor) {
+  return state.env.monitors.some(o => o.key !== m.key && o.name === m.name) ? t('monitor.with_place', { name: m.name, place: placeOf(m) }) : m.name;
+}
+// A slice of the wall of displays, in fractions of its width and height.
+export interface Slice {
+  key: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  primary: boolean;
+}
+// Spanning: where each display is on the wall, as the pictures of it place them, in the displays'
+// order (the main one first). Empty when not spanning.
+export function wallSlices(): Slice[] {
+  if (!spanning()) return [];
+  const ms = state.env.monitors;
+  const left = Math.min(...ms.map(m => m.left)), top = Math.min(...ms.map(m => m.top));
+  const width = Math.max(...ms.map(m => m.left + m.width)) - left, height = Math.max(...ms.map(m => m.top + m.height)) - top;
+  const main = mainMonitor();
+  return ms.map(m => ({ key: m.key, x: (m.left - left) / width, y: (m.top - top) / height, w: m.width / width, h: m.height / height, primary: m.key === main.key }));
 }
 export function screenTheme(key: string) {
   const id = state.lib?.settings.screens[key];
@@ -130,7 +155,7 @@ export function usedOn(id: string): string[] {
   if (!state.lib) return [];
   if (!perMonitor()) return state.lib.current === id ? [t('theme.in_use')] : [];
   const ms = state.env.monitors.filter(m => screenTheme(m.key) === id);
-  return ms.length && ms.length === state.env.monitors.length ? [t('monitor.all')] : ms.map(m => m.name);
+  return ms.length && ms.length === state.env.monitors.length ? [t('monitor.all')] : ms.map(displayName);
 }
 const KINDS: Record<string, Parameters<typeof t>[0]> = {
   scene: 'kind.scene', video: 'kind.video', image: 'kind.image', builtin: 'kind.builtin', none: 'kind.none', missing: 'kind.missing',
@@ -274,11 +299,14 @@ function receive(m: FromNative) {
       // The language first, so that everything drawn for this environment is in it. The pictures
       // are drawn again too: what a component shows when nothing is there (a sample song) is in it.
       const relanguaged = !!state.env.lang && env.lang !== state.env.lang;
+      // A display plugged in or taken away, moved or resized while the window is open: every picture
+      // is shaped by the displays, so all of them are fetched again.
+      const redisplayed = !!state.env.lang && JSON.stringify(env.monitors) !== JSON.stringify(state.env.monitors);
       setLang(env.lang);
       // Once shown, the wizard stays until it is left from its last page, which needs AnimeLogon on.
       const setup = state.setup || env.setupPending;
-      setState(relanguaged ? { env, setup, tick: state.tick + 1 } : { env, setup });
-      if (relanguaged && state.view === 'theme' && state.open) requestPreviewAgain();
+      setState(relanguaged || redisplayed ? { env, setup, tick: state.tick + 1 } : { env, setup });
+      if ((relanguaged || redisplayed) && state.view === 'theme' && state.open) requestPreviewAgain();
       break;
     }
     case 'state': {
