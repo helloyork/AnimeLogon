@@ -69,6 +69,13 @@ private:
     animelogon::SkinPreview preview_;
 };
 
+// A theme's blur of `percent` (blur.h) on a picture of its wallpaper, `width` x `height` pixels of
+// B G R A with no padding, as the logon screen draws it: the whole picture for one display (no
+// `screens`). When spanning, each display on its own, its edges held, by the sigma of the main
+// display's height (WallSigma) on every one, as the logon screen blurs each display's part of the
+// wall; what lies between displays, which no display shows, is blurred as one piece by that sigma.
+void BlurWallpaper(uint8_t *bgra, UINT width, UINT height, float percent, const std::vector<Screen> &screens);
+
 // The picture as a BMP file: 32-bit, top-down, opaque.
 std::vector<uint8_t> Bmp(const animelogon::Picture &picture);
 // A picture with premultiplied alpha as a PNG file, which browsers show with its alpha. Empty

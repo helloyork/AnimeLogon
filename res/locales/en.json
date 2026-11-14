@@ -1,4 +1,8 @@
 {
+  "app.close_exporting": "The export has not finished",
+  "app.close_exporting.close": "Close and cancel export",
+  "app.close_exporting.detail": "Closing the window cancels the export. The unfinished file is not kept.",
+  "app.close_exporting.keep": "Keep exporting",
   "app.close_importing": "The import has not finished",
   "app.close_importing.close": "Close and cancel import",
   "app.close_importing.detail": "Closing the window cancels the import. Nothing processed so far is kept.",
@@ -12,6 +16,7 @@
   "app.sandbox_title": "AnimeLogon (sandbox · {folder})",
 
   "busy.count": " ({i}/{n})",
+  "busy.exporting": "Exporting “{name}”",
   "busy.processing": "Processing “{name}”",
   "busy.reading": "Reading “{name}”",
   "busy.transcoding": "Converting “{name}”",
@@ -586,7 +591,12 @@
 
   "monitor.all": "All displays",
   "monitor.name": "Display {n}",
-  "monitor.primary": "{name} (main)",
+  "monitor.place.above": "Above the main display",
+  "monitor.place.below": "Below the main display",
+  "monitor.place.left": "Left of the main display",
+  "monitor.place.main": "Main display",
+  "monitor.place.right": "Right of the main display",
+  "monitor.with_place": "{name} ({place})",
 
   "msg.applied": "Applied “{name}”. It shows the next time you lock your PC.",
   "msg.cancelled": "Canceled",
@@ -599,6 +609,8 @@
   "msg.delete_failed": "This theme couldn't be deleted. Its files may be in use by the sign-in screen; try again later.",
   "msg.deleted": "Deleted “{name}”",
   "msg.deleted_partly": "Deleted “{name}”, but its wallpaper or components may be in use by the sign-in screen and couldn't be removed yet.",
+  "msg.export_busy": "A theme package is being exported. Try again after the export finishes.",
+  "msg.export_cancelled": "Export canceled",
   "msg.exported": "Exported to {path}",
   "msg.import_busy": "Another import is in progress. Try again after it finishes or is canceled.",
   "msg.import_cancelled": "Import canceled",

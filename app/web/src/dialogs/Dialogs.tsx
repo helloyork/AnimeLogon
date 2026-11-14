@@ -7,7 +7,8 @@ import { Checkmark12Filled, FolderOpen16Regular, Video16Regular } from '@fluentu
 import { UacShield } from '../icons';
 import { send, thumbUrl, wallpaperUrl } from '../native';
 import { edit } from '../preview';
-import { apply, closeDialog, importFlow, screenTheme, themeOf, useStore, workshopFlow, type Dialog as DialogState } from '../store';
+import { DisplaySketch } from '../displays';
+import { apply, closeDialog, importFlow, placeOf, screenTheme, themeOf, useStore, workshopFlow, type Dialog as DialogState } from '../store';
 import { Button, cx, TextInput } from '../ui/controls';
 import { ImportDialog } from './Import';
 import { WorkshopDialog } from './Workshop';
@@ -117,13 +118,17 @@ function MonitorDialog({ d }: { d: Extract<DialogState, { kind: 'monitor' }> }) 
   return (
     <Frame d={d} title={tr('dialog.apply.title', { name: t?.name ?? '' })} wide actions={<Button onClick={() => closeDialog(d.id)}>{tr('button.cancel')}</Button>}>
       <div className="choices">
+        {/* Each display named, placed beside the main one and marked in a sketch of the arrangement. */}
         {s.env.monitors.map(m => (
           <button key={m.key} type="button" className="choice" onClick={() => pick(m.key)}>
-            <span className="ellipsis">{m.primary ? tr('monitor.primary', { name: m.name }) : m.name}</span>
-            <span className="t-cap3 ellipsis">{`${m.width}×${m.height} · ` + tr('dialog.apply.now', { name: themeOf(screenTheme(m.key))?.name ?? '' })}</span>
+            <DisplaySketch highlight={m.key} />
+            <span className="ellipsis">{m.name}</span>
+            <span className="t-cap3 ellipsis">{`${placeOf(m)} · ${m.width}×${m.height}`}</span>
+            <span className="t-cap3 ellipsis">{tr('dialog.apply.now', { name: themeOf(screenTheme(m.key))?.name ?? '' })}</span>
           </button>
         ))}
         <button type="button" className="choice" onClick={() => pick('all')}>
+          <DisplaySketch highlight="all" />
           <span>{tr('monitor.all')}</span>
           <span className="t-cap3">{tr('dialog.apply.all.detail')}</span>
         </button>

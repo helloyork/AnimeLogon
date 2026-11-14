@@ -16,6 +16,13 @@
 .row .value { color: var(--text-2); font-size: 13px; }
 .row .range { display: flex; align-items: center; gap: var(--s3); width: 220px; }
 .row .range .value { width: 28px; text-align: right; }
+/* Which display a row or a choice is about: the arrangement of the displays, that one filled in. */
+.sketch { flex: none; display: block; }
+.sketch rect { fill: none; stroke: var(--text-3); stroke-width: 1; }
+.sketch rect.on { fill: var(--accent); stroke: var(--accent); }
+.row .sketch { margin-right: calc(var(--s1) * -1); }
+.choice .sketch { margin-bottom: var(--s1); }
+
 /* About: the project's links in one quiet row. */
 .row.links { min-height: 44px; flex-wrap: wrap; gap: var(--s2) var(--s5); }
 .row.links .link { font-size: 13px; }

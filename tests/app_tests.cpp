@@ -121,6 +121,13 @@ const skin::Values &Own(const app::Library &l, const std::wstring &theme, const 
     return it == o.instances.end() ? none : it->second.values;
 }
 
+// One value settings.ini holds for an instance, or empty when it holds none.
+std::wstring Set(const app::Library &l, const std::wstring &theme, const std::wstring &instance, const std::wstring &key) {
+    const skin::Values &values = Own(l, theme, instance);
+    const auto it = values.find(key);
+    return it == values.end() ? L"" : it->second;
+}
+
 }  // namespace
 
 // While the page may move things, the panels of the open theme that hold a spectrum are left out of
@@ -650,6 +657,91 @@ TEST(AppLibraryMarksChangedOnlyWhatCanBePutBack) {
     CHECK(Own(l, kThemeT, L"clock").size() == 1 && Own(l, kThemeT, L"clock").count(L"color"));
 }
 
+// A setting that feeds one attribute and nothing else is all there is to that value: the spectrum's
+// width, style, direction, bands, colours, gradient, flow, sensitivity and smoothing are offered with
+// their settings and not again on the spectrum's part page. The setting shows the value in effect,
+// takes what either of them takes (the part's wider ranges), writes the value itself where only it
+// takes what is asked or where the theme sets it, and its reset puts back both. Placing settings and
+// switches are as before.
+TEST(AppLibraryOffersASettingInPlaceOfTheOneValueItFeeds) {
+    const std::wstring kSpectrum = L"0c7c0c7c0c7c0c7c";
+    FakeStores s = Stores();
+    skin::Skin builtIn;
+    CHECK(BuiltInComponent(L"spectrum", &builtIn));
+    s.store.components[kSpectrum] = skin::Normalize(builtIn);
+    s.store.themes[kThemeU] = "<theme format=\"1\" name=\"U\"><wallpaper ref=\"2222222222222222\" fit=\"fill\"/>"
+                              "<component id=\"bars\" ref=\"0c7c0c7c0c7c0c7c\"><set key=\"p1.l1.a1.bands\" value=\"32\"/></component></theme>";
+    app::Library l(s);
+    l.Open(kThemeU);
+    json::Value v = Opened(l);
+    const json::Value *bars = ById(v[L"instances"], L"id", L"bars");
+    CHECK(bars != nullptr);
+    if (!bars) return;
+    const json::Value &settings = (*bars)[L"settings"];
+    const std::pair<const wchar_t *, const wchar_t *> standFor[] = {
+        {L"width", L"p1.l1.a1.length"}, {L"mode", L"p1.l1.a1.mode"},   {L"direction", L"p1.l1.a1.direction"},
+        {L"bands", L"p1.l1.a1.bands"},  {L"colors", L"p1.l1.a1.colors"}, {L"gradient", L"p1.l1.a1.gradient"},
+        {L"flow", L"p1.l1.a1.flow"},    {L"sensitivity", L"p1.l1.a1.sensitivity"}, {L"smoothing", L"p1.l1.a1.smoothing"}};
+    for (const auto &[id, key] : standFor) {
+        const json::Value *setting = ById(settings, L"id", id);
+        CHECK(setting && (*setting)[L"adjusts"].Str() == key && !Offered(*bars, key));
+    }
+    // The spectrum's part keeps what no setting stands for.
+    CHECK(Offered(*bars, L"p1.l1.a1.gap") && Offered(*bars, L"p1.l1.a1.height"));
+    // Placing and switches as before.
+    CHECK((*ById(settings, L"id", L"size"))[L"folded"].Bool() && (*ById(settings, L"id", L"size"))[L"adjusts"].IsNull());
+    CHECK(!(*ById(settings, L"id", L"hide"))[L"strength"].IsNull() && (*ById(settings, L"id", L"hide"))[L"adjusts"].IsNull());
+    // The wider of the two ranges, so that nothing the part offered goes out of reach.
+    const json::Value &width = *ById(settings, L"id", L"width");
+    CHECK(width[L"min"].Num() == 1 && width[L"max"].Num() == 40 && width[L"value"].Str() == L"13" && !width[L"modified"].Bool());
+    // The theme's own value is the one in effect, and writing goes to it, which wins over the setting.
+    const json::Value &bands = *ById(settings, L"id", L"bands");
+    CHECK(bands[L"min"].Num() == 4 && bands[L"value"].Str() == L"32" && !bands[L"modified"].Bool());
+    CHECK(l.SetValue(L"bars", L"bands", L"64"));
+    CHECK(Set(l, kThemeU, L"bars", L"p1.l1.a1.bands") == L"64" && !Own(l, kThemeU, L"bars").count(L"bands"));
+    CHECK((*ById((*ById(Opened(l)[L"instances"], L"id", L"bars"))[L"settings"], L"id", L"bands"))[L"value"].Str() == L"64");
+
+    // Set on the part before (or by an older version), the value in effect shows with the setting.
+    CHECK(l.SetValue(L"bars", L"p1.l1.a1.length", L"20"));
+    const json::Value shown = *ById((*ById(Opened(l)[L"instances"], L"id", L"bars"))[L"settings"], L"id", L"width");
+    CHECK(shown[L"value"].Str() == L"20" && shown[L"modified"].Bool());
+    // Writing the setting puts the part's value back.
+    CHECK(l.SetValue(L"bars", L"width", L"15"));
+    CHECK(Set(l, kThemeU, L"bars", L"width") == L"15" && !Own(l, kThemeU, L"bars").count(L"p1.l1.a1.length"));
+    // A width only the part takes goes to the part.
+    CHECK(l.SetValue(L"bars", L"width", L"1.5"));
+    CHECK(Set(l, kThemeU, L"bars", L"p1.l1.a1.length") == L"1.5" && Set(l, kThemeU, L"bars", L"width") == L"15");
+    CHECK((*ById((*ById(Opened(l)[L"instances"], L"id", L"bars"))[L"settings"], L"id", L"width"))[L"value"].Str() == L"1.5");
+    CHECK(!l.SetValue(L"bars", L"width", L"abc"));  // neither takes it
+    // The setting's reset puts back both.
+    CHECK(l.ClearValues(L"bars", {L"width", L"p1.l1.a1.length"}));
+    CHECK(!Own(l, kThemeU, L"bars").count(L"width") && !Own(l, kThemeU, L"bars").count(L"p1.l1.a1.length"));
+
+    // Someone's own component: the same rule. A colour that feeds two texts stays as it was, and so
+    // do those texts' colours on their pages.
+    const std::wstring kOwn = L"0d0d0d0d0d0d0d0d";
+    s.store.components[kOwn] =
+        "<component format=\"1\" name=\"Own\"><settings>"
+        "<color id=\"tint\" label=\"T\" default=\"#FFFFFF\"/>"
+        "<number id=\"fade\" label=\"F\" default=\"0.6\" min=\"0.2\" max=\"1\" step=\"0.1\"/>"
+        "</settings><panel anchor=\"top\" size=\"4\">"
+        "<line><text value=\"{time}\" color=\"$tint\"/><text value=\"{date}\" color=\"$tint\" opacity=\"$fade\"/></line>"
+        "</panel></component>";
+    app::Library own(s);
+    own.Open(kThemeT);
+    const std::wstring id = own.AddInstance(kOwn);
+    CHECK(!id.empty());
+    v = Opened(own);
+    const json::Value *mine = ById(v[L"instances"], L"id", id);
+    CHECK(mine != nullptr);
+    if (!mine) return;
+    const json::Value &fade = *ById((*mine)[L"settings"], L"id", L"fade");
+    CHECK(fade[L"adjusts"].Str() == L"p1.l1.t2.opacity" && !Offered(*mine, L"p1.l1.t2.opacity") && fade[L"min"].Num() == 0);
+    CHECK((*ById((*mine)[L"settings"], L"id", L"tint"))[L"adjusts"].IsNull());
+    CHECK(Offered(*mine, L"p1.l1.t1.color") && Offered(*mine, L"p1.l1.t2.color"));
+    CHECK(own.SetValue(id, L"fade", L"0.1") && Set(own, kThemeT, id, L"p1.l1.t2.opacity") == L"0.1");
+}
+
 TEST(AppLibraryRemembersTheRecentThemes) {
     FakeStores s = Stores();
     app::Library l(s);
@@ -684,7 +776,9 @@ TEST(AppTrayMenuMarksWhatTheLogonScreenShows) {
     MonitorInfo a, b;
     a.key = L"00000000000000aa";
     a.primary = true;
+    a.rect = {0, 0, 1920, 1080};
     b.key = L"00000000000000bb";
+    b.rect = {1920, 0, 3200, 1024};
     // The theme in use is offered even when it is not among the newest.
     app::TrayMenu m = app::MenuFor(one, {a, b});
     CHECK(m.displays.empty() && m.themes.size() == 2);
@@ -697,7 +791,7 @@ TEST(AppTrayMenuMarksWhatTheLogonScreenShows) {
     app::Library each(s);
     m = app::MenuFor(each, {a, b});
     CHECK(m.themes.empty() && m.displays.size() == 2);
-    CHECK(m.displays[0].label == L"显示器 1（主）" && m.displays[1].label == L"显示器 2");
+    CHECK(m.displays[0].label == L"显示器 1（主显示器）" && m.displays[1].label == L"显示器 2（主显示器右侧）");
     CHECK(m.displays[0].themes.size() == 2 && m.displays[0].themes[0].id == kThemeU && m.displays[0].themes[0].checked &&
           m.displays[0].themes[0].monitor == a.key);
     CHECK(m.displays[1].themes[1].id == kThemeT && m.displays[1].themes[1].checked && m.displays[1].themes[1].monitor == b.key);
@@ -706,4 +800,38 @@ TEST(AppTrayMenuMarksWhatTheLogonScreenShows) {
     m = app::MenuFor(each, {a});
     CHECK(m.displays.empty() && m.themes[0].id == kThemeU && m.themes[0].checked && m.themes[0].monitor == a.key);
     CHECK(app::ShowingNow(each, {a}) == L"U");
+}
+
+// Displays are told apart by the name Windows has for them, and by where each is beside the main one,
+// which tells two of the same model apart.
+TEST(AppTellsDisplaysApartByNameAndPlace) {
+    auto display = [](const wchar_t *key, RECT rect, bool primary, const wchar_t *name = L"", const wchar_t *device = L"") {
+        MonitorInfo m;
+        m.key = key;
+        m.rect = rect;
+        m.primary = primary;
+        m.name = name;
+        m.gdiName = device;
+        return m;
+    };
+    const std::vector<MonitorInfo> all{
+        display(L"main", {0, 0, 1920, 1080}, true, L"DELL U2720Q", L"\\\\.\\DISPLAY2"),
+        display(L"left", {-1280, 56, 0, 1080}, false, L"DELL U2720Q", L"\\\\.\\DISPLAY1"),
+        display(L"above", {0, -1080, 1920, 0}, false, L"", L"\\\\.\\DISPLAY3"),
+        display(L"below", {200, 1080, 1800, 2000}, false),
+        // Off the corner, as far across as down in the main display's widths and heights: beside it.
+        display(L"corner", {1920, 1080, 3840, 2160}, false),
+        // Off the corner but further down than across: below it.
+        display(L"low", {1000, 1200, 2920, 2280}, false)};
+    const app::Place places[] = {app::Place::Main, app::Place::Left, app::Place::Above, app::Place::Below, app::Place::Right, app::Place::Below};
+    for (size_t i = 0; i < all.size(); ++i) CHECK(app::PlaceOf(all[i], all) == places[i]);
+    CHECK(std::wstring(app::PlaceName(app::Place::Left)) == L"left" && std::wstring(app::PlaceName(app::Place::Main)) == L"main");
+    // Its own name; else Windows' number for it; else its place in the list.
+    CHECK(app::DisplayName(all[0], 0) == L"DELL U2720Q");
+    CHECK(app::DisplayName(all[2], 2) == L"显示器 3" && app::DisplayName(all[3], 3) == L"显示器 4");
+    CHECK(app::DisplayLabel(all[1], all, 1) == L"DELL U2720Q（主显示器左侧）");
+    // With none marked as the main one, the first is.
+    std::vector<MonitorInfo> unmarked = all;
+    for (MonitorInfo &m : unmarked) m.primary = false;
+    CHECK(app::PlaceOf(unmarked[0], unmarked) == app::Place::Main && app::PlaceOf(unmarked[1], unmarked) == app::Place::Left);
 }

@@ -20,6 +20,17 @@
 
 namespace animelogon {
 
+// A panel may hang past the edges of its display -- what lies beyond is simply not on it -- but
+// at least this much of its box stays on the display in each direction, so that it is never lost
+// and can always be grabbed back on the settings page (app/web/src/editor/geometry.ts keeps the
+// same rule).
+constexpr float kPanelStaysOn = 0.25f;
+
+// How far to move a panel whose box runs from `lo` to `hi` along one direction of a display
+// `limit` pixels long so that it keeps to that rule, in whole pixels so that its text stays on the
+// pixel grid: 0 when it already does. A box at least as long as the display is centred on it.
+float PanelShift(float lo, float hi, float limit);
+
 class SkinView {
 public:
     // Makes its own device context on `device`. False leaves nothing to draw.

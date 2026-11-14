@@ -1,4 +1,8 @@
 {
+  "app.close_exporting": "匯出尚未完成",
+  "app.close_exporting.close": "關閉並取消匯出",
+  "app.close_exporting.detail": "關閉視窗將取消匯出，未完成的檔案不會保留。",
+  "app.close_exporting.keep": "繼續匯出",
   "app.close_importing": "匯入尚未完成",
   "app.close_importing.close": "關閉並取消匯入",
   "app.close_importing.detail": "關閉視窗將取消匯入，已處理的內容不會保留。",
@@ -12,6 +16,7 @@
   "app.sandbox_title": "AnimeLogon（沙箱 · {folder}）",
 
   "busy.count": "（{i}/{n}）",
+  "busy.exporting": "正在匯出「{name}」",
   "busy.processing": "正在處理「{name}」",
   "busy.reading": "正在讀取「{name}」",
   "busy.transcoding": "正在轉碼「{name}」",
@@ -586,7 +591,12 @@
 
   "monitor.all": "所有螢幕",
   "monitor.name": "顯示器 {n}",
-  "monitor.primary": "{name}（主要）",
+  "monitor.place.above": "主顯示器上方",
+  "monitor.place.below": "主顯示器下方",
+  "monitor.place.left": "主顯示器左側",
+  "monitor.place.main": "主顯示器",
+  "monitor.place.right": "主顯示器右側",
+  "monitor.with_place": "{name}（{place}）",
 
   "msg.applied": "已套用「{name}」，下次鎖定時生效",
   "msg.cancelled": "已取消",
@@ -599,6 +609,8 @@
   "msg.delete_failed": "無法刪除此主題，其檔案可能正被登入畫面使用。請稍後再試。",
   "msg.deleted": "已刪除「{name}」",
   "msg.deleted_partly": "已刪除「{name}」，但其桌布或元件可能正被登入畫面使用，暫時無法刪除。",
+  "msg.export_busy": "主題套件正在匯出，請在匯出完成後重試。",
+  "msg.export_cancelled": "已取消匯出",
   "msg.exported": "已匯出至 {path}",
   "msg.import_busy": "另一項匯入正在進行，請在其完成或取消後重試。",
   "msg.import_cancelled": "已取消匯入",

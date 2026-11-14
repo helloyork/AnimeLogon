@@ -493,12 +493,13 @@ function StrengthField({ instId, setting: s, strength, onReset }: { instId: stri
   );
 }
 
-// `onReset` is given the keys to put back: the setting's own, and with a strength its slider's.
+// `onReset` is given the keys to put back: the setting's own, with a strength its slider's, and the
+// one value it stands for when it is all there is to it (the native side writes either, as the value asked takes).
 export function SettingField({ instId, setting: s, onReset }: { instId: string; setting: Setting; onReset: (keys: string[]) => void }) {
   if (s.kind === 'toggle' && s.strength) return <StrengthField instId={instId} setting={s} strength={s.strength} onReset={onReset} />;
   const id = `set-${instId}-${s.id}`;
   const write = writer(instId, s.id);
-  const common = { id, label: s.label, detail: s.detail || undefined, modified: s.modified, onReset: () => onReset([s.id]) };
+  const common = { id, label: s.label, detail: s.detail || undefined, modified: s.modified, onReset: () => onReset(s.adjusts ? [s.id, s.adjusts] : [s.id]) };
   switch (s.kind) {
     case 'number':
       return <NumberField {...common} min={s.min} max={s.max} step={s.step} value={s.value} view={viewFor(s.id, s.step)} write={write} />;

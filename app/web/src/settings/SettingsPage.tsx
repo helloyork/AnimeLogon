@@ -6,15 +6,18 @@ import { UacShield } from '../icons';
 import { LANGUAGES, list, t, tn, type Key } from '../i18n';
 import { calm } from '../motion';
 import { send } from '../native';
-import { global, openLink, perMonitor, setLanguage, setState, switchOn, themeOf, useStore } from '../store';
+import { DisplaySketch } from '../displays';
+import { displayName, global, openLink, perMonitor, placeOf, setLanguage, setState, switchOn, themeOf, useStore } from '../store';
 import { Button, cx, Select, Slider, Switch, type Choice } from '../ui/controls';
 
 // The control in a row is named by the row's title. `anchor` is what the icon in the system tray
 // may ask to have pointed out (store.ts `reveal`).
-function Row({ title, description, children, sub, dim, anchor }: { title: string; description?: string; children?: (labelId: string) => ReactNode; sub?: boolean; dim?: boolean; anchor?: string }) {
+// `lead` goes before the title: the sketch of which display a row is about.
+function Row({ title, description, children, sub, dim, anchor, lead }: { title: string; description?: string; children?: (labelId: string) => ReactNode; sub?: boolean; dim?: boolean; anchor?: string; lead?: ReactNode }) {
   const id = useId();
   return (
     <div className={cx('row', sub && 'sub', dim && 'dim')} data-anchor={anchor}>
+      {lead}
       <div className="lbl">
         <div id={id}>{title}</div>
         {description && <div className="t-cap">{description}</div>}
@@ -159,10 +162,12 @@ export function SettingsPage() {
                 options={choices([['duplicate', 'settings.monitors.duplicate'], ['span', 'settings.monitors.span'], ['per-monitor', 'settings.monitors.per']])} />
             )}
           </Row>
+          {/* Each display by its name, where it is beside the main one and its resolution, with a
+              sketch of the arrangement that marks it: what tells two of the same model apart. */}
           {perMonitor() && s.env.monitors.map(m => (
-            <Row key={m.key} sub title={m.primary ? t('monitor.primary', { name: m.name }) : m.name} description={`${m.width}×${m.height}`}>
+            <Row key={m.key} sub lead={<DisplaySketch highlight={m.key} />} title={m.name} description={`${placeOf(m)} · ${m.width}×${m.height}`}>
               {() => (
-                <Select label={m.name} value={set.screens[m.key] || ''} onChange={v => global('screen.' + m.key, v)}
+                <Select label={displayName(m)} value={set.screens[m.key] || ''} onChange={v => global('screen.' + m.key, v)}
                   options={[{ value: '', label: t('settings.screen.follow', { name: themeOf(s.lib!.current)?.name ?? '' }) },
                     ...s.lib!.themes.map(th => ({ value: th.id, label: th.name }))]} />
               )}
