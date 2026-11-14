@@ -62,35 +62,23 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
       # One setup program: install.exe carries every file it installs for both architectures, the
-      # licences included, so it is the whole release. The log lists its SHA-256, as
-      # SHA256SUMS.txt does.
+      # licences included. Beside it, the programs' symbols of both architectures in one zip, so
+      # that anyone can read a crash reported against this release; the project is open source,
+      # so they are published with it. The log lists every file's SHA-256, as SHA256SUMS.txt does.
       - name: Package
         shell: pwsh
         run: |
           $dist = (New-Item -ItemType Directory -Force dist).FullName
           Copy-Item build/x64/bin/Release/install.exe (Join-Path $dist "AnimeLogon-$env:VERSION-setup.exe") -ErrorAction Stop
-          Get-ChildItem $dist -Filter *.exe | ForEach-Object {
-            '{0}  {1}' -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(), $_.Name
-          } | Set-Content (Join-Path $dist SHA256SUMS.txt)
-          Get-Content (Join-Path $dist SHA256SUMS.txt)
-
-      # The programs' symbols, so that a crash reported against this release can be read. Kept with
-      # the workflow run, not attached to the release.
-      - name: Collect the symbols
-        shell: pwsh
-        run: |
           foreach ($arch in 'x64', 'arm64') {
             $to = (New-Item -ItemType Directory -Force "symbols/$arch").FullName
             Copy-Item "build/$arch/bin/Release/*.pdb" $to -ErrorAction Stop
           }
-          Get-ChildItem -Recurse symbols -Filter *.pdb | ForEach-Object { '{0}  {1}' -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(), $_.FullName }
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: AnimeLogon-${{ env.VERSION }}-symbols
-          path: symbols/
-          retention-days: 90
-          if-no-files-found: error
+          Compress-Archive -Path symbols/* -DestinationPath (Join-Path $dist "AnimeLogon-$env:VERSION-symbols.zip") -ErrorAction Stop
+          Get-ChildItem $dist -File | Where-Object Name -ne SHA256SUMS.txt | ForEach-Object {
+            '{0}  {1}' -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(), $_.Name
+          } | Set-Content (Join-Path $dist SHA256SUMS.txt)
+          Get-Content (Join-Path $dist SHA256SUMS.txt)
 
       # A draft, so that its files can be checked and its notes written before anyone sees it.
       - name: Create a draft release
