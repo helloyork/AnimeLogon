@@ -34,6 +34,8 @@
   "check.folder.title": "安装位置不可用",
   "check.h264.detail": "Windows N 和 KN 版本不含该解码器。请在「设置 > 应用 > 可选功能」中添加「媒体功能包」，然后重新检查。",
   "check.h264.title": "缺少 H.264 视频解码器",
+  "check.machine.detail": "其中没有适用于 {machine} 处理器的 AnimeLogon。Releases 页面上的安装程序同时包含 x64 和 ARM64 版本。",
+  "check.machine.title": "此安装程序不支持这台电脑的处理器",
   "check.space.detail": "需要 {need}，可用 {free}。",
   "check.space.title": "磁盘空间不足",
 
@@ -290,6 +292,7 @@
   "install.error.data": "无法设置数据文件夹的权限",
   "install.error.dir": "安装位置必须在 {root} 中：{dir}",
   "install.error.h264": "缺少 H.264 视频解码器。AnimeLogon 不支持未安装媒体功能包的 Windows N/KN 版本。",
+  "install.error.machine": "此安装程序不包含适用于 {machine} 处理器的 AnimeLogon",
   "install.error.missing": "安装程序缺少文件：{name}",
   "install.error.mkdir": "无法创建安装文件夹：{dir}",
   "install.error.others": "无法停用 {name}，已撤销对系统所做的更改",

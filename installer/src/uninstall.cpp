@@ -28,6 +28,8 @@ bool HasArg(int argc, wchar_t **argv, const wchar_t *name) {
 }  // namespace
 
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
+    // Elevated, as install.exe is: DLLs loaded by name come from System32 only (install.cpp).
+    SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32);
     namespace i18n = animelogon::i18n;
     int argc = 0;
     wchar_t **argv = CommandLineToArgvW(GetCommandLineW(), &argc);

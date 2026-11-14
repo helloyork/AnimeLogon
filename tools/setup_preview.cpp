@@ -119,9 +119,13 @@ int wmain(int argc, wchar_t **argv) {
             stage(w);
         });
     };
+    // A stand-in for the other program that draws the logon screen, as its name would show.
+    static const wchar_t kOther[] = L"Other Logon";
+    // The version an update starts from: the release before this one.
+    static const wchar_t kOld[] = L"0.1.0-alpha";
     install(L"1-welcome", [](auto &w) { w.page = P::Welcome; });
-    install(L"1c-welcome-others", [](auto &w) { w.page = P::Welcome; w.othersOn = L"Shittim Logon"; });
-    install(L"1b-welcome-update", [](auto &w) { w.page = P::Welcome; w.installedVersion = L"0.1.0"; w.askConsent = false; });
+    install(L"1c-welcome-others", [](auto &w) { w.page = P::Welcome; w.othersOn = kOther; });
+    install(L"1b-welcome-update", [](auto &w) { w.page = P::Welcome; w.installedVersion = kOld; w.askConsent = false; });
     install(L"2-location", [](auto &w) { w.page = P::Location; });
     install(L"2b-location-outside", [](auto &w) { w.page = P::Location; w.targetDir = L"D:\\Apps\\AnimeLogon"; });
     install(L"3-working", [](auto &w) {
@@ -134,10 +138,15 @@ int wmain(int argc, wchar_t **argv) {
         w.blockers = {{i18n::Tr("check.h264.title"), i18n::Tr("check.h264.detail")},
                       {i18n::Tr("check.space.title"), i18n::Tr("check.space.detail", {{L"need", L"10 MB"}, {L"free", L"3 MB"}})}};
     });
+    // A setup program with no programs for this processor: an x64-only build run on ARM64.
+    install(L"4b-blocked-machine", [](auto &w) {
+        w.page = P::Blocked;
+        w.blockers = {{i18n::Tr("check.machine.title"), i18n::Tr("check.machine.detail", {{L"machine", L"ARM64"}})}};
+    });
     install(L"5-done", [](auto &w) { w.page = P::Done; w.report.ok = true; });
     install(L"5b-done-webview2", [](auto &w) { w.page = P::Done; w.report.ok = true; w.report.webView2Missing = true; });
-    install(L"5d-done-others", [](auto &w) { w.page = P::Done; w.report.ok = true; w.report.switchedOff = L"Shittim Logon"; });
-    install(L"5c-done-update", [](auto &w) { w.page = P::Done; w.report.ok = true; w.installedVersion = L"0.1.0"; });
+    install(L"5d-done-others", [](auto &w) { w.page = P::Done; w.report.ok = true; w.report.switchedOff = kOther; });
+    install(L"5c-done-update", [](auto &w) { w.page = P::Done; w.report.ok = true; w.installedVersion = kOld; });
     install(L"6-failed", [](auto &w) {
         w.page = P::Failed;
         w.report.message = i18n::Tr("error.with_code", {{L"text", i18n::Tr("install.error.service")}, {L"code", L"1073"}});

@@ -41,3 +41,5 @@ animelogon_add_executable(setup_preview WIN32 LOCALES
     LIBS mfuuid ole32 oleaut32 shell32 comctl32 d2d1 dwrite dwmapi)
 # A console program, though its windows need the manifest of a windowed one (common controls 6).
 set_target_properties(setup_preview PROPERTIES WIN32_EXECUTABLE OFF)
+# The installer's list of what it installs (installer/CMakeLists.txt).
+target_include_directories(setup_preview PRIVATE ${ANIMELOGON_PAYLOAD_INCLUDE})

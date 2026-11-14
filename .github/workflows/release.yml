@@ -1,7 +1,8 @@
 name: Release
 
-# Pushing a tag such as v0.1.0 or v0.1.0-alpha builds x64 and ARM64 and attaches the setup program
-# of each to a draft GitHub release. The draft is published by hand once its files have been checked.
+# Pushing a tag such as v1.0.0 or v1.1.0-beta1 builds ARM64 and x64 and attaches the one setup
+# program, which installs either, to a draft GitHub release. The draft is published by hand once its
+# files have been checked.
 on:
   push:
     tags: ['v*']
@@ -26,7 +27,7 @@ jobs:
           cache: npm
           cache-dependency-path: app/web/package-lock.json
 
-      # v0.1.0-alpha is version 0.1.0 with the suffix -alpha. The numbers must be the ones in
+      # v1.1.0-beta1 is version 1.1.0 with the suffix -beta1. The numbers must be the ones in
       # CMakeLists.txt, so that a tag cannot ship programs that carry another version.
       - name: Read the version from the tag
         shell: pwsh
@@ -42,32 +43,54 @@ jobs:
           "SUFFIX=$suffix" >> $env:GITHUB_ENV
           "PRERELEASE=$(if ($suffix) { 'true' } else { 'false' })" >> $env:GITHUB_ENV
 
-      # Tags are made on master, whose commits the Build workflow has already built and tested,
-      # so the tests and tools are left out here.
+      # ARM64 first: the x64 build's install.exe carries the ARM64 programs as well as its own and
+      # installs whichever the machine runs (installer/CMakeLists.txt). Tags are made on master,
+      # whose commits the Build workflow has already built and tested, so the tests and tools are
+      # left out here.
       - name: Build
         shell: pwsh
         run: |
-          foreach ($arch in 'x64', 'arm64') {
-            cmake --preset $arch -DBUILD_TESTING=OFF -DANIMELOGON_BUILD=${{ github.run_number }} "-DANIMELOGON_VERSION_SUFFIX=$env:SUFFIX"
-            if ($LASTEXITCODE) { exit $LASTEXITCODE }
-            cmake --build --preset "$arch-release"
-            if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          }
+          $common = @('-DBUILD_TESTING=OFF', "-DANIMELOGON_BUILD=${{ github.run_number }}", "-DANIMELOGON_VERSION_SUFFIX=$env:SUFFIX")
+          cmake --preset arm64 @common
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cmake --build --preset arm64-release
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $arm64 = (Resolve-Path build/arm64/bin/Release).Path
+          cmake --preset x64 @common "-DANIMELOGON_ARM64_PAYLOAD_DIR=$arm64"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cmake --build --preset x64-release
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
-      # One setup program per architecture: install.exe carries every file it installs, the
-      # licences included (installer/CMakeLists.txt), so it is the whole release. The log lists
-      # each one's SHA-256, as SHA256SUMS.txt does.
+      # One setup program: install.exe carries every file it installs for both architectures, the
+      # licences included, so it is the whole release. The log lists its SHA-256, as
+      # SHA256SUMS.txt does.
       - name: Package
         shell: pwsh
         run: |
           $dist = (New-Item -ItemType Directory -Force dist).FullName
-          foreach ($arch in 'x64', 'arm64') {
-            Copy-Item "build/$arch/bin/Release/install.exe" (Join-Path $dist "AnimeLogon-$env:VERSION-$arch-setup.exe") -ErrorAction Stop
-          }
+          Copy-Item build/x64/bin/Release/install.exe (Join-Path $dist "AnimeLogon-$env:VERSION-setup.exe") -ErrorAction Stop
           Get-ChildItem $dist -Filter *.exe | ForEach-Object {
             '{0}  {1}' -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(), $_.Name
           } | Set-Content (Join-Path $dist SHA256SUMS.txt)
           Get-Content (Join-Path $dist SHA256SUMS.txt)
+
+      # The programs' symbols, so that a crash reported against this release can be read. Kept with
+      # the workflow run, not attached to the release.
+      - name: Collect the symbols
+        shell: pwsh
+        run: |
+          foreach ($arch in 'x64', 'arm64') {
+            $to = (New-Item -ItemType Directory -Force "symbols/$arch").FullName
+            Copy-Item "build/$arch/bin/Release/*.pdb" $to -ErrorAction Stop
+          }
+          Get-ChildItem -Recurse symbols -Filter *.pdb | ForEach-Object { '{0}  {1}' -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(), $_.FullName }
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: AnimeLogon-${{ env.VERSION }}-symbols
+          path: symbols/
+          retention-days: 90
+          if-no-files-found: error
 
       # A draft, so that its files can be checked and its notes written before anyone sees it.
       - name: Create a draft release

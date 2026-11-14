@@ -34,6 +34,8 @@
   "check.folder.title": "無法使用此安裝位置",
   "check.h264.detail": "Windows N 和 KN 版本不含此解碼器。請在「設定 > 應用程式 > 選用功能」中新增「媒體功能套件」，然後重新檢查。",
   "check.h264.title": "缺少 H.264 視訊解碼器",
+  "check.machine.detail": "其中沒有適用於 {machine} 處理器的 AnimeLogon。Releases 頁面上的安裝程式同時包含 x64 和 ARM64 版本。",
+  "check.machine.title": "此安裝程式不支援這台電腦的處理器",
   "check.space.detail": "需要 {need}，可用 {free}。",
   "check.space.title": "磁碟空間不足",
 
@@ -290,6 +292,7 @@
   "install.error.data": "無法設定資料資料夾的權限",
   "install.error.dir": "安裝位置必須在 {root} 中：{dir}",
   "install.error.h264": "缺少 H.264 視訊解碼器。AnimeLogon 不支援未安裝媒體功能套件的 Windows N/KN 版本。",
+  "install.error.machine": "此安裝程式不包含適用於 {machine} 處理器的 AnimeLogon",
   "install.error.missing": "安裝程式缺少檔案：{name}",
   "install.error.mkdir": "無法建立安裝資料夾：{dir}",
   "install.error.others": "無法停用 {name}，已復原對系統所做的變更",

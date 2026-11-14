@@ -34,6 +34,8 @@
   "check.folder.title": "This location can't be used",
   "check.h264.detail": "Windows N and KN editions don't include it. Add the Media Feature Pack in Settings > Apps > Optional features, then check again.",
   "check.h264.title": "The H.264 video decoder is missing",
+  "check.machine.detail": "It doesn't include AnimeLogon for {machine} processors. The setup program on the Releases page includes both x64 and ARM64.",
+  "check.machine.title": "This setup program doesn't support this PC's processor",
   "check.space.detail": "{need} is needed and {free} is available.",
   "check.space.title": "Not enough disk space",
 
@@ -290,6 +292,7 @@
   "install.error.data": "Couldn't set the permissions of the data folder",
   "install.error.dir": "The install location must be inside {root}: {dir}",
   "install.error.h264": "The H.264 video decoder is missing. AnimeLogon doesn't support Windows N/KN editions without the Media Feature Pack.",
+  "install.error.machine": "This setup program doesn't include AnimeLogon for {machine} processors",
   "install.error.missing": "The installer is missing a file: {name}",
   "install.error.mkdir": "Couldn't create the install folder: {dir}",
   "install.error.others": "Couldn't turn off {name}. The changes to your system have been undone",

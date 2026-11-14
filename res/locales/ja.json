@@ -34,6 +34,8 @@
   "check.folder.title": "この場所は使用できません",
   "check.h264.detail": "Windows の N エディションと KN エディションには含まれていません。[設定] > [アプリ] > [オプション機能] でメディア機能パックを追加してから、再確認してください。",
   "check.h264.title": "H.264 ビデオ デコーダーがありません",
+  "check.machine.detail": "{machine} プロセッサ用の AnimeLogon は含まれていません。Releases ページのセットアップ プログラムには x64 版と ARM64 版の両方が含まれています。",
+  "check.machine.title": "このセットアップ プログラムは、この PC のプロセッサに対応していません",
   "check.space.detail": "{need} 必要ですが、空き容量は {free} です。",
   "check.space.title": "ディスクの空き容量が不足しています",
 
@@ -290,6 +292,7 @@
   "install.error.data": "データ フォルダーのアクセス許可を設定できませんでした",
   "install.error.dir": "インストール先は {root} 内にする必要があります: {dir}",
   "install.error.h264": "H.264 ビデオ デコーダーがありません。メディア機能パックのない Windows N/KN エディションには対応していません。",
+  "install.error.machine": "このセットアップ プログラムには {machine} プロセッサ用の AnimeLogon が含まれていません",
   "install.error.missing": "インストーラーにファイルがありません: {name}",
   "install.error.mkdir": "インストール フォルダーを作成できませんでした: {dir}",
   "install.error.others": "{name} を無効にできませんでした。システムへの変更は元に戻しました",

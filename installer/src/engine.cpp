@@ -41,19 +41,14 @@ using namespace animelogon;
 
 namespace engine {
 
-// WebView2Loader.dll is the settings app's: it finds the Edge WebView2 runtime its page runs in.
-const wchar_t *const kComponents[] = {L"overlay.exe", L"launcher.exe", L"animelogon.exe", L"scene.exe", L"WebView2Loader.dll",
-                                      L"uninstall.exe"};
-const size_t kComponentCount = ARRAYSIZE(kComponents);
-
 namespace {
 
 using i18n::Tr;
 
-// The licences of AnimeLogon and of the code it carries, beside the programs. Only install.exe as
-// built has them (payload.h); a build run from its own folder installs without.
-const wchar_t *const kDocuments[] = {L"LICENSE.txt", L"licenses\\WebView2.txt", L"licenses\\ThorVG.txt",
-                                     L"licenses\\RapidJSON.txt"};
+// What is installed is listed once, in installer/CMakeLists.txt (payload.h): the programs --
+// WebView2Loader.dll is the settings app's, which finds the Edge WebView2 runtime its page runs in --
+// and the licences of AnimeLogon and of the code it carries, beside them. Only install.exe as built
+// carries the licences; a build run from its own folder installs the programs beside it, without.
 
 DWORD SceneReadAccess(const std::wstring &path, bool directory) {
     BYTE sid[SECURITY_MAX_SID_SIZE]; DWORD size = sizeof(sid);
@@ -78,7 +73,7 @@ constexpr const wchar_t *kDisplayName = L"AnimeLogon";
 constexpr const wchar_t *kUninstallKey =
     L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\AnimeLogon";
 // The app is the theme library as well as the settings, so its shortcut carries its own name, the
-// same in every language. Versions before 0.2 named it after the settings.
+// same in every language. Version 0.1.0 named it after the settings.
 constexpr const wchar_t *kShortcut = L"AnimeLogon.lnk";
 constexpr const wchar_t *kOldShortcut = L"AnimeLogon \u8bbe\u7f6e.lnk";
 constexpr const wchar_t *kProjectUrl = L"https://github.com/helloyork/AnimeLogon";
@@ -316,7 +311,10 @@ DWORD RemoveFileOrQueue(const std::wstring &path) {
 
 // Whether the settings app will find the Edge WebView2 runtime, asked of the loader it ships
 // with, the copy just installed. Windows 11 has the runtime built in; Windows 10 may not.
-bool WebView2RuntimePresent(const std::wstring &targetDir) {
+// The ARM64 loader cannot be loaded into this x64 program; for ARM64 (Windows 11 only), the
+// runtime's own registration answers instead.
+bool WebView2RuntimePresent(const std::wstring &targetDir, USHORT arch) {
+    if (arch != payload::OwnMachine()) return WebView2Installed();
     HMODULE loader = LoadLibraryExW((targetDir + L"\\WebView2Loader.dll").c_str(), nullptr,
                                     LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
     if (!loader) return false;
@@ -360,15 +358,15 @@ DWORD WriteOver(const std::wstring &to, const std::function<DWORD()> &write) {
     return ERROR_SUCCESS;
 }
 
-// Writes one program or document into the install directory: from inside install.exe, or from
-// beside it when this build carries none. A copy loses the mark of a download (Zone.Identifier) that
-// CopyFileW carries over from files unpacked from a downloaded zip.
-DWORD Place(const wchar_t *name, const std::wstring &to, bool required) {
-    const bool carried = payload::Has(name);
+// Writes one program (the one for `arch`) or document into the install directory: from inside install.exe,
+// or from beside it when this build carries none. A copy loses the mark of a download
+// (Zone.Identifier) that CopyFileW carries over from files unpacked from a downloaded zip.
+DWORD Place(const wchar_t *name, USHORT arch, const std::wstring &to, bool required) {
+    const bool carried = payload::Has(name, arch);
     const std::wstring from = SourceDir() + L"\\" + name;
     if (!carried && GetFileAttributesW(from.c_str()) == INVALID_FILE_ATTRIBUTES) return required ? ERROR_FILE_NOT_FOUND : ERROR_SUCCESS;
     return WriteOver(to, [&]() -> DWORD {
-        if (carried) return payload::Write(name, to);
+        if (carried) return payload::Write(name, arch, to);
         if (!CopyFileW(from.c_str(), to.c_str(), FALSE)) return GetLastError();
         DeleteFileW((to + L":Zone.Identifier").c_str());
         return ERROR_SUCCESS;
@@ -425,9 +423,9 @@ unsigned long long FreeBytes(const std::wstring &dir) {
 unsigned long long RequiredBytes() {
     // The programs and licences, and room for the logs and the sign-in background. A build without
     // a payload counts the files beside it.
-    unsigned long long total = payload::TotalBytes();
+    unsigned long long total = payload::TotalBytes(payload::InstallMachine());
     if (!total)
-        for (const wchar_t *c : kComponents) {
+        for (const wchar_t *c : payload::Names(payload::Kind::Program)) {
             WIN32_FILE_ATTRIBUTE_DATA a{};
             if (GetFileAttributesExW((SourceDir() + L"\\" + c).c_str(), GetFileExInfoStandard, &a))
                 total += ((unsigned long long)a.nFileSizeHigh << 32) | a.nFileSizeLow;
@@ -437,6 +435,9 @@ unsigned long long RequiredBytes() {
 
 std::vector<Blocker> CheckBeforeInstall(const std::wstring &targetDir) {
     std::vector<Blocker> found;
+    if (!payload::InstallMachine())
+        found.push_back({Tr("check.machine.title"),
+                         Tr("check.machine.detail", {{L"machine", payload::MachineName(payload::NativeMachine())}})});
     if (!H264Available()) found.push_back({Tr("check.h264.title"), Tr("check.h264.detail")});
     if (!InstallDirAllowed(targetDir)) {
         found.push_back({Tr("check.folder.title"), Tr("check.folder.detail", {{L"root", ProgramFilesDir()}})});
@@ -490,12 +491,26 @@ Report Install(const std::wstring &targetDir, const InstallOptions &options) {
         ALOG(L"install: %s", text.c_str());
         if (options.progress) options.progress(fraction, text);
     };
+    // An update that fails before its own service is installed starts the previous one again, if
+    // it was running: until then the previous install is registered as it was, and it is better
+    // that its logon screen runs than that Windows' lock screen stays off with nothing drawing it.
+    bool restartOnFailure = false;
     auto fail = [&](const std::wstring &message) {
         r.message = message;
         ALOG(L"install: %s", message.c_str());
+        if (restartOnFailure) {
+            const DWORD started = machine::StartLauncherService();
+            ALOG(L"install: the previous service %s (%lu)", started == ERROR_SUCCESS ? L"started again" : L"did not start again", started);
+        }
         return r;
     };
 
+    // The programs for the processor Windows runs on; a setup program without them installs nothing.
+    const USHORT arch = payload::InstallMachine();
+    if (!arch) {
+        r.message = Tr("install.error.machine", {{L"machine", payload::MachineName(payload::NativeMachine())}});
+        return r;
+    }
     if (!H264Available()) {
         r.message = Tr("install.error.h264");
         return r;
@@ -511,17 +526,23 @@ Report Install(const std::wstring &targetDir, const InstallOptions &options) {
 
     // Stop any previous install before touching its files.
     if (options.progress) options.progress(0.02, Tr("install.step.stop"));
+    const DWORD before = machine::ServiceState();
     const DWORD stopped = machine::StopLauncherService();
+    restartOnFailure = before == SERVICE_RUNNING || before == SERVICE_START_PENDING;
 
     // The data directory before anything is written into it, the log included.
     DWORD e = PrepareDataDir();
-    if (e != ERROR_SUCCESS) {
-        r.message = WithError(Tr("install.error.data"), e);
-        return r;
-    }
+    if (e != ERROR_SUCCESS) return fail(WithError(Tr("install.error.data"), e));
     log::Open(paths::LogPath(L"install.log"));
-    ALOG(L"install: version %S into %s", ANIMELOGON_VERSION, targetDir.c_str());
+    ALOG(L"install: version %S for %s into %s (Windows runs on %s; this setup program is %s and carries %s)", ANIMELOGON_VERSION,
+         payload::MachineName(arch).c_str(), targetDir.c_str(), payload::MachineName(payload::NativeMachine()).c_str(),
+         payload::MachineName(payload::OwnMachine()).c_str(), [] {
+             std::wstring list;
+             for (USHORT m : payload::Carried()) list += (list.empty() ? L"" : L", ") + payload::MachineName(m);
+             return list.empty() ? std::wstring(L"nothing, installing the files beside it") : list;
+         }().c_str());
     if (stopped != ERROR_SUCCESS) ALOG(L"install: stopping the service failed (%lu)", stopped);
+    if (restartOnFailure) ALOG(L"install: the previous service was running");
     at(0.10, "install.step.data");
     RemoveOldStores();
 
@@ -533,16 +554,17 @@ Report Install(const std::wstring &targetDir, const InstallOptions &options) {
     // An uninstall with no restart since left what it could not delete, uninstall.exe and the
     // directory at least, to be deleted at the next restart: that would now take the new copy.
     restart::KeepInstalled(targetDir);
+    const std::vector<const wchar_t *> programs = payload::Names(payload::Kind::Program);
     size_t placed = 0;
-    for (const wchar_t *component : kComponents) {
-        e = Place(component, targetDir + L"\\" + component, true);
-        if (e == ERROR_FILE_NOT_FOUND) return fail(Tr("install.error.missing", {{L"name", component}}));
-        if (e != ERROR_SUCCESS) return fail(WithError(Tr("install.error.copy", {{L"name", component}}), e));
-        if (options.progress) options.progress(0.20 + 0.40 * ++placed / kComponentCount, r.steps.back());
+    for (const wchar_t *program : programs) {
+        e = Place(program, arch, targetDir + L"\\" + program, true);
+        if (e == ERROR_FILE_NOT_FOUND) return fail(Tr("install.error.missing", {{L"name", program}}));
+        if (e != ERROR_SUCCESS) return fail(WithError(Tr("install.error.copy", {{L"name", program}}), e));
+        if (options.progress) options.progress(0.20 + 0.40 * ++placed / programs.size(), r.steps.back());
     }
     paths::CreateDirectories(targetDir + L"\\licenses");
-    for (const wchar_t *document : kDocuments) {
-        e = Place(document, targetDir + L"\\" + document, false);
+    for (const wchar_t *document : payload::Names(payload::Kind::Document)) {
+        e = Place(document, arch, targetDir + L"\\" + document, false);
         if (e != ERROR_SUCCESS) ALOG(L"install: %s not written (%lu)", document, e);
     }
     RemoveDirectoryW((targetDir + L"\\licenses").c_str());  // only if nothing went into it
@@ -588,6 +610,9 @@ Report Install(const std::wstring &targetDir, const InstallOptions &options) {
         if (e != ERROR_SUCCESS) ALOG(L"install: language not recorded (%lu)", e);
     }
 
+    // From here on the service is this install's: each failure below removes it and undoes what
+    // was done to Windows, rather than starting it again.
+    restartOnFailure = false;
     at(0.80, "install.step.service");
     e = machine::InstallService(LauncherPath(targetDir));
     if (e != ERROR_SUCCESS) {
@@ -616,14 +641,18 @@ Report Install(const std::wstring &targetDir, const InstallOptions &options) {
         }
     } else {
         // Another program drawing the logon screen goes off before TurnOn records what Windows had.
-        for (const others::Program &p : others::Installed())
+        // One already off can still fail here, putting back Windows values it left (others.h).
+        std::wstring failing;
+        for (const others::Program &p : others::Installed()) {
             if (p.on) switchedOff = p.name;
+            if (failing.empty() || p.on) failing = p.name;
+        }
         if (!switchedOff.empty()) at(0.85, "install.step.others");
         e = others::TurnOff(paths::BackgroundPath());
         if (e != ERROR_SUCCESS) {
             machine::TurnOff();
             machine::RemoveService();
-            return fail(WithError(Tr("install.error.others", {{L"name", switchedOff.empty() ? std::wstring(L"Shittim Logon") : switchedOff}}), e));
+            return fail(WithError(Tr("install.error.others", {{L"name", failing}}), e));
         }
         r.switchedOff = switchedOff;
 
@@ -660,7 +689,7 @@ Report Install(const std::wstring &targetDir, const InstallOptions &options) {
     if (!switchedOff.empty()) r.message += L"\n\n" + Tr("install.others_off", {{L"name", switchedOff}});
     if (options.progress) options.progress(1.0, Tr("install.step.done"));
     // The logon screen works without it; only the settings app needs it.
-    if (!WebView2RuntimePresent(targetDir)) {
+    if (!WebView2RuntimePresent(targetDir, arch)) {
         ALOG(L"install: no WebView2 runtime");
         r.webView2Missing = true;
         r.message += L"\n\n" + Tr("install.no_webview2");
@@ -736,9 +765,10 @@ Report Uninstall(bool keepData, const Progress &progress) {
         at(0.85, "uninstall.step.files");
         CloseRunningApp();
         DWORD first = ERROR_SUCCESS;
-        std::vector<const wchar_t *> files(kComponents, kComponents + kComponentCount);
+        std::vector<const wchar_t *> files = payload::Names(payload::Kind::Program);
         files.insert(files.end(), std::begin(kRetired), std::end(kRetired));
-        files.insert(files.end(), std::begin(kDocuments), std::end(kDocuments));
+        const std::vector<const wchar_t *> documents = payload::Names(payload::Kind::Document);
+        files.insert(files.end(), documents.begin(), documents.end());
         for (const wchar_t *file : files) {
             const std::wstring path = dir + L"\\" + file;
             const bool there = GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES;
