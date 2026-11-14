@@ -100,6 +100,13 @@ bool Watch::Start(std::function<void(DWORD)> onShutdown) {
     return true;
 }
 
+void Watch::Flush() {
+    if (!session_) return;
+    std::vector<BYTE> props = Properties();
+    ControlTraceW(session_, nullptr, reinterpret_cast<EVENT_TRACE_PROPERTIES *>(props.data()),
+                  EVENT_TRACE_CONTROL_FLUSH);
+}
+
 void Watch::Stop() {
     if (session_) {
         std::vector<BYTE> props = Properties();

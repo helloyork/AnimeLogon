@@ -155,6 +155,7 @@ void Supervise() {
     // session ends: session ids are handed out again.
     sessionrecord::Record record;
     HANDLE sessionWinlogon = nullptr;
+    ULONGLONG flushedAt = 0;
 
     while (WaitForSingleObject(g_stopEvent, 0) != WAIT_OBJECT_0) {
         const DWORD session = WTSGetActiveConsoleSessionId();
@@ -223,6 +224,10 @@ void Supervise() {
             if (!child) nextTry = now + (backoff = backoff ? (backoff * 2 > 30000 ? 30000 : backoff * 2) : 2000);
         }
         live.Tick(session);
+        if (now - flushedAt >= 250) {
+            winlogon.Flush();
+            flushedAt = now;
+        }
         WaitForSingleObject(g_stopEvent, 100);
     }
     live.Stop();

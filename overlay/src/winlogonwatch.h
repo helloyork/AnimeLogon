@@ -36,6 +36,11 @@ public:
     // started; the caller keeps working without it.
     bool Start(std::function<void(DWORD flags)> onShutdown);
     void Stop();
+    // A real-time session hands its buffers over on a timer whose shortest setting is a second,
+    // so a 6101 can sit for a second or more before anyone hears it (measured: 2 s after the
+    // overlay's own WM_ENDSESSION). The session is ours, so the caller flushes it itself, a few
+    // times a second; Winlogon writes a handful of events a minute, so each flush is next to free.
+    void Flush();
 
     // How many Winlogon events arrived, for the log.
     long Events() const { return events_.load(); }
