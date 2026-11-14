@@ -419,7 +419,7 @@ void Host::SendSteamItems() {
 }
 
 void Host::InstallFromSteam(const json::Value &ids) {
-    if (importing_) return;
+    if (RefuseWhileImporting()) return;
     std::vector<ImportJob> jobs;
     std::set<std::wstring> seen;
     // Only what the page was last shown, and only what can be installed now: the page names items,

@@ -1,6 +1,7 @@
 #include "host.h"
 #include "sceneimport.h"
 
+#include <commctrl.h>
 #include <commdlg.h>
 #include <sddl.h>
 #define SECURITY_WIN32
@@ -34,6 +35,10 @@
 #include "fonts.h"
 #include "resources.h"
 #include "tray.h"
+
+// TaskDialogIndirect, for the question asked when the window is closed during an import. The
+// program's manifest asks for version 6 of the common controls, which has it.
+#pragma comment(lib, "comctl32.lib")
 
 using Microsoft::WRL::Callback;
 using Microsoft::WRL::ComPtr;
@@ -290,8 +295,10 @@ Host::Host() : library_(DiskStores()), pictures_(library_) { monitors_ = Enumera
 
 Host::~Host() {
     if (worker_.joinable()) {
+        // Closed during an import: the worker stops, and what it staged goes with it.
         cancel_ = true;
         worker_.join();
+        for (const ImportJob &j : importJobs_) secure::RemoveTree(j.dir);
     }
     if (scanner_.joinable()) scanner_.join();
 }
@@ -452,7 +459,13 @@ LRESULT Host::Handle(UINT msg, WPARAM wp, LPARAM lp) {
         }
         return 0;
     case WM_CLOSE:
-        if (importing_) cancel_ = true;
+        // Closing cancels an import under way, which may have been converting a video for
+        // minutes: that is asked first. The question is asked once, however often the window is
+        // asked to close while it is up (the installer asks too).
+        if (importing_) {
+            if (askingToClose_ || !CloseCancelsImport()) return 0;
+            if (importing_) cancel_ = true;  // it may have finished while the question was up
+        }
         SavePlacement(hwnd_);
         DestroyWindow(hwnd_);
         return 0;
@@ -1324,8 +1337,39 @@ void Host::OnMessage(const json::Value &m) {
 
 // --- what needs the elevated helper ----------------------------------------------------------
 
+bool Host::RefuseWhileImporting() {
+    if (!importing_) return false;
+    Toast(i18n::Tr("msg.import_busy"));
+    return true;
+}
+
+bool Host::CloseCancelsImport() {
+    const std::wstring instruction = i18n::Tr("app.close_importing"), detail = i18n::Tr("app.close_importing.detail");
+    const std::wstring close = i18n::Tr("app.close_importing.close"), keep = i18n::Tr("app.close_importing.keep");
+    constexpr int kClose = 100, kKeep = 101;
+    const TASKDIALOG_BUTTON buttons[] = {{kClose, close.c_str()}, {kKeep, keep.c_str()}};
+    TASKDIALOGCONFIG config{};
+    config.cbSize = sizeof config;
+    config.hwndParent = hwnd_;
+    // Esc and the title bar's close button keep the window, as Keep importing does.
+    config.dwFlags = TDF_ALLOW_DIALOG_CANCELLATION | TDF_POSITION_RELATIVE_TO_WINDOW;
+    config.pszWindowTitle = L"AnimeLogon";
+    config.pszMainIcon = TD_WARNING_ICON;
+    config.pszMainInstruction = instruction.c_str();
+    config.pszContent = detail.c_str();
+    config.cButtons = ARRAYSIZE(buttons);
+    config.pButtons = buttons;
+    config.nDefaultButton = kKeep;
+    int pressed = kKeep;
+    askingToClose_ = true;
+    const HRESULT hr = TaskDialogIndirect(&config, &pressed, nullptr, nullptr);
+    askingToClose_ = false;
+    if (FAILED(hr)) ALOG(L"close: the question could not be asked (0x%08lX)", (unsigned long)hr);
+    return SUCCEEDED(hr) && pressed == kClose;
+}
+
 void Host::Import(bool wallpaper, importable::Kind kind) {
-    if (importing_) return;
+    if (RefuseWhileImporting()) return;
     const std::vector<importable::Filter> filters = wallpaper ? importable::WallpaperFilters() : importable::ThemeFilters(kind);
     ALOG(L"import: %s, file dialog opens on %s", wallpaper ? L"wallpaper" : importable::NameOf(kind), filters[0].patterns.c_str());
     const std::wstring source = PickFile(hwnd_, FiltersOf(filters).c_str(), nullptr, false, L"");
@@ -1334,7 +1378,7 @@ void Host::Import(bool wallpaper, importable::Kind kind) {
 }
 
 void Host::StartImport(std::vector<ImportJob> jobs, bool wallpaper) {
-    if (importing_ || jobs.empty()) return;
+    if (jobs.empty() || RefuseWhileImporting()) return;
     for (ImportJob &j : jobs) {
         j.dir = staging::NewImportDir();
         if (j.dir.empty()) {
@@ -1555,6 +1599,7 @@ void Host::ImportWorkshop(const json::Value &ids, bool wallpaper) {
 }
 
 void Host::ImportComponent(bool add) {
+    if (RefuseWhileImporting()) return;
     const std::wstring path = PickFile(hwnd_, Filters({{i18n::Tr("filter.components"), L"*.xml"}, {i18n::Tr("filter.all"), L"*.*"}}).c_str(), L"xml", false, L"");
     if (path.empty()) return;
     const std::wstring dir = staging::NewImportDir();

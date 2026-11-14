@@ -86,6 +86,11 @@ private:
     // types of `kind` (importable.h); with `wallpaper`, a picture or video as a wallpaper alone,
     // for the open theme.
     void Import(bool wallpaper, importable::Kind kind = importable::Kind::Any);
+    // One import at a time: while one runs, another is refused and the page told why. True when
+    // refused. The page also disables its import commands while the busy bar is up.
+    bool RefuseWhileImporting();
+    // Asked when the window is closed during an import, which closing cancels: true to close.
+    bool CloseCancelsImport();
     // Stages each file on `worker_`, then installs all of them on one prompt (FinishImport).
     // With `wallpaper` there is one file, a wallpaper alone for the open theme.
     void StartImport(std::vector<ImportJob> jobs, bool wallpaper);
@@ -219,6 +224,7 @@ private:
     std::vector<ImportJob> importJobs_;
     std::vector<staging::Result> importResults_;
     bool importWallpaper_ = false;
+    bool askingToClose_ = false;  // CloseCancelsImport's question is up
 
     // Wallpaper Engine's folders, each mapped to a host name before the page loads (WebView2
     // applies a mapping only to pages loaded after it is made), and the last look in them; the

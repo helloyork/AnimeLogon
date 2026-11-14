@@ -48,8 +48,10 @@ export function WorkshopDialog({ d }: { d: Extract<DialogState, { kind: 'worksho
   const bytes = picked.reduce((n, id) => n + (byId.get(id)?.bytes ?? 0), 0);
   const allPicked = visible.length > 0 && visible.every(w => picked.includes(w.id));
 
+  // One import at a time: while another runs (the busy bar is up), these wait for it.
+  const busy = !!s.busy;
   const bring = (ids: string[]) => {
-    if (!ids.length) return;
+    if (!ids.length || busy) return;
     close();
     send('importWorkshop', { items: ids, wallpaper: d.wallpaper });
   };
@@ -121,7 +123,7 @@ export function WorkshopDialog({ d }: { d: Extract<DialogState, { kind: 'worksho
           </DialogActions>
           <DialogActions>
             <Button onClick={close}>{tr('button.cancel')}</Button>
-            <Button variant="primary" shield disabled={!picked.length} onClick={() => bring(picked)}>
+            <Button variant="primary" shield disabled={!picked.length || busy} onClick={() => bring(picked)}>
               {d.wallpaper ? tr('we.import_use') : picked.length > 1 ? tr('we.import_n', { n: picked.length }) : tr('we.import')}
             </Button>
           </DialogActions>
