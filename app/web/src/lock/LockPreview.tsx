@@ -4,7 +4,7 @@
 // display of that shape would show it, with black bars around it.
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { t as tr } from '../i18n';
-import { SceneFrames, WallpaperVideo } from '../media';
+import { SceneFrames, SpectrumFrames, WallpaperVideo } from '../media';
 import { calm } from '../motion';
 import { lockUrl, ORIGIN } from '../native';
 import { motion } from '../preview';
@@ -54,11 +54,14 @@ interface Entering {
   duration: number;
   size: number;  // the panel's em, in percent of the display's height
   live: boolean; // it shows what is playing: drawn again every second
+  audio: boolean; // it holds a spectrum: drawn moving with the sound (SpectrumFrames), its picture cut to the panel
+  theme: string;
+  query: string;  // what its pictures were asked for with
   url: string;
   box: number[];
 }
 
-type Panel = Omit<Entering, 'url' | 'box'>;
+type Panel = Omit<Entering, 'url' | 'box' | 'query' | 'theme'>;
 const wait = (ms: number) => new Promise(ok => setTimeout(ok, ms));
 
 // Each visible panel's picture and entrance, fetched and decoded before anything comes in, so that
@@ -79,14 +82,17 @@ function useEntering(id: string, query: string) {
     }
     const draw = async (e: Panel, q: string): Promise<Entering | null> => {
       try {
-        const r = await fetch(`${ORIGIN}lock/${id}/part/${e.part}.png?${q}`);
+        // A panel with a spectrum moves only where the page may move things; otherwise it is one
+        // picture like the rest, with the made-up sound previews show.
+        const audio = e.audio && motion();
+        const r = await fetch(audio ? `${ORIGIN}spectrum/${id}/${e.part}.png?${q}&lock=1` : `${ORIGIN}lock/${id}/part/${e.part}.png?${q}`);
         if (!r.ok) return null;
         const url = URL.createObjectURL(await r.blob());
         urls.push(url);
         const img = new Image();
         img.src = url;
         await img.decode();
-        return { ...e, url, box: (r.headers.get('X-Part-Box') || '0,0,1,1').split(',').map(Number) };
+        return { ...e, audio, theme: id, query: q, url, box: (r.headers.get('X-Part-Box') || '0,0,1,1').split(',').map(Number) };
       } catch {
         return null;  // a panel that cannot be drawn is left out, as the logon screen leaves it out
       }
@@ -105,7 +111,7 @@ function useEntering(id: string, query: string) {
       }
       if (!alive) return;
       setParts(out);
-      const live = list.parts.filter(p => p.live);
+      const live = list.parts.filter(p => p.live && !(p.audio && motion()));
       for (let n = 1; alive && live.length; ++n) {
         await wait(1000);
         const fresh = new Map<string, Entering>();
@@ -151,6 +157,12 @@ function EnteringPart({ p, go, woke, leave }: { p: Entering; go: boolean; woke: 
           ? `opacity 0s linear ${calm() ? 0 : p.delay}s`
           : `opacity ${p.duration}s ease-in-out ${p.delay}s, transform ${p.duration}s cubic-bezier(.33, 1, .68, 1) ${p.delay}s`,
   };
+  if (p.audio)
+    return (
+      <div className="lock-fill" style={style}>
+        <SpectrumFrames theme={p.theme} part={p.part} query={`${p.query}&lock=1`} first={{ url: p.url, box: p.box }} />
+      </div>
+    );
   return <img className="lock-fill" src={p.url} style={style} alt="" />;
 }
 

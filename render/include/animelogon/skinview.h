@@ -73,6 +73,9 @@ public:
         float holdX[3]{}, holdY[3]{};
     };
     std::vector<Bound> Bounds(size_t slot) const;
+    // Everything the panels last drawn in `slot` can touch -- their ink, shadows and backdrops --
+    // in the target's pixels. False when nothing was drawn.
+    bool Reach(size_t slot, D2D1_RECT_F *area) const;
 
 private:
     // A panel laid out for one display.
@@ -128,6 +131,8 @@ private:
     };
 
     bool Build(Built &built, size_t panel, UINT width, UINT height);
+    // What a built panel can touch: its text, its shadows and its backdrop.
+    D2D1_RECT_F AreaOf(const Built &built, const skin::Panel &panel) const;
     bool Lay(Line &line, const skin::Panel &panel, const skin::Line &source, const std::vector<std::wstring> &words,
              float px);
     std::wstring Family(const std::wstring &wanted) const;

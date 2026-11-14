@@ -44,4 +44,29 @@ private:
     bool failed_ = false;
 };
 
+// A skin drawn again and again over nothing, for a preview that moves with the sound: its view
+// lives from one frame to the next, so a spectrum's bands rise and fall, and its peaks hang and
+// drop, as on the logon screen. Each frame is only the part of the picture the skin can touch.
+class LivePreview {
+public:
+    // Draws `skin` as a display of `width` x `height` shows it, its spectra following `audio`, into
+    // `out` (premultiplied), and says where in the picture that part is (`where`). A different
+    // `signature` -- another skin, other values, another size -- starts its bands afresh.
+    bool Draw(const std::wstring &signature, const skin::Resolved &skin, const ClockStyle &style,
+              const RegionalFormat &format, const data::Snapshot &data, UINT width, UINT height,
+              const spectrum::Frame &audio, Picture *out, RECT *where);
+
+private:
+    bool Ready();
+
+    Microsoft::WRL::ComPtr<ID3D11Device> device_;
+    Microsoft::WRL::ComPtr<ID3D11DeviceContext> context_;
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> target_;
+    Microsoft::WRL::ComPtr<ID2D1Bitmap1> bitmap_;
+    UINT width_ = 0, height_ = 0;
+    SkinView view_;
+    std::wstring signature_;
+    bool failed_ = false;
+};
+
 }  // namespace animelogon

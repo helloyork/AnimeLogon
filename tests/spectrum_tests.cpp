@@ -13,7 +13,7 @@
 #include "animelogon/skinpreview.h"
 #include "animelogon/spectrum.h"
 #include "animelogon/text.h"
-#include "audiocapture.h"
+#include "animelogon/audiocapture.h"
 
 using namespace animelogon;
 
@@ -195,6 +195,51 @@ TEST(SpectrumListensToTheOutputDevice) {
     capture.Stop();
     CHECK(GetTickCount64() - before < 1500);
     CHECK(!capture.Latest(&samples, &rate));
+}
+
+// The settings app's moving previews: one view drawn frame after frame keeps its bands, so they rise
+// with sound and fall back after it, and each frame is only the part the panel can touch.
+TEST(SpectrumPreviewMovesFromFrameToFrame) {
+    const HRESULT co = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    skin::Skin s;
+    CHECK(BuiltInComponent(L"spectrum", &s));
+    const skin::Resolved r = skin::Resolve(s, {});
+    const RegionalFormat us{L"en-US", L"h:mm tt", L"dddd, MMMM d, yyyy"};
+    LivePreview live;
+    Picture out;
+    RECT where{};
+    auto lit = [&] {
+        size_t n = 0;
+        for (size_t i = 3; i < out.bgra.size(); i += 4) n += out.bgra[i] > 40;
+        return n;
+    };
+    // Noise, loud in every band: the same every run.
+    std::vector<float> noise(4096);
+    uint32_t seed = 12345;
+    for (float &v : noise) {
+        seed = seed * 1664525u + 1013904223u;
+        v = ((float)(seed >> 8) / (float)(1u << 24) - 0.5f) * 0.6f;
+    }
+    auto frame = [&](const std::wstring &signature, const spectrum::Frame &f) {
+        return live.Draw(signature, r, ClockStyle{}, us, data::Snapshot{}, 960, 540, f, &out, &where);
+    };
+    CHECK(frame(L"a", {{}, 0.0f, false, 0.0}));
+    // Where the panel is (the bottom middle, 6% of the height tall) and nothing more.
+    CHECK(where.left > 200 && where.right < 760 && where.top > 440 && where.bottom <= 540);
+    CHECK((LONG)out.width == where.right - where.left && (LONG)out.height == where.bottom - where.top);
+    const size_t rest = lit();
+    CHECK(rest > 0);
+    for (double t = 1.0 / 60.0; t < 0.3; t += 1.0 / 60.0) CHECK(frame(L"a", FrameOf(noise, t)));
+    const size_t loud = lit();
+    CHECK(loud > rest * 3);
+    // Silence: a moment later the bands are on their way down, not gone.
+    CHECK(frame(L"a", {{}, 0.0f, false, 0.32}));
+    const size_t falling = lit();
+    CHECK(falling > rest && falling <= loud);
+    // Another component or other values start afresh, at rest.
+    CHECK(frame(L"b", {{}, 0.0f, false, 0.34}));
+    CHECK(lit() == rest);
+    if (SUCCEEDED(co)) CoUninitialize();
 }
 
 TEST(SpectrumIsDrawnWhereItsRoomIs) {

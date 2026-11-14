@@ -25,6 +25,7 @@
 #include "importable.h"
 #include "json.h"
 #include "library.h"
+#include "livespectrum.h"
 #include "pictures.h"
 #include "steam_client.h"
 #include "steam_workshop.h"
@@ -181,6 +182,10 @@ private:
 
     Library library_;
     Pictures pictures_;
+    // The spectra the page draws moving over the pictures, and which panels the open theme's picture
+    // left out for it ("<instance>.p<n>").
+    LiveSpectrum spectra_{library_};
+    std::vector<std::wstring> previewSpectra_;
     std::vector<animelogon::MonitorInfo> monitors_;
 
     // The open theme's picture, at the size the page shows it. When the page may play video and

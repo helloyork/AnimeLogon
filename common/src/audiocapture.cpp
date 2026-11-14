@@ -1,4 +1,4 @@
-#include "audiocapture.h"
+#include "animelogon/audiocapture.h"
 
 #include <audioclient.h>
 #include <ksmedia.h>
@@ -15,10 +15,10 @@
 
 #include "animelogon/log.h"
 #include "animelogon/spectrum.h"
-#include "audio.h"
 
 using Microsoft::WRL::ComPtr;
 
+namespace animelogon {
 namespace {
 
 // A second at 32 kHz, a little less at higher rates: more than any analysis takes (16384 samples
@@ -31,8 +31,8 @@ constexpr ULONGLONG kQuietMs = 30;
 constexpr ULONGLONG kRetryMs = 3000;
 // When the log says what was heard in the first seconds.
 constexpr ULONGLONG kReportMs = 5000;
-// At boot a USB device can take seconds to appear: the signed-in person's device is waited for
-// this long before the system's default is listened to instead (as AudioSystem waits to play).
+// At boot a USB device can take seconds to appear: the device asked for is waited for this long
+// before the default is listened to instead (as the logon screen's AudioSystem waits to play).
 constexpr ULONGLONG kDeviceWaitMs = 12000;
 
 enum class Encoding { Float32, Int16, Int24, Int32, Unknown };
@@ -88,6 +88,7 @@ void Mix(const BYTE *data, UINT32 frames, const WAVEFORMATEX *format, Encoding e
 
 struct AudioCapture::Shared {
     std::atomic<bool> stop{false};
+    std::function<std::wstring()> chooser;  // the device wanted, or none: the default
     HANDLE done = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     std::mutex lock;
     std::vector<float> ring = std::vector<float>(kRing, 0.0f);
@@ -119,17 +120,17 @@ void AudioCapture::Shared::Listen() {
     std::vector<float> mono;
     const ULONGLONG started = GetTickCount64();
     while (!stop) {
-        // The device the signed-in person's sound goes to, once it is there; else the system's default.
+        // The device asked for, once it is there; else the default output.
         ComPtr<IMMDeviceEnumerator> devices;
         ComPtr<IMMDevice> device;
-        const std::wstring wanted = AudioSystem::ListeningDevice();
-        const wchar_t *which = L"the system default";
+        const std::wstring wanted = chooser ? chooser() : std::wstring();
+        const wchar_t *which = L"the default output";
         HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, IID_PPV_ARGS(&devices));
         if (SUCCEEDED(hr) && !wanted.empty()) {
             DWORD state = 0;
             if (SUCCEEDED(devices->GetDevice(wanted.c_str(), &device)) && SUCCEEDED(device->GetState(&state)) &&
                 state == DEVICE_STATE_ACTIVE) {
-                which = L"the signed-in user's output";
+                which = L"the output asked for";
             } else {
                 device.Reset();
                 if (GetTickCount64() - started < kDeviceWaitMs) {
@@ -224,9 +225,10 @@ void AudioCapture::Shared::Listen() {
     SetEvent(done);
 }
 
-void AudioCapture::Start() {
+void AudioCapture::Start(std::function<std::wstring()> device) {
     Stop();
     auto shared = std::make_shared<Shared>();
+    shared->chooser = std::move(device);
     shared_ = shared;
     std::thread([shared] { shared->Listen(); }).detach();
 }
@@ -243,10 +245,12 @@ bool AudioCapture::Latest(std::vector<float> *samples, float *rate) {
     if (!shared_) return false;
     std::lock_guard<std::mutex> hold(shared_->lock);
     if (shared_->rate <= 0.0f) return false;
-    const size_t count = std::min(animelogon::spectrum::Analyzer::SizeFor(shared_->rate), shared_->filled);
+    const size_t count = std::min(spectrum::Analyzer::SizeFor(shared_->rate), shared_->filled);
     samples->resize(count);
     const size_t start = (shared_->write + kRing - count) % kRing;
     for (size_t i = 0; i < count; ++i) (*samples)[i] = shared_->ring[(start + i) % kRing];
     *rate = shared_->rate;
     return true;
 }
+
+}  // namespace animelogon

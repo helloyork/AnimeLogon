@@ -10,7 +10,7 @@
 import { useEffect, useLayoutEffect, useReducer, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 import { t as tr } from '../i18n';
 import { Desktop16Regular } from '@fluentui/react-icons';
-import { SceneFrames, WallpaperVideo } from '../media';
+import { SceneFrames, SpectrumFrames, WallpaperVideo } from '../media';
 import { calm } from '../motion';
 import {
   endGesture,
@@ -131,6 +131,9 @@ export function Canvas() {
   }, [s.noVideo]);
 
   const k = pv.width ? stage.width / pv.width : 0;
+  // The size the stage's picture is drawn at (askPreview), for the spectra drawn over it.
+  const dpr = window.devicePixelRatio || 1;
+  const liveSize = `w=${Math.round(stage.width * dpr)}&h=${Math.round(stage.height * dpr)}`;
 
   /* --- lifting: what the pointer is over or what is selected is made ready to drag --- */
   const hoverInst = s.hover?.inst ?? null;
@@ -390,6 +393,15 @@ export function Canvas() {
             {video && <WallpaperVideo key={wallpaper.ref} wallpaper={wallpaper.ref} fit={t.fit} brightness={t.brightness} />}
             {pv.url && <Picture url={pv.url} hidden={!!lifted} />}
             {lifted && <img className="layer" src={lifted.base} alt="" draggable={false} />}
+            {pv.url && motion() && pv.spectra.length > 0 && (
+              // The panels with a spectrum, left out of the picture, moving with the sound; the one
+              // being dragged moves with the pointer as part of its lifted layer instead.
+              <div className="live-spectra" aria-hidden="true">
+                {pv.spectra.filter(p => !drag || !p.startsWith(drag.inst + '.')).map(p => (
+                  <SpectrumFrames key={p} theme={t.id} part={p} query={liveSize} />
+                ))}
+              </div>
+            )}
             {rest && <div className="sprite" style={rest} />}
             {sprite && <div className="sprite" style={sprite} />}
             {pv.previous && <Leaving url={pv.previous} />}

@@ -931,6 +931,44 @@ bool SkinView::Entering() const {
     return false;
 }
 
+D2D1_RECT_F SkinView::AreaOf(const Built &b, const skin::Panel &panel) const {
+    D2D1_RECT_F area = D2D1::RectF(FLT_MAX, FLT_MAX, -FLT_MAX, -FLT_MAX);
+    auto add = [&](float left, float top, float right, float bottom) {
+        area = D2D1::RectF(std::min(area.left, left), std::min(area.top, top), std::max(area.right, right),
+                           std::max(area.bottom, bottom));
+    };
+    const D2D1_SIZE_U size = b.text->GetPixelSize();
+    add(b.at.x, b.at.y, b.at.x + (float)size.width, b.at.y + (float)size.height);
+    for (const skin::Shadow &sh : panel.shadows) {
+        const float x = b.at.x + std::round(sh.x * b.px), y = b.at.y + std::round(sh.y * b.px);
+        const float blur = std::ceil(3.0f * std::max(0.5f, sh.blur * b.px)) + 1.0f;
+        add(x - blur, y - blur, x + (float)size.width + blur, y + (float)size.height + blur);
+    }
+    if (b.backdrop && b.plate) {
+        const D2D1_RECT_F &r = b.plateArea.rect;
+        add(r.left, r.top, r.right, r.bottom);
+    } else if (b.backdrop) {
+        const D2D1_ELLIPSE &e = b.backdropArea;
+        add(e.point.x - e.radiusX, e.point.y - e.radiusY, e.point.x + e.radiusX, e.point.y + e.radiusY);
+    }
+    return area;
+}
+
+bool SkinView::Reach(size_t slot, D2D1_RECT_F *area) const {
+    if (slot >= slots_.size()) return false;
+    const Slot &s = slots_[slot];
+    bool any = false;
+    for (size_t i = 0; i < s.panels.size() && i < skin_.panels.size(); ++i) {
+        if (!s.panels[i].text) continue;
+        const D2D1_RECT_F a = AreaOf(s.panels[i], skin_.panels[i]);
+        *area = any ? D2D1::RectF(std::min(area->left, a.left), std::min(area->top, a.top), std::max(area->right, a.right),
+                                  std::max(area->bottom, a.bottom))
+                    : a;
+        any = true;
+    }
+    return any;
+}
+
 bool SkinView::Draw(ID2D1Bitmap1 *target, UINT width, UINT height, size_t slot, float opacity) {
     if (!dc_) return false;
     if (slot >= slots_.size()) slots_.resize(slot + 1);
@@ -961,31 +999,9 @@ bool SkinView::Draw(ID2D1Bitmap1 *target, UINT width, UINT height, size_t slot, 
     }
     dc_->SetTarget(target);
     dc_->BeginDraw();
-    // What panel i can touch: its text, its shadows and its backdrop. A layer covers only that: one
-    // the size of the target costs a full-screen blend per frame while a panel fades.
-    auto areaOf = [&](size_t i) {
-        D2D1_RECT_F area = D2D1::RectF(FLT_MAX, FLT_MAX, -FLT_MAX, -FLT_MAX);
-        auto add = [&](float left, float top, float right, float bottom) {
-            area = D2D1::RectF(std::min(area.left, left), std::min(area.top, top), std::max(area.right, right),
-                               std::max(area.bottom, bottom));
-        };
-        const Built &b = s.panels[i];
-        const D2D1_SIZE_U size = b.text->GetPixelSize();
-        add(b.at.x, b.at.y, b.at.x + (float)size.width, b.at.y + (float)size.height);
-        for (const skin::Shadow &sh : skin_.panels[i].shadows) {
-            const float x = b.at.x + std::round(sh.x * b.px), y = b.at.y + std::round(sh.y * b.px);
-            const float blur = std::ceil(3.0f * std::max(0.5f, sh.blur * b.px)) + 1.0f;
-            add(x - blur, y - blur, x + (float)size.width + blur, y + (float)size.height + blur);
-        }
-        if (b.backdrop && b.plate) {
-            const D2D1_RECT_F &r = b.plateArea.rect;
-            add(r.left, r.top, r.right, r.bottom);
-        } else if (b.backdrop) {
-            const D2D1_ELLIPSE &e = b.backdropArea;
-            add(e.point.x - e.radiusX, e.point.y - e.radiusY, e.point.x + e.radiusX, e.point.y + e.radiusY);
-        }
-        return area;
-    };
+    // A layer covers only what a panel can touch: one the size of the target costs a full-screen
+    // blend per frame while a panel fades.
+    auto areaOf = [&](size_t i) { return AreaOf(s.panels[i], skin_.panels[i]); };
     for (size_t i = 0; i < s.panels.size(); ++i) {
         const Built &b = s.panels[i];
         if (!b.text) continue;

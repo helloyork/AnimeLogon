@@ -7,7 +7,6 @@ animelogon_add_executable(overlay
         src/presenter.cpp
         src/player.cpp
         src/audio.cpp
-        src/audiocapture.cpp
         src/screen.cpp
         src/keyhook.cpp
         src/plan.cpp

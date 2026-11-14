@@ -33,6 +33,8 @@
 .stage.dragging { cursor: grabbing; }
 .stage .layer { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .stage .sprite { position: absolute; inset: 0; background-size: 100% 100%; pointer-events: none; will-change: transform; }
+/* Panels with a spectrum, drawn moving over the picture that leaves them out (media.tsx SpectrumFrames). */
+.stage .live-spectra { position: absolute; inset: 0; pointer-events: none; }
 .stage > video { pointer-events: none; }
 
 .box { position: absolute; border-radius: 2px; pointer-events: none; }

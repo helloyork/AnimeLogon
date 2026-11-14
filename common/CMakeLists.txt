@@ -1,5 +1,6 @@
 # Code shared by every program: paths, logs, settings, themes and their stores, and machine state.
 add_library(animelogon_common STATIC
+    src/audiocapture.cpp
     src/background.cpp
     src/bitmap.cpp
     src/clock.cpp

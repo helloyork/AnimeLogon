@@ -405,6 +405,7 @@ LRESULT Host::Handle(UINT msg, WPARAM wp, LPARAM lp) {
         Fit();
         return 0;
     case WM_TIMER:
+        spectra_.Idle();
         for (auto it=scenePreviews_.begin();it!=scenePreviews_.end();) {
             if (GetTickCount64()-it->second.used > 1500) it=scenePreviews_.erase(it); else ++it;
         }
@@ -717,6 +718,10 @@ void Host::SendPreview(int seq) {
     json::Writer w;
     w.BeginObject().Member(L"type", L"preview").Key(L"rev").Int(previewRev_).Key(L"seq").Int(seq);
     w.Member(L"width", (int)drawnW_).Member(L"height", (int)drawnH_).Member(L"layer", previewLayer_);
+    // The panels left out of the picture, for the page to draw from frames that follow the sound.
+    w.Key(L"spectra").BeginArray();
+    for (const std::wstring &part : previewSpectra_) w.String(part);
+    w.EndArray();
     w.Key(L"bounds").BeginArray();
     for (const Bound &b : bounds_) {
         w.BeginObject().Member(L"instance", b.instance).Member(L"key", b.key).Member(L"screen", (int)b.screen);
@@ -789,12 +794,20 @@ void Host::RenderPreview(bool live) {
         drawnH_ = std::max(16u, (UINT)std::lround((double)previewH_ * kLiveWidth / previewW_));
         drawnW_ = kLiveWidth;
     }
+    previewSpectra_.clear();
     if (library_.open().empty() || drawnW_ < 16 || drawnH_ < 16) return;
-    const theme::Theme t = library_.Edited(library_.open());
+    theme::Theme t = library_.Edited(library_.open());
     // A video wallpaper plays in the page itself, under the components drawn here.
     scene::Document sceneDoc;
     previewLayer_ = library_.LoadScene(library_.open(),&sceneDoc) || (previewMotion_ && IsVideo(library_, t.wallpaper));
     screens_ = Wall(drawnW_, drawnH_);
+    // While the page may move things, the panels that hold a spectrum are left out of the picture
+    // and the page draws them from frames that follow the sound (livespectrum.h). Not on a wall of
+    // displays, where one component can be drawn on several of them.
+    if (previewMotion_ && screens_.empty() && library_.settings().components) {
+        previewSpectra_ = spectra_.Panels(t);
+        if (!previewSpectra_.empty()) t = spectra_.Without(t);
+    }
     Picture p;
     if (pictures_.Theme(t, drawnW_, drawnH_, previewLayer_ ? Draw::ComponentsOnly : Draw::Everything, &p, &bounds_,
                         &screens_))
@@ -941,6 +954,8 @@ void Host::OnResource(ICoreWebView2WebResourceRequestedEventArgs *args) {
         const bool layer = alone || previewLayer_;
         if (!library_.open().empty() && previewW_ >= 16 && previewH_ >= 16) {
             theme::Theme t = library_.Edited(library_.open());
+            // As the stage shows it: without the panels the page draws moving (RenderPreview).
+            if (!alone && !previewSpectra_.empty()) t = spectra_.Without(t);
             bool found = false;
             for (theme::Instance &i : t.components) {
                 if (i.id == id) found = i.visible;
@@ -1005,13 +1020,18 @@ void Host::OnResource(ICoreWebView2WebResourceRequestedEventArgs *args) {
                 const bool live = std::find(sources.begin(), sources.end(), data::Source::Media) != sources.end();
                 for (size_t k = 0; k < r.panels.size(); ++k) {
                     const skin::Panel &panel = r.panels[k];
+                    // A panel that holds a spectrum the page draws from frames that follow the sound
+                    // (spectrum/..., below), rather than from one picture.
+                    bool audio = false;
+                    for (const skin::Line &l : panel.lines)
+                        for (const skin::Text &x : l.texts) audio = audio || x.spectrum;
                     const wchar_t *how = panel.enter == skin::Enter::Rise   ? L"rise"
                                          : panel.enter == skin::Enter::Zoom ? L"zoom"
                                          : panel.enter == skin::Enter::None ? L"none"
                                                                         : L"fade";
                     w.BeginObject().Member(L"part", i.id + L".p" + std::to_wstring(k + 1)).Member(L"enter", how);
                     w.Member(L"delay", (double)panel.enterDelay).Member(L"duration", (double)panel.enterDuration);
-                    w.Member(L"size", (double)panel.size).Member(L"live", live).EndObject();
+                    w.Member(L"size", (double)panel.size).Member(L"live", live).Member(L"audio", audio).EndObject();
                 }
             }
         }
@@ -1041,6 +1061,36 @@ void Host::OnResource(ICoreWebView2WebResourceRequestedEventArgs *args) {
                         partBox = box;
                         break;
                     }
+            }
+        }
+        type = L"image/png";
+    } else if (path.rfind(L"spectrum/", 0) == 0 && EndsWith(path, L".png") && !IsIconic(hwnd_)) {
+        // One panel that holds a spectrum, as it is this moment (livespectrum.h), cut to what it can
+        // touch: spectrum/<theme>/<instance>.p<n>.png. The theme page and the lock-screen preview
+        // (`lock=1`, with the battery and what is playing as they are) ask about thirty times a
+        // second; X-Part-Box says where the picture goes.
+        const size_t slash = path.find(L'/', 9);
+        const std::wstring part = slash == std::wstring::npos ? L"" : path.substr(slash + 1, path.size() - slash - 1 - 4);
+        const size_t dot = part.rfind(L".p");
+        if (slash != std::wstring::npos && dot != std::wstring::npos) {
+            const std::wstring id = path.substr(9, slash - 9), instance = part.substr(0, dot);
+            const size_t panel = (size_t)_wtoi(part.c_str() + dot + 2);
+            if (library_.Entry(id) && library_.settings().components) {
+                const UINT w = ParamSize(query, L"w", 960, 3840);
+                UINT h = ParamSize(query, L"h", 0, 3840);
+                if (!h) Shape(id, w, &h);
+                const bool lock = Param(query, L"lock") == L"1";
+                FILETIME utc{};
+                GetSystemTimeAsFileTime(&utc);
+                const data::Snapshot data = lock ? LockData(nullptr) : data::Sample((uint64_t)utc.dwHighDateTime << 32 | utc.dwLowDateTime);
+                RECT where{};
+                if (h >= 16 && spectra_.Frame(lock ? L"lock" : L"stage", library_.Edited(id), instance, panel, w, h, data, &p, &where)) {
+                    body = Png(p);
+                    wchar_t box[96];
+                    swprintf_s(box, L"%.5f,%.5f,%.5f,%.5f", (double)where.left / w, (double)where.top / h,
+                               (double)where.right / w, (double)where.bottom / h);
+                    partBox = box;
+                }
             }
         }
         type = L"image/png";

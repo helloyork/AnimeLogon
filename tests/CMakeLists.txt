@@ -56,7 +56,8 @@ target_include_directories(animelogon_tests PRIVATE ${PROJECT_SOURCE_DIR}/app/sr
 
 # The settings app's pictures of themes: the wall of displays when spanning, and the components
 # alone as a layer, drawn by the logon screen's renderer.
-target_sources(animelogon_tests PRIVATE app_picture_tests.cpp ${PROJECT_SOURCE_DIR}/app/src/pictures.cpp)
+target_sources(animelogon_tests PRIVATE app_picture_tests.cpp ${PROJECT_SOURCE_DIR}/app/src/pictures.cpp
+                                        ${PROJECT_SOURCE_DIR}/app/src/livespectrum.cpp)
 target_link_libraries(animelogon_tests PRIVATE animelogon_render animelogon_scene_host)
 
 # Finding an app's files and Workshop downloads in Steam's libraries (workshop.cpp uses it too).
@@ -93,6 +94,4 @@ endif()
 # The audio spectrum: its bands read out of sound the test makes, the format's <spectrum>, and
 # drawing it with the logon screen's renderer; and the logon screen listening to the output device,
 # where the machine has one.
-target_sources(animelogon_tests PRIVATE spectrum_tests.cpp ${PROJECT_SOURCE_DIR}/overlay/src/audiocapture.cpp
-                                        ${PROJECT_SOURCE_DIR}/overlay/src/audio.cpp)
-target_link_libraries(animelogon_tests PRIVATE wtsapi32)
+target_sources(animelogon_tests PRIVATE spectrum_tests.cpp)

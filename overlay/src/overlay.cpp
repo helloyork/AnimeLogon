@@ -28,11 +28,11 @@
 #include "animelogon/paths.h"
 #include "animelogon/resolve.h"
 #include "animelogon/secure.h"
+#include "animelogon/audiocapture.h"
 #include "animelogon/settings.h"
 #include "animelogon/spectrum.h"
 
 #include "audio.h"
-#include "audiocapture.h"
 #include "bake.h"
 #include "clocktext.h"
 #include "componentlayer.h"
@@ -617,13 +617,13 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
     std::wstring track;  // the wallpaper whose sound track plays, if any
 
     // A spectrum listens to the output device while the screen is up, and is drawn every frame
-    // while its bands move (audiocapture.h).
+    // while its bands move (animelogon/audiocapture.h). It listens to the signed-in person's output.
     const bool listening = withComponents && layer.Listens();
-    AudioCapture capture;
+    animelogon::AudioCapture capture;
     animelogon::spectrum::Analyzer analyzer;
     animelogon::spectrum::Frame heard;
     std::vector<float> samples;
-    if (listening) capture.Start();
+    if (listening) capture.Start(AudioSystem::ListeningDevice);
     const double refresh = RefreshSeconds();
     if (!opt.windowed && !done) {
         AudioSystem::RememberConsoleDefault();

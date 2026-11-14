@@ -14,6 +14,7 @@
 #include "importable.h"
 #include "json.h"
 #include "library.h"
+#include "livespectrum.h"
 #include "staging.h"
 #include "traymenu.h"
 
@@ -121,6 +122,41 @@ const skin::Values &Own(const app::Library &l, const std::wstring &theme, const 
 }
 
 }  // namespace
+
+// While the page may move things, the panels of the open theme that hold a spectrum are left out of
+// its pictures (fully transparent, still in their places) and named, for the page to draw moving.
+TEST(AppLeavesSpectraOutForThePageToMove) {
+    auto stores = Stores();
+    // The built-in spectrum, as an installed component (the stores here hold no built-in but the clock).
+    skin::Skin builtIn;
+    CHECK(BuiltInComponent(L"spectrum", &builtIn));
+    stores.store.components[L"0c7c0c7c0c7c0c7c"] = skin::Normalize(builtIn);
+    stores.store.components[L"0b7b0b7b0b7b0b7b"] =
+        "<component format=\"1\" name=\"Two\"><panel><line><text value=\"{time}\"/></line></panel>"
+        "<panel><line><text value=\"{date}\"/><spectrum/></line></panel></component>";
+    stores.store.themes[kThemeU] = "<theme format=\"1\" name=\"U\"><wallpaper ref=\"2222222222222222\" fit=\"fill\"/>"
+                                   "<component id=\"clock\" ref=\"clock\"/><component id=\"bars\" ref=\"0c7c0c7c0c7c0c7c\"/>"
+                                   "<component id=\"two\" ref=\"0b7b0b7b0b7b0b7b\"/>"
+                                   "<component id=\"hidden\" ref=\"0c7c0c7c0c7c0c7c\" visible=\"false\"/></theme>";
+    app::Library library(stores);
+    const app::LiveSpectrum spectra(library);
+    const theme::Theme t = library.Edited(kThemeU);
+    CHECK(spectra.Panels(t) == (std::vector<std::wstring>{L"bars.p1", L"two.p2"}));
+    const theme::Theme without = spectra.Without(t);
+    auto set = [&](const std::wstring &instance, const std::wstring &key) {
+        for (const theme::Instance &i : without.components)
+            if (i.id == instance) {
+                const auto it = i.sets.find(key);
+                return it == i.sets.end() ? std::wstring() : it->second;
+            }
+        return std::wstring(L"?");
+    };
+    CHECK(set(L"bars", L"p1.opacity") == L"0" && set(L"two", L"p2.opacity") == L"0");
+    CHECK(set(L"two", L"p1.opacity").empty() && set(L"clock", L"p1.opacity").empty() && set(L"hidden", L"p1.opacity").empty());
+    // The component takes the value, so the pictures leave the panel out.
+    skin::Skin s;
+    CHECK(library.LoadSkin(L"0c7c0c7c0c7c0c7c", &s) && skin::Accepts(s, L"p1.opacity", L"0"));
+}
 
 TEST(AppSceneEditsSaveUndoResetAndDescribeControls) {
     wchar_t temp[MAX_PATH]{}; GetTempPathW(MAX_PATH,temp);

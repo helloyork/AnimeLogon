@@ -43,7 +43,7 @@ public:
     // Remembers the signed-in user's default output for the boot screen.
     static void RememberConsoleDefault();
     // Where the signed-in user's sound goes: their default output, else the one remembered from the
-    // last sign-in; empty for the system's default. What a spectrum listens to (audiocapture.h).
+    // last sign-in; empty for the system's default. What a spectrum listens to (animelogon/audiocapture.h).
     // Needs COM.
     static std::wstring ListeningDevice();
 

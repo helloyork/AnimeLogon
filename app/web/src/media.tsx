@@ -1,6 +1,6 @@
 // Wallpapers that move play in the page: a video from the wallpaper store, or a scene's frames,
 // which the native side renders in its sandbox and hands over one at a time.
-import { useEffect, useRef, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { calm } from './motion';
 import { ORIGIN, send, videoUrl } from './native';
 import { setState } from './store';
@@ -44,6 +44,62 @@ export function WallpaperVideo({ wallpaper, fit, brightness = 1, fade = true, on
       onError={() => setState({ noVideo: true })}
     />
   );
+}
+
+// A panel that holds a spectrum, moving with what this computer plays: the native side draws it
+// as it is each moment, cut to what it can touch (livespectrum.h), and this lays each picture where
+// the panel is, over a parent that covers the whole display. About thirty pictures a second while
+// the page is shown. `query` gives the display's size (w=&h=) and, for the lock-screen preview,
+// lock=1. `first` is a picture already fetched, shown until the next.
+export function SpectrumFrames({ theme, part, query, first }: { theme: string; part: string; query: string; first?: { url: string; box: number[] } }) {
+  const img = useRef<HTMLImageElement>(null);
+  const [box, setBox] = useState<number[] | null>(first?.box ?? null);
+  useEffect(() => {
+    let active = true, timer = 0, url = '', attempts = 0, shownBox = (first?.box ?? []).join(',');
+    const next = async () => {
+      if (!active) return;
+      if (document.hidden) {
+        timer = window.setTimeout(next, 500);
+        return;
+      }
+      const asked = performance.now();
+      try {
+        const response = await fetch(`${ORIGIN}spectrum/${theme}/${part}.png?${query}`, { cache: 'no-store' });
+        if (!active) return;
+        if (response.ok) {
+          const blob = await response.blob();
+          if (!active) return;
+          const fresh = URL.createObjectURL(blob), old = url;
+          url = fresh;
+          const where = response.headers.get('X-Part-Box') || '';
+          if (where && where !== shownBox) {
+            shownBox = where;
+            setBox(where.split(',').map(Number));
+          }
+          if (img.current) img.current.src = fresh;
+          if (old) requestAnimationFrame(() => URL.revokeObjectURL(old));
+          attempts = 0;
+        } else ++attempts;
+      } catch {
+        ++attempts;
+      }
+      // One picture every 33 ms, counting the time this one took.
+      if (active && attempts < 100) timer = window.setTimeout(next, attempts ? 250 : Math.max(0, 33 - (performance.now() - asked)));
+    };
+    timer = window.setTimeout(next, 0);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [theme, part, query]);
+  if (!box) return <img ref={img} alt="" draggable={false} style={{ display: 'none' }} />;
+  const [x0, y0, x1, y1] = box;
+  const at: CSSProperties = {
+    position: 'absolute', left: `${x0 * 100}%`, top: `${y0 * 100}%`, width: `${(x1 - x0) * 100}%`, height: `${(y1 - y0) * 100}%`,
+    display: 'block', pointerEvents: 'none',
+  };
+  return <img ref={img} alt="" draggable={false} src={first?.url} style={at} />;
 }
 
 // A scene's frames at `width` x `height` (0: the theme's own shape). With `moving`, frames follow
