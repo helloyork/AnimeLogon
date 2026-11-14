@@ -154,7 +154,7 @@
 .tcard.picked .thumb { outline: 2px solid var(--accent); outline-offset: 2px; }
 .tcard .over.top { align-items: flex-start; justify-content: flex-start; }
 /* The box an item is chosen by, in the picture's corner: shown while pointed at and once chosen. */
-.pick {
+.shelf-pick {
   display: grid;
   place-items: center;
   width: 20px;
@@ -168,11 +168,11 @@
   opacity: 0;
   transition: opacity .12s;
 }
-button.pick { pointer-events: auto; cursor: pointer; }
-.tcard:hover .pick,
-.tcard:focus-within .pick,
-.pick.on { opacity: 1; }
-.pick.on { background: var(--accent); box-shadow: none; }
+button.shelf-pick { pointer-events: auto; cursor: pointer; }
+.tcard:hover .shelf-pick,
+.tcard:focus-within .shelf-pick,
+.shelf-pick.on { opacity: 1; }
+.shelf-pick.on { background: var(--accent); box-shadow: none; }
 
 /* Too narrow for both: the item chosen comes over the results. */
 @media (max-width: 900px) {
@@ -184,5 +184,5 @@ button.pick { pointer-events: auto; cursor: pointer; }
   .disc-sep { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .dpic::after, .pick { transition: none; }
+  .dpic::after, .shelf-pick { transition: none; }
 }
