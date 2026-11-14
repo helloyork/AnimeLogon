@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- One component, two panels: a large time at the bottom left and the long date at the top right.
+     Both follow one colour setting; each panel can be moved on its own in the AnimeLogon app. -->
+<component format="1" name="Split clock" author="AnimeLogon">
+  <settings>
+    <color id="color" label="Color" default="#F4F1EA"/>
+    <font id="font" label="Font" default=""/>
+  </settings>
+  <panel label="Time" anchor="bottom-left" size="16" margin="5">
+    <line>
+      <text value="{time}" font="$font" weight="thin" color="$color" tracking="-0.03" figures="tabular"/>
+    </line>
+    <shadow blur="0.04" opacity="0.3" y="0.015"/>
+  </panel>
+  <panel label="Date" anchor="top-right" size="2.2" margin="5" enter-delay="0.4">
+    <line>
+      <text value="{date.long}" font="$font" weight="medium" color="$color" tracking="0.04"/>
+    </line>
+    <shadow blur="0.1" opacity="0.4" y="0.04"/>
+  </panel>
+</component>

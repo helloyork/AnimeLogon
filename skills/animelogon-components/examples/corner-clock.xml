@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A clock with AM/PM, the weekday and the date. The user picks the corner, size, font and colour,
+     and can turn on a soft backdrop for light wallpapers. AM/PM hangs beside the time, so the
+     weekday line aligns with the time alone. -->
+<component format="1" name="Corner clock" author="AnimeLogon">
+  <settings>
+    <choice id="position" label="Position" detail="The margin follows the display's resolution." default="bottom-left">
+      <option value="top-left" label="Top left"/>
+      <option value="top-right" label="Top right"/>
+      <option value="bottom-left" label="Bottom left"/>
+      <option value="bottom-right" label="Bottom right"/>
+    </choice>
+    <number id="size" label="Size" detail="Height of the time, in percent of the display's height." default="9" min="4" max="20" step="0.5"/>
+    <font id="font" label="Font" detail="Only fonts installed for all users are listed." default=""/>
+    <color id="color" label="Color" default="#FFFFFF"/>
+    <toggle id="shade" label="Backdrop" detail="Darkens the wallpaper behind the clock." default="off" on="0.25" off="0"/>
+  </settings>
+  <panel anchor="$position" size="$size" margin="6" enter="rise" enter-duration="0.6">
+    <line>
+      <text value="{time}" font="$font" weight="light" color="$color" tracking="-0.02" figures="tabular"/>
+      <text value="{ampm}" font="$font" weight="semibold" color="$color" size="0.3" space="0.12" hang="true"/>
+    </line>
+    <line gap="0.18">
+      <text label="Weekday" value="{weekday}" font="$font" weight="semibold" color="$color" size="0.22" case="upper" tracking="0.12"/>
+      <text label="Date" value="{month} {day}" font="$font" color="$color" opacity="0.8" size="0.22" space="0.3"/>
+    </line>
+    <shadow label="Shadow" blur="0.06" opacity="0.35" y="0.02"/>
+    <backdrop label="Backdrop" opacity="$shade"/>
+  </panel>
+</component>
