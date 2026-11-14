@@ -114,6 +114,9 @@ export interface Setting {
   modified: boolean;
   folded?: boolean;   // shown with a part's adjustments rather than with the component's style
   content?: boolean;  // a switch that only shows or hides parts: listed under what the component shows
+  // A switch that turns one value on and off (the clock's backdrop): the slider for that value,
+  // shown under the switch while it is in the state `when`. The value is not among the parts.
+  strength?: Adjustment & { when: 'on' | 'off' };
   min: number;
   max: number;
   step: number;

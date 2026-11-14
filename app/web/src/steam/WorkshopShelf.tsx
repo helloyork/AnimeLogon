@@ -137,12 +137,12 @@ function ShelfCard({ item: i, picked }: { item: ShelfItem; picked: boolean }) {
       {installable(i) && (
         <div className="over top">
           {theme ? (
-            <button type="button" className={cx('pick', picked && 'on')} role="checkbox" aria-checked={picked}
+            <button type="button" className={cx('shelf-pick', picked && 'on')} role="checkbox" aria-checked={picked}
               aria-label={t('shelf.pick_update', { name: i.title || theme.name })} onClick={() => togglePick(i.id)}>
               {picked && <Checkmark12Filled />}
             </button>
           ) : (
-            <span className={cx('pick', picked && 'on')} aria-hidden="true">{picked && <Checkmark12Filled />}</span>
+            <span className={cx('shelf-pick', picked && 'on')} aria-hidden="true">{picked && <Checkmark12Filled />}</span>
           )}
         </div>
       )}

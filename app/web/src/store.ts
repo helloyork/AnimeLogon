@@ -155,7 +155,7 @@ export const multiPanel = (id: string | null) => {
 export const panelKey = (sel: Selection) => (sel.part ? sel.part.split('.')[0] : 'p1');
 
 /* --- navigation --- */
-// A theme's page sits under the library's (D59).
+// A theme's page sits under the library's: the library's tab stays chosen while it is open.
 export function openTheme(id: string) {
   resetPreview();
   setState({ view: 'theme', tab: 'mine', sel: { inst: null, part: null } });

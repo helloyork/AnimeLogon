@@ -1,4 +1,4 @@
-// The theme library: the theme in use, large, then every theme. A click on a theme puts it in use (D41).
+// The theme library: the theme in use, large, then every theme. A click on a theme puts it in use.
 import { useState, type CSSProperties, type ReactNode } from 'react';
 import { Menu, MenuDivider, MenuItem, MenuList, MenuPopover, MenuTrigger, useRestoreFocusTarget } from '@fluentui/react-components';
 import { Add16Regular, Edit16Regular, MoreHorizontal16Regular, Play16Regular, Warning16Regular } from '@fluentui/react-icons';
@@ -50,8 +50,9 @@ export function LibraryPage() {
           <h1 className="t-title">{tr('library.title')}</h1>
           <div className="actions">
             {/* Asks what to import first; the administrator's approval comes after that choice. The
-                focus comes back here when the question is closed. */}
-            <Button {...restoreFocus} onClick={() => importFlow()}>{tr('library.import')}</Button>
+                focus comes back here when the question is closed. One import runs at a time: not
+                offered while one does (the busy bar is up). */}
+            <Button {...restoreFocus} disabled={!!s.busy} onClick={() => importFlow()}>{tr('library.import')}</Button>
             <Button icon={<Add16Regular />} onClick={() => openDialog({ kind: 'newTheme' })}>{tr('library.new')}</Button>
           </div>
         </div>

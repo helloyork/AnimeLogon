@@ -1,5 +1,5 @@
-/* 主题库 */
-.notice { margin-bottom: var(--s6); }
+/* The theme library. Its notices (AnimeLogon not installed, or off) stand above the themes. */
+.page > .notice { margin-bottom: var(--s6); }
 
 /* A picture of a lock screen, at the shape of its display (--arw / --arh), its layers stacked. */
 .shot { position: relative; overflow: hidden; aspect-ratio: var(--arw) / var(--arh); background: #000; }

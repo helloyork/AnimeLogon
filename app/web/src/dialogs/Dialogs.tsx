@@ -135,7 +135,8 @@ function MonitorDialog({ d }: { d: Extract<DialogState, { kind: 'monitor' }> }) 
 // The wallpapers already here, the chosen one outlined and focused first; the last cells bring in
 // a new one. The import cell goes straight to a file dialog and the administrator's approval when
 // it carries the `shield`, and otherwise first asks what to import; where there is Wallpaper
-// Engine and `onWorkshop` is given, a last cell offers its videos.
+// Engine and `onWorkshop` is given, a last cell offers its videos. One import runs at a time: while
+// one does (the busy bar is up), the cells that bring in a new one are not offered.
 function WallpaperGrid({ current, onPick, onImport, importLabel, importDetail, shield, onWorkshop, focusCurrent }: {
   current: string;
   onPick: (id: string) => void;
@@ -166,13 +167,13 @@ function WallpaperGrid({ current, onPick, onImport, importLabel, importDetail, s
           <span className="t-cap3 ellipsis">{w.meta}</span>
         </button>
       ))}
-      <button type="button" className="pick" {...restoreFocus} onClick={onImport}>
+      <button type="button" className="pick" {...restoreFocus} disabled={!!s.busy} onClick={onImport}>
         <span className="pic browse"><FolderOpen16Regular /></span>
         <span className="ellipsis shielded">{shield && <UacShield />}{importLabel}</span>
         <span className="t-cap3 ellipsis">{importDetail}</span>
       </button>
       {onWorkshop && s.env.wallpaperEngine && (
-        <button type="button" className="pick" onClick={onWorkshop}>
+        <button type="button" className="pick" disabled={!!s.busy} onClick={onWorkshop}>
           <span className="pic browse"><Video16Regular /></span>
           <span className="ellipsis">Wallpaper Engine…</span>
           <span className="t-cap3 ellipsis">{tr('dialog.wallpaper.we.detail')}</span>
@@ -236,8 +237,9 @@ function AddComponentDialog({ d }: { d: Extract<DialogState, { kind: 'addCompone
               <span className="t-cap3 ellipsis">{c.builtIn ? tr('dialog.add.builtin') : c.author ? tr('inspector.by', { author: c.author }) : tr('dialog.add.imported')}</span>
             </button>
           ))}
-          <button type="button" className="choice" onClick={() => { closeDialog(d.id); send('importComponent', { add: true }); }}>
-            <span>{tr('dialog.import_file')}</span>
+          {/* A file dialog, then the administrator's approval to install the component. */}
+          <button type="button" className="choice" disabled={!!s.busy} onClick={() => { closeDialog(d.id); send('importComponent', { add: true }); }}>
+            <span className="shielded"><UacShield />{tr('dialog.import_file')}</span>
             <span className="t-cap3">{tr('dialog.add.xml')}</span>
           </button>
         </div>

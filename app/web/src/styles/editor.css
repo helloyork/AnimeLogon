@@ -140,6 +140,8 @@
 .pmain > .seg,
 .pmain > .field:not(.num) { flex: 1; min-width: 0; }
 .preset { flex: none; display: flex; justify-content: center; width: 20px; }
+/* A value set under the switch above it, which turns it on: the strength of a backdrop. */
+.plabel.sub { padding-left: var(--s3); }
 .ptoggle { grid-column: 1 / -1; display: flex; align-items: center; gap: var(--s3); min-height: var(--h-sm); }
 .ptoggle .plabel { flex: 1; }
 .ptoggle .preset { margin-left: calc(var(--s3) * -1 + var(--s1)); }
@@ -222,6 +224,9 @@
 .item .tx { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .item .tx small { color: var(--text-3); font-size: 12px; }
 .item .chev { flex: none; width: 12px; height: 12px; color: var(--text-3); }
+/* The chevron after a part's switch, where the row's button ends before the switch: in line with
+   the chevrons inside the buttons of the rows without one. */
+.item > .chev-after { flex: none; display: grid; place-items: center; margin-right: var(--s2); cursor: pointer; }
 /* Under the list: adding a component, and giving these components to other themes. Ghost buttons,
    their text in line with the list's. */
 .sec-b > .adds { display: flex; flex-wrap: wrap; gap: 0 var(--s1); margin-left: calc(var(--s2) * -1); }

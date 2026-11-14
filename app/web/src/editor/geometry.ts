@@ -195,10 +195,10 @@ export function placeDragged(g: Geometry, dx: number, dy: number, opt: { free?: 
   return { anchor: ANCHORS[row * 3 + col], ox, oy, col, row, bx, by, rx, ry, left: L0, top: T0, lines };
 }
 
-// Where a panel is, as the panel beside the stage says it (D60): its middle, in percent of its
+// Where a panel is, as the panel beside the stage says it: its middle, in percent of its
 // display's width and height from the left and top edges, and how far that can go with the box
 // still on the display. The middle is the point the panel is held by when it is centred (the
-// middle of its lines without a marker that hangs beside them, such as AM/PM, D57), so a clock
+// middle of its lines without a marker that hangs beside them, such as AM/PM), so a clock
 // snapped to the display's middle reads 50. It is reckoned from the stored offsets, not the
 // picture's whole pixels, so a value typed in reads back as typed.
 function middle(g: Geometry) {
