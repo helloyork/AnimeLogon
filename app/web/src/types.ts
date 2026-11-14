@@ -107,7 +107,7 @@ export interface Option {
 // A setting of a component (or of a scene wallpaper), changed for the whole of it.
 export interface Setting {
   id: string;
-  kind: 'toggle' | 'number' | 'color' | 'font' | 'date' | 'choice';
+  kind: 'toggle' | 'number' | 'color' | 'colors' | 'font' | 'date' | 'choice';  // colors: "#RRGGBB[AA] P%, ..."
   label: string;
   detail: string;
   value: string;
@@ -125,7 +125,7 @@ export interface Adjustment {
   key: string;
   label: string;
   detail: string;
-  control: 'slider' | 'choice' | 'color' | 'font' | 'toggle';  // a toggle's value is "true" or "false"
+  control: 'slider' | 'choice' | 'color' | 'colors' | 'font' | 'toggle';  // a toggle's value is "true" or "false"
   min: number;
   max: number;
   step: number;

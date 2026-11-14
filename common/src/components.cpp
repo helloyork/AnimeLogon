@@ -165,20 +165,20 @@ std::string SpectrumText() {
       <option value="both" label="双向"/>
     </choice>
     <number id="bands" label="频段数量" default="64" min="8" max="128" step="1"/>
-    <choice id="gradient" label="渐变方向" detail="水平渐变自左向右；垂直渐变自基线向频段顶端。" default="horizontal">
-      <option value="none" label="无"/>
+    <colors id="colors" label="颜色" detail="渐变的各个颜色及其位置；只有一个颜色时为纯色。" default="#8FD3FF 0%, #C6B9FF 50%, #F3A6FF 100%"/>
+    <choice id="gradient" label="渐变方向" detail="水平自左向右；垂直自基线向顶端；按高度时每个柱形取其高度对应的颜色。" default="horizontal">
       <option value="horizontal" label="水平"/>
       <option value="vertical" label="垂直"/>
+      <option value="level" label="按高度"/>
     </choice>
-    <color id="color" label="起始颜色" default="#8FD3FF"/>
-    <color id="end-color" label="结束颜色" default="#F3A6FF"/>
+    <number id="flow" label="颜色流动" detail="颜色沿渐变方向往返一次所需的秒数；为 0 时不流动。" default="0" min="0" max="30" step="0.5"/>
     <number id="sensitivity" label="灵敏度" detail="数值越大，较轻的声音也会使频段升得越高。" default="1" min="0.1" max="5" step="0.05"/>
     <number id="smoothing" label="平滑度" detail="数值越大，频段的升降越平缓。" default="0.5" min="0" max="0.95" step="0.01"/>
     <toggle id="hide" label="无声音时隐藏" detail="没有声音播放时，频谱淡出。" default="off" on="0" off="1"/>
   </settings>
   <panel anchor="$position" size="$size" margin="5">
     <line>
-      <spectrum label="频谱" length="$width" bands="$bands" mode="$mode" direction="$direction" gradient="$gradient" color="$color" end-color="$end-color" sensitivity="$sensitivity" smoothing="$smoothing" idle-opacity="$hide" gap="0.35" radius="0.5" floor="0.05"/>
+      <spectrum label="频谱" length="$width" bands="$bands" mode="$mode" direction="$direction" colors="$colors" gradient="$gradient" flow="$flow" sensitivity="$sensitivity" smoothing="$smoothing" idle-opacity="$hide" gap="0.35" radius="0.5" floor="0.05"/>
     </line>
     <shadow label="阴影" blur="0.06" opacity="0.25" y="0.02"/>
   </panel>

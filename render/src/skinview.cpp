@@ -225,6 +225,26 @@ private:
     float width_ = 0.0f, height_ = 0.0f, baseline_ = 0.0f;
     DWRITE_OVERHANG_METRICS ink_{};
 };
+// The colour a gradient has at `x` (0 to 1): mixed between the stops either side of it.
+D2D1_COLOR_F ColorAt(const std::vector<skin::Stop> &stops, float x) {
+    if (stops.empty()) return D2D1::ColorF(D2D1::ColorF::White);
+    if (x <= stops.front().at) return ColorOf(stops.front().color, 1.0f);
+    for (size_t i = 1; i < stops.size(); ++i) {
+        if (x > stops[i].at) continue;
+        const D2D1_COLOR_F a = ColorOf(stops[i - 1].color, 1.0f), b = ColorOf(stops[i].color, 1.0f);
+        const float span = stops[i].at - stops[i - 1].at, t = span > 0.0f ? (x - stops[i - 1].at) / span : 1.0f;
+        return D2D1::ColorF(a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t, a.b + (b.b - a.b) * t, a.a + (b.a - a.a) * t);
+    }
+    return ColorOf(stops.back().color, 1.0f);
+}
+
+// To 1 and back: x as it goes 0..1, then 1..0 as it goes 1..2, and so on.
+float Mirrored(float x) {
+    x = std::fmod(x, 2.0f);
+    if (x < 0.0f) x += 2.0f;
+    return x > 1.0f ? 2.0f - x : x;
+}
+
 // A text's words: "{media.position}" and "{media.progress}" move every second while playing.
 bool FollowsPlayback(const std::wstring &value) {
     return value.find(L"{media.position}") != std::wstring::npos || value.find(L"{media.progress}") != std::wstring::npos;
@@ -321,7 +341,7 @@ void SkinView::SettleAudio(const spectrum::Frame &frame) {
 
 bool SkinView::Moving() const {
     for (const Audio &a : spectra_)
-        if (a.bands.Moving()) return true;
+        if (a.bands.Moving() || skin_.panels[a.panel].lines[a.line].texts[a.text].audio.flow > 0.0f) return true;
     return false;
 }
 
@@ -766,35 +786,47 @@ bool SkinView::Build(Built &built, size_t index, UINT width, UINT height) {
 bool SkinView::Brushes(Built::Spectrum &place, const skin::Text &text) {
     const skin::Spectrum &a = text.audio;
     const D2D1_RECT_F &box = place.box;
-    const D2D1_COLOR_F from = ColorOf(text.color, 1.0f), to = ColorOf(a.endColor, 1.0f);
-    // Left to right, or from where the bands start toward where they reach: up from the bottom,
-    // down from the top, or out both ways from the middle.
-    D2D1_POINT_2F start = D2D1::Point2F(box.left, box.bottom), end = D2D1::Point2F(box.left, box.top);
-    std::vector<D2D1_GRADIENT_STOP> stops{{0.0f, from}, {1.0f, to}};
+    const float middle = (box.top + box.bottom) / 2.0f;
+    // Along the gradient: left to right, or from where the bands start toward where they reach --
+    // up from the bottom, down from the top, or out from the middle. Beyond its ends the gradient
+    // comes back mirrored: both ways from the middle then look alike, and colours that flow along
+    // it never jump. A line or an area has no bars to colour by their height, so is coloured as
+    // vertical.
     if (a.gradient == skin::Gradient::Horizontal) {
-        start = D2D1::Point2F(box.left, box.top);
-        end = D2D1::Point2F(box.right, box.top);
+        place.start = D2D1::Point2F(box.left, middle);
+        place.end = D2D1::Point2F(box.right, middle);
     } else if (a.direction == skin::Direction::Down) {
-        std::swap(start, end);
+        place.start = D2D1::Point2F(box.left, box.top);
+        place.end = D2D1::Point2F(box.left, box.bottom);
     } else if (a.direction == skin::Direction::Both) {
-        stops = {{0.0f, to}, {0.5f, from}, {1.0f, to}};
+        place.start = D2D1::Point2F(box.left, middle);
+        place.end = D2D1::Point2F(box.left, box.top);
+    } else {
+        place.start = D2D1::Point2F(box.left, box.bottom);
+        place.end = D2D1::Point2F(box.left, box.top);
     }
+    // Bars coloured by their height take one plain colour each, set as they are drawn.
+    place.linear = a.stops.size() > 1 && !(a.gradient == skin::Gradient::Level && a.mode == skin::Mode::Bars);
+    std::vector<D2D1_GRADIENT_STOP> stops;
+    for (const skin::Stop &s : a.stops) stops.push_back({s.at, ColorOf(s.color, 1.0f)});
     auto make = [&](ComPtr<ID2D1Brush> *out) {
-        if (a.gradient == skin::Gradient::None) {
+        if (!place.linear) {
             ComPtr<ID2D1SolidColorBrush> solid;
-            if (FAILED(dc_->CreateSolidColorBrush(from, &solid))) return false;
+            if (FAILED(dc_->CreateSolidColorBrush(stops.front().color, &solid))) return false;
             *out = solid;
             return true;
         }
         ComPtr<ID2D1GradientStopCollection> collection;
         ComPtr<ID2D1LinearGradientBrush> linear;
-        if (FAILED(dc_->CreateGradientStopCollection(stops.data(), (UINT32)stops.size(), &collection)) ||
-            FAILED(dc_->CreateLinearGradientBrush(D2D1::LinearGradientBrushProperties(start, end), collection.Get(), &linear)))
+        if (FAILED(dc_->CreateGradientStopCollection(stops.data(), (UINT32)stops.size(), D2D1_GAMMA_2_2,
+                                                     D2D1_EXTEND_MODE_MIRROR, &collection)) ||
+            FAILED(dc_->CreateLinearGradientBrush(D2D1::LinearGradientBrushProperties(place.start, place.end),
+                                                  collection.Get(), &linear)))
             return false;
         *out = linear;
         return true;
     };
-    return make(&place.fill) && make(&place.peak);
+    return !stops.empty() && make(&place.fill) && make(&place.peak);
 }
 
 void SkinView::DrawSpectrum(const Built::Spectrum &place, const skin::Text &text, float px) {
@@ -829,32 +861,54 @@ void SkinView::DrawSpectrum(const Built::Spectrum &place, const skin::Text &text
         else *top = box.bottom - h, *bottom = box.bottom;
     };
     place.fill->SetOpacity(alpha);
+    // Flowing colours: the gradient slides along itself, to its end and (mirrored) back, once in
+    // `flow` seconds.
+    const float phase = a.flow > 0.0f ? (float)std::fmod((double)GetTickCount64() / 1000.0, (double)a.flow) / a.flow : 0.0f;
+    if (place.linear)
+        for (ID2D1Brush *brush : {place.fill.Get(), place.peak.Get()}) {
+            ComPtr<ID2D1LinearGradientBrush> linear;
+            if (!brush || FAILED(brush->QueryInterface(IID_PPV_ARGS(&linear)))) continue;
+            const float dx = (place.end.x - place.start.x) * 2.0f * phase, dy = (place.end.y - place.start.y) * 2.0f * phase;
+            linear->SetStartPoint(D2D1::Point2F(place.start.x + dx, place.start.y + dy));
+            linear->SetEndPoint(D2D1::Point2F(place.end.x + dx, place.end.y + dy));
+        }
+    // Bars coloured by their height: the colour the gradient has that far along (moved by the flow).
+    const bool byHeight = a.gradient == skin::Gradient::Level && a.stops.size() > 1;
+    auto paint = [&](ID2D1Brush *brush, float share) {
+        ComPtr<ID2D1SolidColorBrush> solid;
+        if (byHeight && SUCCEEDED(brush->QueryInterface(IID_PPV_ARGS(&solid))))
+            solid->SetColor(ColorAt(a.stops, Mirrored(share + 2.0f * phase)));
+        return brush;
+    };
 
     if (a.mode == skin::Mode::Bars) {
         const float bar = std::max(1.0f, slot * (1.0f - std::clamp(a.gap, 0.0f, 0.95f)));
         const float corner = std::clamp(text.radius, 0.0f, 0.5f) * bar;
         for (int j = 0; j < n; ++j) {
             const float x = box.left + (float)j * slot + (slot - bar) / 2.0f;
+            const float share = reach(levels, bandAt(j));
             float top = 0.0f, bottom = 0.0f;
-            span(reach(levels, bandAt(j)), &top, &bottom);
+            span(share, &top, &bottom);
             const float r = std::min(corner, (bottom - top) / 2.0f);
-            dc_->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(x, top, x + bar, bottom), r, r), place.fill.Get());
+            dc_->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(x, top, x + bar, bottom), r, r), paint(place.fill.Get(), share));
         }
         if (a.peak <= 0.0f || !place.peak) return;
         // A short mark just beyond each bar's highest recent reach, kept inside the room.
         place.peak->SetOpacity(alpha * std::clamp(a.peak, 0.0f, 1.0f));
         const float mark = std::max(1.5f, std::min(bar * 0.45f, height * 0.05f)), lift = std::max(1.0f, mark * 0.8f);
         const float r = std::min(corner, mark / 2.0f);
-        auto draw = [&](float x, float y0) {
+        auto draw = [&](float x, float y0, ID2D1Brush *brush) {
             y0 = std::clamp(y0, box.top, box.bottom - mark);
-            dc_->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(x, y0, x + bar, y0 + mark), r, r), place.peak.Get());
+            dc_->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(x, y0, x + bar, y0 + mark), r, r), brush);
         };
         for (int j = 0; j < n; ++j) {
             const float x = box.left + (float)j * slot + (slot - bar) / 2.0f;
+            const float share = reach(peaks, bandAt(j));
             float top = 0.0f, bottom = 0.0f;
-            span(reach(peaks, bandAt(j)), &top, &bottom);
-            if (a.direction != skin::Direction::Down) draw(x, top - lift - mark);
-            if (a.direction != skin::Direction::Up) draw(x, bottom + lift);
+            span(share, &top, &bottom);
+            ID2D1Brush *brush = paint(place.peak.Get(), share);
+            if (a.direction != skin::Direction::Down) draw(x, top - lift - mark, brush);
+            if (a.direction != skin::Direction::Up) draw(x, bottom + lift, brush);
         }
         return;
     }

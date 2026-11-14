@@ -95,7 +95,10 @@ private:
             size_t audio = 0;        // in spectra_
             size_t line = 0, text = 0;
             D2D1_RECT_F box{};
+            // Plain colours, or gradients from `start` to `end` (`linear`), mirrored beyond them.
             Microsoft::WRL::ComPtr<ID2D1Brush> fill, peak;
+            bool linear = false;
+            D2D1_POINT_2F start{}, end{};
         };
         std::vector<Spectrum> spectra;
         Microsoft::WRL::ComPtr<ID2D1Bitmap1> live;

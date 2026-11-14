@@ -118,7 +118,10 @@ TEST(SpectrumSensitivityRaisesTheBands) {
 TEST(SpectrumElementIsPartOfTheFormat) {
     CHECK(ParsesWith(L"<spectrum/>"));
     CHECK(ParsesWith(L"<spectrum bands=\"32\" mode=\"area\" direction=\"both\" bass=\"middle\" gradient=\"vertical\" "
-                     L"color=\"#FF0000\" end-color=\"#0000FF80\" peak=\"0.5\" low=\"60\" high=\"12000\"/>"));
+                     L"colors=\"#FF0000 0%, #00FF00 40.5%, #0000FF80 100%\" flow=\"4\" peak=\"0.5\" low=\"60\" high=\"12000\"/>"));
+    CHECK(ParsesWith(L"<spectrum gradient=\"level\" colors=\"#FFFFFF 0%\"/>"));
+    CHECK(!ParsesWith(L"<spectrum colors=\"#FF0000\"/>"));  // a colour needs its place
+    CHECK(!ParsesWith(L"<spectrum gradient=\"none\"/>"));
     CHECK(ParsesWith(L"<text value=\"{time}\"/><spectrum space=\"0.5\" when=\"media.state=playing\"/>"));
     CHECK(!ParsesWith(L"<spectrum value=\"{time}\"/>"));  // it names no data
     CHECK(!ParsesWith(L"<spectrum bands=\"3\"/>"));
@@ -147,7 +150,9 @@ TEST(SpectrumComponentComesBuiltIn) {
     CHECK(u.audio.bass == skin::Bass::Middle && u.audio.peak == 0.8f && u.audio.sensitivity == 2.5f);
     CHECK(skin::Accepts(s, L"p1.l1.a1.bands", L"100") && !skin::Accepts(s, L"p1.l1.a1.bands", L"200"));
     CHECK(!skin::Accepts(s, L"p1.l1.a1.bands", L"40.5") && !skin::Accepts(s, L"p1.l1.a2.bands", L"40"));
-    CHECK(skin::Accepts(s, L"p1.l1.a1.end-color", L"#123456") && skin::IsAdjustmentKey(L"p1.l1.a1.smoothing"));
+    CHECK(skin::Accepts(s, L"p1.l1.a1.colors", L"#123456 0%, #ABCDEF 100%") && skin::IsAdjustmentKey(L"p1.l1.a1.smoothing"));
+    CHECK(!skin::Accepts(s, L"p1.l1.a1.color", L"#123456") && !skin::Accepts(s, L"p1.l1.a1.end-color", L"#123456"));
+    CHECK(s.Find(L"colors") && s.Find(L"colors")->kind == skin::SettingKind::Colors && skin::Accepts(s, L"colors", L"#FF0000 0%"));
     CHECK(!skin::Accepts(s, L"bands", L"129") && skin::Accepts(s, L"bands", L"128"));
     const std::vector<skin::Part> parts = skin::Parts(s);
     const auto part = std::find_if(parts.begin(), parts.end(), [](const skin::Part &p) { return p.key == L"p1.l1.a1"; });
@@ -195,6 +200,77 @@ TEST(SpectrumListensToTheOutputDevice) {
     capture.Stop();
     CHECK(GetTickCount64() - before < 1500);
     CHECK(!capture.Latest(&samples, &rate));
+}
+
+// A spectrum's colours: one to eight, each at its place along the gradient.
+TEST(SpectrumColoursAreStopsAlongAGradient) {
+    std::vector<skin::Stop> stops;
+    CHECK(skin::ParseStops(L"#FF0000 0%, #00FF0080 50%,#0000FF 100%", &stops) && stops.size() == 3);
+    CHECK(stops[0].color == 0xFFFF0000 && stops[1].color == 0x8000FF00 && stops[1].at == 0.5f && stops[2].at == 1.0f);
+    CHECK(skin::ParseStops(L"#FFFFFF 25%", &stops) && stops.size() == 1 && stops[0].at == 0.25f);
+    CHECK(skin::ParseStops(L"  #102030   12.5% ,  #405060 12.5%  ", &stops) && stops.size() == 2);  // places may repeat
+    CHECK(!skin::ParseStops(L"", &stops));
+    CHECK(!skin::ParseStops(L"#FF0000", &stops));                      // no place
+    CHECK(!skin::ParseStops(L"#FF0000 50, #00FF00 60%", &stops));      // a place without %
+    CHECK(!skin::ParseStops(L"#FF0000 60%, #00FF00 50%", &stops));     // out of order
+    CHECK(!skin::ParseStops(L"#FF0000 -1%", &stops) && !skin::ParseStops(L"#FF0000 101%", &stops));
+    CHECK(!skin::ParseStops(L"red 0%", &stops) && !skin::ParseStops(L"#FF0000 0%,", &stops));
+    std::wstring nine;
+    for (int i = 0; i < 9; ++i) nine += (i ? L", " : L"") + std::wstring(L"#FFFFFF ") + std::to_wstring(i * 10) + L"%";
+    CHECK(!skin::ParseStops(nine, &stops));
+    skin::Skin s;
+    CHECK(BuiltInComponent(L"spectrum", &s));
+    const skin::Text t = skin::Resolve(s, {{L"colors", L"#FF0000 0%, #0000FF 100%"}, {L"gradient", L"level"}, {L"flow", L"6"}})
+                             .panels[0].lines[0].texts[0];
+    CHECK(t.audio.stops.size() == 2 && t.audio.stops[1].color == 0xFF0000FF);
+    CHECK(t.audio.gradient == skin::Gradient::Level && t.audio.flow == 6.0f);
+    CHECK(skin::Resolve(s, {}).panels[0].lines[0].texts[0].audio.stops.size() == 3);
+}
+
+// Three colours left to right; colour by height; colours that flow.
+TEST(SpectrumDrawsItsColours) {
+    const HRESULT co = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    skin::Skin s;
+    CHECK(BuiltInComponent(L"spectrum", &s));
+    Picture background, out;
+    background.width = 960;
+    background.height = 540;
+    background.bgra.assign((size_t)960 * 540 * 4, 0);
+    SkinPreview preview;
+    std::vector<SkinView::Bound> bounds;
+    const RegionalFormat us{L"en-US", L"h:mm tt", L"dddd, MMMM d, yyyy"};
+    auto draw = [&](const skin::Values &values) {
+        skin::Values v = values;
+        v[L"p1.s1.opacity"] = L"0";
+        return preview.Render(background, skin::Resolve(s, v), ClockStyle{}, us, SYSTEMTIME{}, &out, &bounds);
+    };
+    auto room = [&] {
+        for (const SkinView::Bound &b : bounds)
+            if (b.key == L"p1.l1.a1") return b.rect;
+        return D2D1_RECT_F{};
+    };
+    // The most of one channel (0 blue, 1 green, 2 red) in a column of the room, near its foot.
+    auto most = [&](int x, int channel) {
+        const D2D1_RECT_F r = room();
+        int best = 0;
+        for (int dx = -6; dx <= 6; ++dx)
+            best = std::max<int>(best, out.bgra[((size_t)((int)r.bottom - 3) * out.width + x + dx) * 4 + channel]);
+        return best;
+    };
+    CHECK(draw({{L"colors", L"#FF0000 0%, #00FF00 50%, #0000FF 100%"}}));
+    const D2D1_RECT_F r = room();
+    const int left = (int)r.left + 8, mid = (int)((r.left + r.right) / 2), right = (int)r.right - 8;
+    CHECK(most(left, 2) > 200 && most(left, 1) < 80 && most(left, 0) < 40);
+    CHECK(most(mid, 1) > 200 && most(mid, 2) < 80 && most(mid, 0) < 80);
+    CHECK(most(right, 0) > 200 && most(right, 2) < 40 && most(right, 1) < 80);
+    // By height: every bar is one colour, the shorter ones nearer the first. The sample's bars all
+    // rise above half the room, so their foot is no longer pure red but toward blue.
+    CHECK(draw({{L"colors", L"#FF0000 0%, #0000FF 100%"}, {L"gradient", L"level"}}));
+    CHECK(most(left, 0) > 60 && most(right, 0) > 60);
+    // One colour is a plain colour, whatever the direction.
+    CHECK(draw({{L"colors", L"#00FF00 0%"}, {L"gradient", L"vertical"}}));
+    CHECK(most(left, 1) > 200 && most(right, 1) > 200 && most(mid, 2) < 40);
+    if (SUCCEEDED(co)) CoUninitialize();
 }
 
 // The settings app's moving previews: one view drawn frame after frame keeps its bands, so they rise

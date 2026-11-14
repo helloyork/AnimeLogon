@@ -155,6 +155,43 @@
 .swatches button[aria-checked=true] { box-shadow: 0 0 0 2px var(--surface-1), 0 0 0 3.5px var(--accent); }
 /* Fluent's colour area is at least 300 px wide; the layer holds it with its padding. */
 .picker { display: flex; flex-direction: column; gap: var(--s3); width: 332px; }
+/* A gradient: a handle on the bar for each colour, the chosen one's colour and place below, then
+   gradients to start from. The bar is inset by half a handle, so handles at its ends stay inside
+   the panel; a checkerboard shows through colours that are not opaque. */
+.pgrad { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--s2); padding-top: 2px; }
+.gbar {
+  position: relative;
+  height: 22px;
+  margin: 0 8px;
+  border-radius: var(--r-xs);
+  background: repeating-conic-gradient(#c8c8c8 0% 25%, #fff 0% 50%) 0 0 / 8px 8px;
+  cursor: copy;
+  touch-action: none;
+}
+.gbar.full { cursor: default; }
+.gfill { position: absolute; inset: 0; border-radius: inherit; box-shadow: inset 0 0 0 1px rgba(127, 127, 127, .45); pointer-events: none; }
+.gstop {
+  position: absolute;
+  top: 50%;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .4), 0 1px 3px rgba(0, 0, 0, .35);
+  transform: translate(-50%, -50%);
+  cursor: ew-resize;
+  touch-action: none;
+}
+.gstop.on { box-shadow: 0 0 0 1px rgba(0, 0, 0, .4), 0 0 0 3.5px var(--accent); z-index: 1; }
+.gstop:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.gedit { display: flex; align-items: center; gap: var(--s1); }
+.gedit > .field.mono { flex: 1; min-width: 0; }
+/* The presets share the row's width, so all of them fit on one row in every language. */
+.gpresets { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 5px; }
+.gpresets button { width: auto; height: 16px; border-radius: var(--r-xs); }
+.gpresets button[aria-pressed=true] { box-shadow: 0 0 0 2px var(--surface-1), 0 0 0 3.5px var(--accent); }
 
 /* Lists: components, parts, a scene's layers. */
 .list { display: flex; flex-direction: column; margin: 0 calc(var(--s2) * -1); }

@@ -18,7 +18,7 @@ const wchar_t *const kAnchors[] = {L"top-left", L"top", L"top-right", L"left", L
                                    L"right", L"bottom-left", L"bottom", L"bottom-right"};
 enum class Type {
     Label, Anchor, Number, Align, Template, Font, Weight, Style, Color, Case, Bool, Condition, Date, Fraction, Enter,
-    Figures, Shape, Count, Mode, Direction, Bass, Gradient
+    Figures, Shape, Count, Mode, Direction, Bass, Gradient, Stops
 };
 
 // `adjustable` attributes can be set by hand in the settings app.
@@ -70,7 +70,7 @@ const AttributeSpec kSpectrum[] = {
     {L"height", Type::Number, 0.05, 8},     {L"bands", Type::Count, 4, 128},
     {L"gap", Type::Number, 0, 0.95},        {L"radius", Type::Number, 0, 0.5},
     {L"stroke", Type::Number, 0.005, 1},    {L"floor", Type::Number, 0, 1},
-    {L"color", Type::Color},                {L"end-color", Type::Color},
+    {L"colors", Type::Stops},               {L"flow", Type::Number, 0, 60},
     {L"gradient", Type::Gradient},          {L"opacity", Type::Number, 0, 1},
     {L"idle-opacity", Type::Number, 0, 1},  {L"peak", Type::Number, 0, 1},
     {L"sensitivity", Type::Number, 0.05, 10}, {L"smoothing", Type::Number, 0, 0.99},
@@ -202,7 +202,11 @@ bool Check(const AttributeSpec &spec, const std::wstring &value) {
     case Type::Mode: return value == L"bars" || value == L"line" || value == L"area";
     case Type::Direction: return value == L"up" || value == L"down" || value == L"both";
     case Type::Bass: return value == L"left" || value == L"right" || value == L"middle";
-    case Type::Gradient: return value == L"none" || value == L"horizontal" || value == L"vertical";
+    case Type::Gradient: return value == L"horizontal" || value == L"vertical" || value == L"level";
+    case Type::Stops: {
+        std::vector<Stop> stops;
+        return ParseStops(value, &stops);
+    }
     }
     return false;
 }
@@ -224,6 +228,7 @@ bool Suits(const Setting &setting, const AttributeSpec &spec) {
     case SettingKind::Color: return spec.type == Type::Color;
     case SettingKind::Font: return spec.type == Type::Font;
     case SettingKind::Date: return spec.type == Type::Date;
+    case SettingKind::Colors: return spec.type == Type::Stops;
     }
     return false;
 }
@@ -284,6 +289,7 @@ private:
             else if (e.name == L"color") s.kind = SettingKind::Color;
             else if (e.name == L"font") s.kind = SettingKind::Font;
             else if (e.name == L"date") s.kind = SettingKind::Date;
+            else if (e.name == L"colors") s.kind = SettingKind::Colors;
             else return Fail(e, L"unknown setting <" + e.name + L">");
             const std::wstring *on = nullptr, *off = nullptr, *min = nullptr, *max = nullptr, *step = nullptr;
             bool hasDefault = false;
@@ -498,9 +504,9 @@ const Offer kOffers[] = {
     {L"spectrum", L"radius", L"圆角", L"0 为直角，0.5 为半圆形端点。", Control::Slider, 0, 0.5, 0.01, L"0.5"},
     {L"spectrum", L"stroke", L"线宽", L"曲线的粗细，相对于组件大小。", Control::Slider, 0.01, 0.3, 0.005, L"0.06"},
     {L"spectrum", L"floor", L"最小高度", L"无声音时各频段的高度，以频谱高度的比例计。", Control::Slider, 0, 0.5, 0.005, L"0.05"},
-    {L"spectrum", L"color", L"起始颜色", L"渐变方向为「无」时，仅使用此颜色。", Control::Color, 0, 0, 0, L"#FFFFFF"},
-    {L"spectrum", L"end-color", L"结束颜色", L"", Control::Color, 0, 0, 0, L"#FFFFFF"},
-    {L"spectrum", L"gradient", L"渐变方向", L"水平渐变自左向右；垂直渐变自基线向频段顶端。", Control::Choice, 0, 0, 0, L"none"},
+    {L"spectrum", L"colors", L"颜色", L"渐变的各个颜色及其位置；只有一个颜色时为纯色。", Control::Colors, 0, 0, 0, L"#FFFFFF 0%"},
+    {L"spectrum", L"gradient", L"渐变方向", L"水平自左向右；垂直自基线向顶端；按高度时每个柱形取其高度对应的颜色。", Control::Choice, 0, 0, 0, L"horizontal"},
+    {L"spectrum", L"flow", L"颜色流动", L"颜色沿渐变方向往返一次所需的秒数；为 0 时不流动。", Control::Slider, 0, 30, 0.5, L"0"},
     {L"spectrum", L"opacity", L"不透明度", L"", Control::Slider, 0, 1, 0.01, L"1"},
     {L"spectrum", L"idle-opacity", L"无声音时的不透明度", L"相对于不透明度；为 0 时，无声音时不显示频谱。", Control::Slider, 0, 1, 0.01, L"1"},
     {L"spectrum", L"peak", L"峰值标记", L"柱形上方短暂停留后回落的标记的不透明度；为 0 时不显示。", Control::Slider, 0, 1, 0.01, L"0"},
@@ -527,7 +533,7 @@ std::vector<Option> OptionsOf(const std::wstring &attribute) {
     if (attribute == L"mode") return {{L"bars", L"柱形"}, {L"line", L"曲线"}, {L"area", L"填充曲线"}};
     if (attribute == L"direction") return {{L"up", L"向上"}, {L"down", L"向下"}, {L"both", L"双向"}};
     if (attribute == L"bass") return {{L"left", L"左侧"}, {L"middle", L"中间"}, {L"right", L"右侧"}};
-    if (attribute == L"gradient") return {{L"none", L"无"}, {L"horizontal", L"水平"}, {L"vertical", L"垂直"}};
+    if (attribute == L"gradient") return {{L"horizontal", L"水平"}, {L"vertical", L"垂直"}, {L"level", L"按高度"}};
     return {};
 }
 
@@ -632,7 +638,6 @@ void ReadSpectrum(Applied &a, Text *text) {
     Spectrum &s = text->audio;
     text->length = a.Number(L"length", 12.0f);
     text->radius = a.Number(L"radius", 0.5f);
-    text->color = a.Color(L"color", text->color);
     text->opacity = a.Number(L"opacity", 1.0f);
     text->space = a.Number(L"space", 0.0f);
     s.bands = (int)std::lround(a.Number(L"bands", (float)s.bands));
@@ -644,23 +649,52 @@ void ReadSpectrum(Applied &a, Text *text) {
     s.sensitivity = a.Number(L"sensitivity", s.sensitivity);
     s.smoothing = a.Number(L"smoothing", s.smoothing);
     const std::wstring mode = a.String(L"mode", L"bars"), direction = a.String(L"direction", L"up");
-    const std::wstring bass = a.String(L"bass", L"left"), gradient = a.String(L"gradient", L"none");
+    const std::wstring bass = a.String(L"bass", L"left"), gradient = a.String(L"gradient", L"horizontal");
     s.mode = mode == L"line" ? Mode::Line : mode == L"area" ? Mode::Area : Mode::Bars;
     s.direction = direction == L"down" ? Direction::Down : direction == L"both" ? Direction::Both : Direction::Up;
     s.bass = bass == L"right" ? Bass::Right : bass == L"middle" ? Bass::Middle : Bass::Left;
-    s.gradient = gradient == L"horizontal" ? Gradient::Horizontal
-                 : gradient == L"vertical" ? Gradient::Vertical
-                                           : Gradient::None;
+    s.gradient = gradient == L"vertical" ? Gradient::Vertical : gradient == L"level" ? Gradient::Level : Gradient::Horizontal;
+    if (!ParseStops(a.String(L"colors", L"#FFFFFF 0%"), &s.stops)) s.stops = {{0.0f, 0xFFFFFFFF}};
+    s.flow = a.Number(L"flow", s.flow);
     s.height = a.Number(L"height", s.height);
     s.gap = a.Number(L"gap", s.gap);
     s.floor = a.Number(L"floor", s.floor);
     s.stroke = a.Number(L"stroke", s.stroke);
-    s.endColor = a.Color(L"end-color", text->color);
     s.idleOpacity = a.Number(L"idle-opacity", s.idleOpacity);
     s.peak = a.Number(L"peak", s.peak);
 }
 
 }  // namespace
+
+bool ParseStops(const std::wstring &text, std::vector<Stop> *out) {
+    if (text.empty() || text.size() > 200) return false;
+    std::vector<Stop> stops;
+    for (size_t i = 0; i <= text.size();) {
+        size_t end = text.find(L',', i);
+        if (end == std::wstring::npos) end = text.size();
+        // "#RRGGBB[AA] P%", spaces around it allowed
+        std::wstring item = text.substr(i, end - i);
+        i = end + 1;
+        const size_t first = item.find_first_not_of(L' '), last = item.find_last_not_of(L' ');
+        if (first == std::wstring::npos) return false;
+        item = item.substr(first, last - first + 1);
+        const size_t space = item.find(L' ');
+        if (space == std::wstring::npos || item.back() != L'%') return false;
+        Stop s;
+        double at = 0;
+        const std::wstring place = item.substr(item.find_first_not_of(L' ', space), std::wstring::npos);
+        if (!ParseRgba(item.substr(0, space), &s.color) || !ParseNumber(place.substr(0, place.size() - 1), &at) || at < 0 ||
+            at > 100 || (!stops.empty() && at / 100.0 < stops.back().at))
+            return false;
+        s.at = (float)(at / 100.0);
+        stops.push_back(s);
+        if (stops.size() > 8) return false;
+        if (end == text.size()) break;
+    }
+    if (stops.empty()) return false;
+    *out = std::move(stops);
+    return true;
+}
 
 const Setting *Skin::Find(const std::wstring &id) const {
     for (const Setting &s : settings)
@@ -718,6 +752,10 @@ bool IsValue(const Setting &setting, const std::wstring &value) {
     case SettingKind::Date: {
         data::Date d;
         return data::ParseDate(value, &d);
+    }
+    case SettingKind::Colors: {
+        std::vector<Stop> stops;
+        return ParseStops(value, &stops);
     }
     }
     return false;

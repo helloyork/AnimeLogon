@@ -105,6 +105,7 @@ const wchar_t *KindName(skin::SettingKind kind) {
     case skin::SettingKind::Color: return L"color";
     case skin::SettingKind::Font: return L"font";
     case skin::SettingKind::Date: return L"date";
+    case skin::SettingKind::Colors: return L"colors";
     default: return L"choice";
     }
 }
@@ -115,6 +116,7 @@ const wchar_t *ControlName(skin::Control control) {
     case skin::Control::Color: return L"color";
     case skin::Control::Font: return L"font";
     case skin::Control::Toggle: return L"toggle";
+    case skin::Control::Colors: return L"colors";
     default: return L"slider";
     }
 }

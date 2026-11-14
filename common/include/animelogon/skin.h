@@ -25,7 +25,8 @@
 
 namespace animelogon::skin {
 
-enum class SettingKind { Choice, Toggle, Number, Color, Font, Date };
+// Colors: a list of colours at places along a gradient (Stop, ParseStops).
+enum class SettingKind { Choice, Toggle, Number, Color, Font, Date, Colors };
 
 struct Option {
     std::wstring value, label;
@@ -71,7 +72,7 @@ bool IsSettingId(const std::wstring &id);
 // element's name and the attribute's, as in p1.l1.t1.weight, and wins over the skin's own
 // value for that attribute.
 
-enum class Control { Slider, Choice, Color, Font, Toggle };
+enum class Control { Slider, Choice, Color, Font, Toggle, Colors };
 
 struct Adjustment {
     std::wstring key;  // e.g. p1.l1.t1.weight
@@ -119,12 +120,22 @@ enum class Mode { Bars, Line, Area };
 enum class Direction { Up, Down, Both };
 // Where the bass is: at the left end, at the right, or in the middle with the treble at both ends.
 enum class Bass { Left, Right, Middle };
-// How a spectrum's colour goes from `color` to `end-color`: not at all, from left to right, or
-// from where the bands start to where they reach.
-enum class Gradient { None, Horizontal, Vertical };
+// How a spectrum's colours lie: from its left end to its right, from where the bands start to where
+// they reach, or each bar in the one colour its height reads off the gradient (a line or an area,
+// which has no bars, as Vertical).
+enum class Gradient { Horizontal, Vertical, Level };
 
-// A <spectrum>'s own attributes. Its length, corner radius, colour, opacity and the space before
-// it are a Text's, as a bar's are.
+// A colour at a place along a gradient, `at` from 0 to 1.
+struct Stop {
+    float at = 0.0f;
+    uint32_t color = 0xFFFFFFFF;  // 0xAARRGGBB
+};
+// "#RRGGBB[AA] P%, ...": one to eight colours, each at a place from 0% to 100%, the places in
+// order. The value of a Colors setting and of a spectrum's `colors`.
+bool ParseStops(const std::wstring &text, std::vector<Stop> *out);
+
+// A <spectrum>'s own attributes. Its length, corner radius, opacity and the space before it are a
+// Text's, as a bar's are.
 struct Spectrum {
     int bands = 64;
     float low = 40.0f, high = 16000.0f;  // Hz
@@ -136,8 +147,9 @@ struct Spectrum {
     float gap = 0.35f;     // between bars, as a share of each band's part of the length
     float floor = 0.05f;   // a band at rest, as a share of the height
     float stroke = 0.06f;  // em: the width of a line
-    uint32_t endColor = 0xFFFFFFFF;
-    Gradient gradient = Gradient::None;
+    std::vector<Stop> stops{{0.0f, 0xFFFFFFFF}};  // its colours; one is a plain colour
+    Gradient gradient = Gradient::Horizontal;
+    float flow = 0.0f;  // seconds for the colours to slide once along the gradient and back; 0 still
     float idleOpacity = 1.0f;  // while nothing is heard, times the opacity
     float peak = 0.0f;         // the opacity of a mark held above each bar, times the opacity
 };
@@ -167,7 +179,7 @@ struct Text {
     uint32_t track = 0xFFFFFFFF;             // the part not yet filled
     float trackOpacity = 0.25f;
 
-    bool spectrum = false;  // a spectrum: `audio`, and length, radius, color, opacity and space
+    bool spectrum = false;  // a spectrum: `audio`, and length, radius, opacity and space
     Spectrum audio;
 };
 
