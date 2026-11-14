@@ -165,6 +165,10 @@ function Overview() {
               value={String(t.brightness)} modified={t.brightnessModified} view={{ factor: 100, digits: 0, unit: () => '%' }}
               write={(v, gesture) => edit('brightness', { value: v, ...(gesture ? { gesture } : {}) })}
               onReset={() => edit('brightness', { value: t.ownBrightness })} />
+            <NumberField id="wp-blur" label={tr('inspector.blur')} detail={tr('inspector.blur.detail')} min={0} max={5} step={0.1}
+              value={String(t.blur)} modified={t.blurModified} view={{ factor: 1, digits: 1, unit: () => tr('unit.screen_height') }}
+              write={(v, gesture) => edit('blur', { value: v, ...(gesture ? { gesture } : {}) })}
+              onReset={() => edit('blur', { value: t.ownBlur })} />
             {scene && scene.settings.map(st => <SettingField key={st.id} instId="wallpaper" setting={st} onReset={() => clearValues('wallpaper', [st.id])} />)}
           </div>
         )}

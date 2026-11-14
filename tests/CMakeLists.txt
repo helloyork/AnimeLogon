@@ -1,6 +1,19 @@
 add_executable(animelogon_tests common_tests.cpp clock_tests.cpp skin_tests.cpp wake_tests.cpp data_tests.cpp
                                theme_tests.cpp resolve_tests.cpp motion_tests.cpp)
 target_sources(animelogon_tests PRIVATE image_tests.cpp package_tests.cpp look_tests.cpp)
+# The wallpaper blur on the graphics card against the same blur on the processor, on WARP.
+include(${PROJECT_SOURCE_DIR}/cmake/CompileShader.cmake)
+target_sources(animelogon_tests PRIVATE gpublur_tests.cpp ${PROJECT_SOURCE_DIR}/overlay/src/gpublur.cpp)
+foreach(entry IN ITEMS VS Box Gauss Up)
+    string(TOLOWER ${entry} lower)
+    if(entry STREQUAL "VS")
+        set(profile vs_5_0)
+    else()
+        set(profile ps_5_0)
+    endif()
+    animelogon_compile_shader(animelogon_tests ${PROJECT_SOURCE_DIR}/overlay/shaders/blur.hlsl ${entry} ${profile}
+                              g_blur_${lower} blur_${lower}.h)
+endforeach()
 target_sources(animelogon_tests PRIVATE scene_tests.cpp)
 target_sources(animelogon_tests PRIVATE scene_runtime_tests.cpp)
 add_dependencies(animelogon_tests scene)

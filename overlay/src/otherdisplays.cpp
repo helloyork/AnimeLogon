@@ -7,6 +7,7 @@
 #include <cmath>
 #include <thread>
 
+#include "animelogon/blur.h"
 #include "animelogon/bitmap.h"
 #include "animelogon/log.h"
 #include "animelogon/monitors.h"
@@ -108,8 +109,8 @@ std::wstring KindOf(const plan::Wallpaper &w) {
     return L"no wallpaper";
 }
 
-// The display's picture of its wallpaper, at its size and its theme's brightness, B G R: what
-// the display was showing. A wallpaper that cannot be shown gives way to the built-in one, as it
+// The display's picture of its wallpaper, at its size and its theme's brightness and blur, B G R:
+// what the display was showing. A wallpaper that cannot be shown gives way to the built-in one, as it
 // does on the screen. `what` says which it is, for the log.
 std::vector<uint8_t> Picture(const stills::Still &still, std::wstring *what) {
     std::vector<uint8_t> bgr;
@@ -125,6 +126,8 @@ std::vector<uint8_t> Picture(const stills::Still &still, std::wstring *what) {
         bgr = stills::BuiltIn(still);
     }
     animelogon::ApplyBrightness(bgr.data(), bgr.size() / 3, 3, still.wallpaper.brightness);
+    const int h = Height(still.rect);
+    animelogon::blur::Apply(bgr.data(), Width(still.rect), h, 3, animelogon::blur::Sigma(still.wallpaper.blur, h));
     return bgr;
 }
 

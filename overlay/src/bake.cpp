@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "animelogon/background.h"
+#include "animelogon/blur.h"
 #include "animelogon/log.h"
 #include "animelogon/monitors.h"
 #include "animelogon/paths.h"
@@ -184,6 +185,13 @@ std::wstring ReadKey() {
     return animelogon::FromUtf8(std::string_view((const char *)bytes.data(), bytes.size()));
 }
 
+// The theme's brightness and blur on a picture of the wallpaper, B G R, as the logon screen draws
+// them on a display of that size.
+void Look(std::vector<uint8_t> *bgr, int width, int height, const plan::Wallpaper &wallpaper) {
+    animelogon::ApplyBrightness(bgr->data(), bgr->size() / 3, 3, wallpaper.brightness);
+    animelogon::blur::Apply(bgr->data(), width, height, 3, animelogon::blur::Sigma(wallpaper.blur, height));
+}
+
 bool Write(const std::wstring &path, const std::vector<uint8_t> &bytes) {
     std::vector<uint8_t> existing;
     std::wstring why;
@@ -233,7 +241,12 @@ bool Refresh(const std::wstring &preview) {
     // it is keeps the key, and the background, it always had.
     const float brightness = wallpaper.brightness;
     const bool darker = brightness < animelogon::kBrightness;
-    const std::wstring dimmed = darker ? animelogon::Format(L"|brightness %g", brightness) : std::wstring();
+    std::wstring dimmed = darker ? animelogon::Format(L"|brightness %g", brightness) : std::wstring();
+    // The blur likewise, at the size the background is baked: its sigma is that share of the
+    // baked picture's height, as it is of the display's on the logon screen.
+    const bool blurred = wallpaper.blur > 0.0f;
+    if (blurred) dimmed += animelogon::Format(L"|blur %g", wallpaper.blur);
+    const bool plain = !darker && !blurred;
     // A video's key is what it was before themes, so the same video keeps the same background.
     const std::wstring key =
         (video ? animelogon::Format(L"%s|%s|%s", kVersion, wallpaper.id.c_str(), placed.c_str())
@@ -254,7 +267,7 @@ bool Refresh(const std::wstring &preview) {
         }
         const layout::Mapping m = layout::Map(f.displayW, f.displayH, primary.canvas, primary.rect, wallpaper.fit);
         std::vector<uint8_t> bgr = Compose(f, m, windowW, windowH, width, height);
-        animelogon::ApplyBrightness(bgr.data(), bgr.size() / 3, 3, brightness);
+        Look(&bgr, width, height, wallpaper);
         if (!EncodePng(bgr, width, height, &png)) {
             ALOG(L"bake: the background could not be encoded");
             return false;
@@ -269,17 +282,17 @@ bool Refresh(const std::wstring &preview) {
         }
         const layout::Mapping m = layout::Map(pixels.width, pixels.height, primary.canvas, primary.rect, wallpaper.fit);
         std::vector<uint8_t> bgr = picture::Compose(pixels, m, windowW, windowH, width, height);
-        animelogon::ApplyBrightness(bgr.data(), bgr.size() / 3, 3, brightness);
+        Look(&bgr, width, height, wallpaper);
         if (!EncodePng(bgr, width, height, &png)) {
             ALOG(L"bake: the background could not be encoded");
             return false;
         }
-    } else if (!darker) {
+    } else if (plain) {
         // The built-in wallpaper is exactly the background the installer writes, so a machine
         // that never chose another never has its background rewritten.
         png = animelogon::background::Render();
     } else {
-        // Darkened, it is drawn afresh at the display's size, as the logon screen draws it.
+        // Darkened or blurred, it is drawn afresh at the display's size, as the logon screen draws it.
         const std::vector<uint8_t> bgra = animelogon::background::Pixels(width, height);
         std::vector<uint8_t> bgr(bgra.size() / 4 * 3);
         for (size_t i = 0, j = 0; i + 3 < bgra.size(); i += 4, j += 3) {
@@ -287,7 +300,7 @@ bool Refresh(const std::wstring &preview) {
             bgr[j + 1] = bgra[i + 1];
             bgr[j + 2] = bgra[i + 2];
         }
-        animelogon::ApplyBrightness(bgr.data(), bgr.size() / 3, 3, brightness);
+        Look(&bgr, width, height, wallpaper);
         if (!EncodePng(bgr, width, height, &png)) {
             ALOG(L"bake: the background could not be encoded");
             return false;

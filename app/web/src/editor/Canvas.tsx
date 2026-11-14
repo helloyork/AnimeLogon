@@ -390,7 +390,7 @@ export function Canvas() {
               <SceneFrames theme={t.id} width={pv.width} height={pv.height} moving={motion() && !scene.static} refresh={pv.rev}
                 onBounds={rects => { pv.bounds = pv.bounds.filter(b => b.instance !== 'wallpaper').concat(rects as Bound[]); redraw(); }} />
             )}
-            {video && <WallpaperVideo key={wallpaper.ref} wallpaper={wallpaper.ref} fit={t.fit} brightness={t.brightness} />}
+            {video && <WallpaperVideo key={wallpaper.ref} wallpaper={wallpaper.ref} fit={t.fit} brightness={t.brightness} blur={t.blur} />}
             {pv.url && <Picture url={pv.url} hidden={!!lifted} />}
             {lifted && <img className="layer" src={lifted.base} alt="" draggable={false} />}
             {pv.url && motion() && pv.spectra.length > 0 && (

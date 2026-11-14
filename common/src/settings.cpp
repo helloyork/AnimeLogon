@@ -75,6 +75,12 @@ bool ParseThemeOverride(std::wstring_view rest, std::wstring_view value, Setting
         s->themeOverrides[themeId].brightness = brightness;
         return true;
     }
+    if (what == L"blur") {
+        float blur = 0.0f;
+        if (!ParseBlur(value, &blur)) return false;
+        s->themeOverrides[themeId].blur = blur;
+        return true;
+    }
     const size_t inner = what.find(L'.');
     if (inner == std::wstring_view::npos) return false;
     const std::wstring instance(what.substr(0, inner));
@@ -173,6 +179,16 @@ bool ParseBrightness(std::wstring_view text, float *out) {
     const double v = std::wcstod(copy.c_str(), &end);
     // The float of the lower bound is a hair below 0.1, so 0.1 itself passes.
     if (end != copy.c_str() + copy.size() || !(v >= kBrightnessMin - 1e-6 && v <= kBrightness)) return false;
+    *out = (float)v;
+    return true;
+}
+
+bool ParseBlur(std::wstring_view text, float *out) {
+    if (text.empty() || text.size() > 8) return false;
+    const std::wstring copy(text);
+    wchar_t *end = nullptr;
+    const double v = std::wcstod(copy.c_str(), &end);
+    if (end != copy.c_str() + copy.size() || !(v >= 0.0 && v <= kBlurMax)) return false;
     *out = (float)v;
     return true;
 }
@@ -323,6 +339,7 @@ void AppendOverrides(const Settings &s, std::wstring *out) {
         if (o.wake) *out += prefix + L"wake = " + ToString(*o.wake) + L"\r\n";
         if (o.wakeSeconds) *out += prefix + L"wake-duration = " + Format(L"%g", *o.wakeSeconds) + L"\r\n";
         if (o.brightness) *out += prefix + L"brightness = " + Format(L"%g", *o.brightness) + L"\r\n";
+        if (o.blur) *out += prefix + L"blur = " + Format(L"%g", *o.blur) + L"\r\n";
         for (const auto &[key, value] : o.wallpaperValues)
             *out += prefix + L"wallpaper." + key + L" = " + value + L"\r\n";
         for (const auto &[instance, io] : o.instances) {

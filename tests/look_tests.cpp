@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "animelogon/blur.h"
 #include "animelogon/settings.h"
 #include "animelogon/theme.h"
 #include "plan.h"
@@ -79,4 +80,53 @@ TEST(BrightnessFollowsTheWallpaperOntoTheScreen) {
     std::vector<plan::Wallpaper> shown = {video};
     CHECK(plan::ShowBuiltInInstead(&shown, L"1111111111111111").size() == 1);
     CHECK(shown[0].source == plan::Source::Gradient && shown[0].brightness == 0.6f);
+}
+
+TEST(ThemesSayHowMuchTheirWallpaperIsBlurred) {
+    theme::Theme t;
+    CHECK(ParsesTheme(Theme("<wallpaper ref=\"default\" fit=\"fill\"/>"), &t) && t.blur == 0.0f);
+    CHECK(theme::Normalize(t).find("blur") == std::string::npos);
+    CHECK(ParsesTheme(Theme("<wallpaper ref=\"default\" fit=\"fill\" brightness=\"0.8\" blur=\"2.8\"/>"), &t));
+    CHECK(t.blur == 2.8f && t.brightness == 0.8f);
+    theme::Theme again;
+    CHECK(theme::Normalize(t).find("blur=\"2.8\"") != std::string::npos);
+    CHECK(ParsesTheme(theme::Normalize(t), &again) && again.blur == 2.8f);
+    CHECK(ParsesTheme(Theme("<wallpaper ref=\"default\" fit=\"fill\" blur=\"0\"/>"), &t) && t.blur == 0.0f);
+    CHECK(ParsesTheme(Theme("<wallpaper ref=\"default\" fit=\"fill\" blur=\"5\"/>"), &t) && t.blur == 5.0f);
+    for (const char *bad : {"-1", "5.1", "soft", "", "1 "})
+        CHECK(!ParsesTheme(Theme(std::string("<wallpaper ref=\"default\" fit=\"fill\" blur=\"") + bad + "\"/>")));
+
+    const Settings s = ParseSettings(L"theme = default\r\ntheme.default.blur = 1.5\r\ntheme.0123456789abcdef.blur = 9\r\n");
+    CHECK(s.OverridesFor(L"default").blur == 1.5f && !s.OverridesFor(L"0123456789abcdef").blur);
+    CHECK(ParseSettings(SerializeSettings(s)).OverridesFor(L"default").blur == 1.5f);
+    CHECK(theme::Edited(theme::Default(), s.OverridesFor(L"default")).blur == 1.5f);
+}
+
+TEST(BlurWorksOnCellsAndKeepsWhatIsEven) {
+    // Cells: the largest power of two up to half the sigma.
+    CHECK(blur::Factor(0.5f) == 1 && blur::Factor(3.9f) == 1 && blur::Factor(4.0f) == 2 && blur::Factor(30.0f) == 8);
+    CHECK(blur::Factor(108.0f) == 32);
+    CHECK(blur::Sigma(2.8f, 1080) > 30.2f && blur::Sigma(2.8f, 1080) < 30.3f);
+    // An even picture stays as it is, edges included; the fourth byte is never touched.
+    std::vector<uint8_t> even(40 * 30 * 4);
+    for (size_t i = 0; i < even.size(); i += 4) even[i] = 10, even[i + 1] = 120, even[i + 2] = 250, even[i + 3] = 7;
+    std::vector<uint8_t> blurred = even;
+    blur::Apply(blurred.data(), 40, 30, 4, 9.0f);
+    CHECK(blurred == even);
+    // A white line on black spreads out evenly to both sides and keeps its total.
+    std::vector<uint8_t> line(64 * 8 * 3, 0);
+    for (int y = 0; y < 8; ++y)
+        for (int c = 0; c < 3; ++c) line[((size_t)y * 64 + 32) * 3 + c] = 255;
+    std::vector<uint8_t> soft = line;
+    blur::Apply(soft.data(), 64, 8, 3, 3.0f);
+    const auto at = [&](int x) { return (int)soft[((size_t)4 * 64 + x) * 3]; };
+    CHECK(at(32) < 255 && at(32) > 0 && at(28) > 0 && at(36) > 0 && at(10) == 0);
+    CHECK(std::abs(at(29) - at(35)) <= 2 && std::abs(at(30) - at(34)) <= 2);
+    int sum = 0;
+    for (int x = 0; x < 64; ++x) sum += at(x);
+    CHECK(std::abs(sum - 255) <= 8);
+    // No blur, no change.
+    std::vector<uint8_t> same = line;
+    blur::Apply(same.data(), 64, 8, 3, 0.0f);
+    CHECK(same == line);
 }

@@ -460,3 +460,24 @@ TEST(AppPicturesDrawTheWallpaperAtTheThemesBrightness) {
     CHECK(brightest > 200);
     if (SUCCEEDED(co)) CoUninitialize();
 }
+
+// The wallpaper is blurred, the components over it stay sharp.
+TEST(AppPicturesBlurTheWallpaperAloneAtTheThemesBlur) {
+    const HRESULT co = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    OneThemeStores stores;
+    app::Library library(stores);
+    app::Pictures pictures(library);
+    theme::Theme t = library.Edited(kTheme);
+    t.blur = 3.0f;
+    Picture everything;
+    std::vector<app::Bound> bounds;
+    CHECK(pictures.Theme(t, 320, 180, app::Draw::Everything, &everything, &bounds));
+    uint8_t brightest = 0;
+    for (const app::Bound &b : bounds)
+        if (b.key == L"p1")
+            for (UINT y = (UINT)std::max(0.0f, b.rect.top); y < (UINT)b.rect.bottom && y < everything.height; ++y)
+                for (UINT x = (UINT)std::max(0.0f, b.rect.left); x < (UINT)b.rect.right && x < everything.width; ++x)
+                    brightest = std::max(brightest, everything.bgra[((size_t)y * everything.width + x) * 4 + 2]);
+    CHECK(brightest > 200);
+    if (SUCCEEDED(co)) CoUninitialize();
+}

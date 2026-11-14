@@ -467,3 +467,17 @@ TEST(PlanCarriesTheThemesBrightness) {
     p = plan::Build(s, Monitors(1), store);
     CHECK(p.displays[0].wallpaper.brightness == kBrightness && plan::Describe(p.displays[0]).find(L"brightness") == std::wstring::npos);
 }
+
+TEST(PlanCarriesTheThemesBlur) {
+    FakeStore store = Store();
+    store.themes[L"dddddddddddddddd"] =
+        "<theme format=\"1\" name=\"D\"><wallpaper ref=\"default\" fit=\"fill\" blur=\"2.5\"/></theme>";
+    Settings s;
+    s.theme = L"dddddddddddddddd";
+    plan::Plan p = plan::Build(s, Monitors(1), store);
+    CHECK(p.displays[0].wallpaper.blur == 2.5f && plan::Describe(p.displays[0]).find(L"blurred by 2.5%") != std::wstring::npos);
+    std::vector<plan::Wallpaper> shown = {p.displays[0].wallpaper};
+    shown[0].source = plan::Source::Video;
+    shown[0].id = L"1111111111111111";
+    CHECK(plan::ShowBuiltInInstead(&shown, L"1111111111111111").size() == 1 && shown[0].blur == 2.5f);
+}

@@ -48,6 +48,11 @@ constexpr float kWakeSeconds = 0.5f, kWakeSecondsMin = 0.1f, kWakeSecondsMax = 2
 // components over it readable. Each colour channel is scaled by it.
 constexpr float kBrightness = 1.0f, kBrightnessMin = 0.1f;
 
+// How much a theme's wallpaper is blurred on the logon screen: a Gaussian whose standard deviation
+// is this percentage of the display's height (blur.h), 0 for none. Windows blurs its own sign-in
+// background by about 2.8.
+constexpr float kBlurMax = 5.0f;
+
 // Which displays components are drawn on. Auto is the display Windows puts its password box on.
 enum class ComponentDisplays { Auto, Primary, All };
 
@@ -86,13 +91,14 @@ struct InstanceOverrides {
 };
 
 // What settings.ini changes about one theme: theme.<theme id>.wallpaper / .fit / .wake /
-// .wake-duration / .brightness / .<instance>.*.
+// .wake-duration / .brightness / .blur / .<instance>.*.
 struct ThemeOverrides {
     std::optional<std::wstring> wallpaper;  // a wallpaper id, "default" or "none"
     std::optional<Scaling> fit;
     std::optional<WakeStyle> wake;     // theme.<theme id>.wake
     std::optional<float> wakeSeconds;  // theme.<theme id>.wake-duration
     std::optional<float> brightness;   // theme.<theme id>.brightness
+    std::optional<float> blur;         // theme.<theme id>.blur
     skin::Values wallpaperValues;  // scene settings and pN layer adjustments
     std::map<std::wstring, InstanceOverrides> instances;  // by instance id
 };
@@ -160,6 +166,8 @@ bool Parse(std::wstring_view text, WakeStyle *out);  // fade, zoom, slide or cut
 bool ParseWakeSeconds(std::wstring_view text, float *out);
 // A wallpaper's brightness, from kBrightnessMin to 1.
 bool ParseBrightness(std::wstring_view text, float *out);
+// A wallpaper's blur, from 0 to kBlurMax.
+bool ParseBlur(std::wstring_view text, float *out);
 // Scales the colour of `count` pixels `stride` bytes apart (3 for B G R, 4 for B G R A, whose
 // fourth byte is left alone) by `brightness`, rounding to nearest: as the logon screen's shader
 // draws a wallpaper of that brightness. Nothing happens at 1.

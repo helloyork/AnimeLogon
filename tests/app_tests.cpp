@@ -433,6 +433,10 @@ TEST(AppLibraryWallpaperAndFit) {
     CHECK(l.settings().themeOverrides.at(kThemeT).brightness == 0.7f && l.Modifications(kThemeT) == before + 1);
     CHECK(!l.SetBrightness(0.05f, 0) && !l.SetBrightness(1.5f, 0) && l.Edited(kThemeT).brightness == 0.7f);
     CHECK(l.SetBrightness(1.0f, 0) && !l.settings().themeOverrides.at(kThemeT).brightness);
+    // Blur: tenths kept, none clears the override, out of range refused.
+    CHECK(l.SetBlur(2.84f, 0) && l.Edited(kThemeT).blur == 2.8f && l.settings().themeOverrides.at(kThemeT).blur == 2.8f);
+    CHECK(!l.SetBlur(-0.5f, 0) && !l.SetBlur(5.5f, 0) && l.Edited(kThemeT).blur == 2.8f);
+    CHECK(l.SetBlur(0.0f, 0) && !l.settings().themeOverrides.at(kThemeT).blur);
     CHECK(l.SetWallpaper(kNoWallpaper) && l.Edited(kThemeT).wallpaper == kNoWallpaper);
 }
 

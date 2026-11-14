@@ -15,6 +15,7 @@
 #include <cmath>
 
 #include "animelogon/bitmap.h"
+#include "animelogon/blur.h"
 #include "animelogon/clock.h"
 #include "animelogon/components.h"
 #include "animelogon/i18n.h"
@@ -932,12 +933,16 @@ void Host::OnResource(ICoreWebView2WebResourceRequestedEventArgs *args) {
             const UINT width=ParamSize(query,L"w",960,3840); UINT height=ParamSize(query,L"h",0,2400);
             if (!height) Shape(id,width,&height);
             const double time=wcstod(Param(query,L"t").c_str(),nullptr)/1000;
+            int frameW = 0, frameH = 0;
             if (std::isfinite(time) && time >= 0 && time <= 86400 &&
                 SceneFrame(id,width,height,time,Param(query,L"motion") == L"1",&body,&sceneBounds) &&
-                bitmap::IsCanonical(body.data(), body.size(), body.size())) {
-                // At the theme's brightness, as the logon screen draws the scene.
-                ApplyBrightness(body.data() + bitmap::kHeaderBytes, (body.size() - bitmap::kHeaderBytes) / 4, 4,
-                                library_.Edited(id).brightness);
+                bitmap::ReadSize(body.data(), body.size(), body.size(), &frameW, &frameH)) {
+                // At the theme's brightness and blur, as the logon screen draws the scene; the frame's
+                // own size is the one its header gives.
+                const theme::Theme t = library_.Edited(id);
+                uint8_t *pixels = body.data() + bitmap::kHeaderBytes;
+                ApplyBrightness(pixels, (size_t)frameW * frameH, 4, t.brightness);
+                blur::Apply(pixels, frameW, frameH, 4, blur::Sigma(t.blur, frameH));
             }
         }
         type=L"image/bmp";
@@ -1232,6 +1237,8 @@ void Host::OnMessage(const json::Value &m) {
         Edited(Parse(m[L"value"].Str(), &fit) && library_.SetFit(fit), false, seq);
     } else if (op == L"brightness") {
         Edited(library_.SetBrightness((float)m[L"value"].Num(), gesture), false, seq);
+    } else if (op == L"blur") {
+        Edited(library_.SetBlur((float)m[L"value"].Num(), gesture), false, seq);
     } else if (op == L"reset") {
         Edited(library_.Reset(), false, seq);
     } else if (op == L"undo") {

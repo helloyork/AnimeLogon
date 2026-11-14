@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "animelogon/settings.h"
+#include "gpublur.h"
 #include "plan.h"
 #include "player.h"
 
@@ -170,5 +171,9 @@ private:
     std::vector<std::vector<size_t>> componentsPerTarget_;
     bool componentsFailed_ = false;
     float componentOpacity_ = 1.0f;
+    // The themes' wallpaper blur; none if its shaders could not be made, and then the wallpaper
+    // is drawn sharp.
+    std::unique_ptr<GpuBlur> blur_;
+    bool blurFailed_ = false;
     float leaveScale_ = 1.0f, leaveRise_ = 0.0f, leaveScaleSaid_ = 1.0f, leaveRiseSaid_ = 0.0f;
 };
