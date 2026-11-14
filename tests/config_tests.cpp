@@ -939,3 +939,33 @@ TEST(SandboxKeepsTheWindowToItsOwnCopy) {
     CHECK(paths::DataDir() != box + L"\\ProgramData\\AnimeLogon");
     secure::RemoveTree(scratch);
 }
+
+// Where the profile or AppData was moved with mklink /J, %LOCALAPPDATA% leads through a junction.
+// The elevated side refuses staged files reached through one, so a new import directory is named
+// by the path it really has, and what is staged there is taken.
+TEST(ImportDirIsNamedByItsRealPath) {
+    const std::wstring scratch = ScratchDir(), real = scratch + L"\\real", moved = scratch + L"\\moved";
+    CHECK(CreateDirectoryW(real.c_str(), nullptr) && MakeJunction(moved, real));
+    paths::UseSandbox(moved + L"\\");
+    const std::wstring dir = staging::NewImportDir();
+    const std::wstring through = moved + L"\\LocalAppData\\AnimeLogon\\import\\" + RandomHex(6);
+    paths::UseSandbox(L"");
+    CHECK(!dir.empty() && dir.find(L"\\moved\\") == std::wstring::npos && dir.find(L"\\real\\") != std::wstring::npos);
+    CHECK(store::IsImportDir(dir));
+
+    const image::Picture p = Pixels(16, 12, 3);
+    std::vector<uint8_t> png;
+    CHECK(image::EncodePng(p.width, p.height, p.bgra.data(), p.bgra.size(), &png, nullptr));
+    const std::wstring source = scratch + L"\\Harbour.png";
+    WriteAll(source, png);
+    std::atomic<bool> cancel{false};
+    PlainTarget t(scratch + L"\\data");
+    CHECK(staging::Media(source, dir, cancel, nullptr).ok);
+    CHECK(store::CommitPackage(t, dir) == commit::kOk);
+    // What NewImportDir returned before: the same place, named through the junction.
+    CHECK(paths::CreateDirectories(through));
+    CHECK(staging::Media(source, through, cancel, nullptr).ok);
+    CHECK(store::CommitPackage(t, through) != commit::kOk);
+    RemoveDirectoryW(moved.c_str());
+    secure::RemoveTree(scratch);
+}

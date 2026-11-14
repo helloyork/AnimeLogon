@@ -24,8 +24,8 @@ using Progress = std::function<void(double)>;
 // the scene code is built and tested as before.
 inline constexpr bool kTakesScenes = false;
 
-// A new, empty import directory, %LOCALAPPDATA%\AnimeLogon\import\<12 hex digits>; empty if it
-// cannot be made.
+// A new, empty import directory, %LOCALAPPDATA%\AnimeLogon\import\<12 hex digits>, by its real
+// path (junctions on the way followed); empty if it cannot be made.
 std::wstring NewImportDir();
 
 // Whether `path` is taken for a picture rather than a video, by its extension.
