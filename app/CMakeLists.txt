@@ -19,7 +19,11 @@ add_custom_command(OUTPUT ${APP_WEB_SRC}/node_modules/.package-lock.json
     WORKING_DIRECTORY ${APP_WEB_SRC}
     COMMENT "Installing the settings page's packages"
     VERBATIM)
+# It also writes the licences of the npm packages that went into app.js, which install.exe installs
+# as licenses\npm.txt (installer/CMakeLists.txt).
+set(ANIMELOGON_NPM_NOTICES ${APP_WEB_DIR}/npm-licenses.txt PARENT_SCOPE)
 add_custom_command(OUTPUT ${APP_WEB_DIR}/index.html ${APP_WEB_DIR}/app.css ${APP_WEB_DIR}/app.js
+                          ${APP_WEB_DIR}/npm-licenses.txt
     COMMAND ${NODE_EXECUTABLE} build.mjs --out ${APP_WEB_DIR}
     DEPENDS ${app_web_sources} ${APP_WEB_SRC}/build.mjs ${APP_WEB_SRC}/index.html
             ${APP_WEB_SRC}/node_modules/.package-lock.json
