@@ -35,9 +35,7 @@ Windows N and KN editions are not supported.
 2. Run it and follow the wizard. Its first page lets you choose the language. If Windows says "Windows protected your PC", select **More info > Run anyway**.
 3. Open AnimeLogon from the Start menu and select **Import…** to add a video or picture.
 
-Run with `--quiet`, the setup program shows no wizard and writes its result to the console; in a
-script, wait for it with `start /wait`. The exit code is `0` when it installed, `1` when it failed
-and `1223` when it was cancelled.
+For silent installation and uninstallation, see [Command line](#command-line).
 
 ## Usage
 
@@ -76,6 +74,83 @@ The installer describes the first two changes and asks before it makes them. Tur
 ## Uninstallation
 
 Open **Settings > Apps > Installed apps**, find AnimeLogon and select **Uninstall**, or select **Uninstall** in AnimeLogon's Settings. You can choose whether to delete your themes, wallpapers and settings as well.
+
+## Interfaces
+
+These file formats, command lines and file locations are for theme authors, scripts and other
+programs.
+
+### File formats
+
+| Format | Description |
+|---|---|
+| Component (`.xml`, root element `<component>`) | What a theme draws over its wallpaper: clocks, dates, battery, now playing, countdowns and audio spectra. See [Component format](skills/animelogon-components/reference/component-format.md) and [Component attributes](skills/animelogon-components/reference/attributes.md). |
+| Theme (`theme.xml`) and theme package (`.altheme`) | A theme is a wallpaper and up to 8 components. A theme package is an uncompressed zip file that carries a theme with its wallpaper and component files. See [Themes and theme packages](skills/animelogon-components/reference/theme-package.md). |
+| Scene wallpaper (`.alscene`) | Not imported by the current version. See [tools/SCENES.md](tools/SCENES.md) (Chinese). |
+
+Each format is at version `format="1"`. AnimeLogon refuses elements and attributes it does not
+recognize, so a file that uses something added in a later version cannot be imported by an
+earlier one.
+
+### Writing components
+
+[`skills/animelogon-components`](skills/animelogon-components) is an Agent Skill for AI coding
+assistants such as Claude Code. Copy the folder into the assistant's skills folder (for Claude
+Code, `%USERPROFILE%\.claude\skills\`) and the assistant can write, check and package components
+in the format. The folder is also a reference for writing components by hand.
+
+A build from source includes two developer tools: `component_check` checks components and theme
+packages with AnimeLogon's own reader and packs `.altheme` files, and `skin_preview` draws a
+component over a picture.
+
+To try components without changing what is installed, use `animelogon.exe --sandbox <folder>`
+(below). Imports there need no administrator approval.
+
+### Command line
+
+**Setup program** (`AnimeLogon-<version>-setup.exe`; `install.exe` in a build):
+
+| Argument | Description |
+|---|---|
+| `--quiet` | No wizard; the result is written to the console. In a script, wait for it with `start /wait`. |
+| `--lang <language>` | The language: `zh-Hans`, `zh-Hant`, `en` or `ja`. |
+| `--dir <path>` | Installs to `<path>`. Without it, a new installation goes to `C:\Program Files\AnimeLogon` and an update to where AnimeLogon is installed. |
+| `--setup-in-app` | With `--quiet`: installs without turning AnimeLogon on. A wizard turns it on the first time AnimeLogon is opened. |
+
+Exit codes: `0` installed, `1` failed, `1223` cancelled.
+
+**Uninstaller** (`uninstall.exe` in the installation folder):
+
+| Argument | Description |
+|---|---|
+| `--quiet` | No wizard; removes AnimeLogon and keeps themes, wallpapers and settings. |
+| `--quiet --purge` | Also deletes themes, wallpapers and settings. |
+
+Exit codes: `0` removed, `1` a change could not be undone, `1223` cancelled.
+
+**AnimeLogon** (`animelogon.exe` in the installation folder):
+
+| Argument | Description |
+|---|---|
+| `--tray` | Shows the system tray icon instead of the window. The startup entry runs it this way at sign-in. |
+| `--show switch`, `--show lock` | Opens the window, or brings it forward, at the **Enable AnimeLogon** switch or at the lock screen preview of the theme in use. |
+| `--sandbox <folder>` | Opens a window that works on separate data (themes, components, settings) in `<folder>`, for testing. Imports there need no administrator approval, and the lock screen does not use them. |
+| `--switch-on`, `--switch-off` | Turns AnimeLogon on or off, as the switch in the settings does. Requires administrator rights. Exit codes: `0` done, `1` failed, `4` not run as administrator. |
+
+With arguments it does not recognize, `animelogon.exe` says so and exits with code `2`. The
+`--commit-*` and `--remove-*` arguments, run with administrator rights, install or remove what
+the window has prepared for import; see [config/src/commit.h](config/src/commit.h). The helper of
+the Steam edition (planned), `animelogon-steam.exe`, speaks the protocol in
+[steam/PROTOCOL.md](steam/PROTOCOL.md).
+
+### File locations
+
+| Location | Contents |
+|---|---|
+| `C:\Program Files\AnimeLogon\` | The programs, `uninstall.exe` and the third-party licences (`licenses\`). |
+| `%ProgramData%\AnimeLogon\settings.ini` | Machine-wide settings: the theme in use, multiple displays, the clock, sound, and the changes made to each theme. One `key = value` per line, holding only ids, choices and typed values, never a path or free text. The keys are described in [settings.h](common/include/animelogon/settings.h). |
+| `%ProgramData%\AnimeLogon\themes\`, `components\`, `wallpapers\` | Imported themes, components and wallpapers. Only administrators can write there, and AnimeLogon writes them in normalized form. |
+| `%ProgramData%\AnimeLogon\logs\` | Logs. |
 
 ## Building from source
 
