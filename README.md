@@ -19,7 +19,8 @@ can place videos, widgets and other content on it.
 
 ## Requirements
 
-- Windows 10 or Windows 11, x64 or ARM64
+- x64 PCs: Windows 10 or Windows 11
+- ARM64 PCs: Windows 11
 - Administrator rights for installation
 - The Microsoft Edge WebView2 runtime for the AnimeLogon window. Windows 11 includes it;
   on Windows 10 the installer says so if it is missing.
@@ -28,14 +29,15 @@ Windows N and KN editions are not supported.
 
 ## Installation
 
-> The current version is a preview (alpha) and may have problems. The programs are not code-signed.
+> The programs are not code-signed.
 
-1. Download the setup program for your computer's architecture (`AnimeLogon-<version>-x64-setup.exe` or `AnimeLogon-<version>-arm64-setup.exe`) from [Releases](https://github.com/helloyork/AnimeLogon/releases).
+1. Download the setup program, `AnimeLogon-<version>-setup.exe`, from [Releases](https://github.com/helloyork/AnimeLogon/releases). The same setup program is used on x64 and ARM64 PCs; it installs the version for your PC's processor.
 2. Run it and follow the wizard. Its first page lets you choose the language. If Windows says "Windows protected your PC", select **More info > Run anyway**.
 3. Open AnimeLogon from the Start menu and select **Import…** to add a video or picture.
 
 Run with `--quiet`, the setup program shows no wizard and writes its result to the console; in a
-script, wait for it with `start /wait`.
+script, wait for it with `start /wait`. The exit code is `0` when it installed, `1` when it failed
+and `1223` when it was cancelled.
 
 ## Usage
 
@@ -64,6 +66,9 @@ and the number of themes in its menu changed.
 - **Imported videos, pictures and themes are stored on drive C:.** The location cannot be changed.
 - **The system tray icon runs at sign-in.** The installer adds a startup entry for every account
   and uninstalling removes it. It can also be disabled under **Startup apps** in Task Manager.
+- **A Windows service named AnimeLogon is installed.** It runs as the local system account, starts
+  with Windows and shows the lock screen. Turning off **Enable AnimeLogon** stops it and sets it to
+  start manually; uninstalling removes it.
 
 The installer describes the first two changes and asks before it makes them. Turning off
 **Enable AnimeLogon** in the settings, or uninstalling AnimeLogon, restores these settings.
@@ -88,7 +93,7 @@ cmake --preset x64
 cmake --build --preset x64-release
 ```
 
-Output is written to `build\<preset>\bin\<configuration>\`.
+Output is written to `build\<preset>\bin\<configuration>\`. The setup program is `install.exe` there.
 
 | Configure preset | Build presets |
 |---|---|
@@ -100,13 +105,32 @@ Options:
 | Option | Description |
 |---|---|
 | `-DANIMELOGON_BUILD=<n>` | Build number written to the version resource. Default `0`. |
+| `-DANIMELOGON_VERSION_SUFFIX=<suffix>` | Pre-release suffix added to the version, for example `-beta1`. Default empty. |
+| `-DANIMELOGON_ARM64_PAYLOAD_DIR=<path>` | x64 builds only: the `bin\Release` directory of an ARM64 Release build. `install.exe` then includes the ARM64 version as well and installs on both kinds of PC. |
+| `-DBUILD_TESTING=OFF` | Leaves out the tests and developer tools. Default `ON`. |
 | `-DCMAKE_GENERATOR_INSTANCE=<path>` | Visual Studio installation to use when more than one is installed. |
+
+To run the tests (x64):
+
+```powershell
+ctest --preset x64-release --output-on-failure
+```
+
+To make the setup program a release has, with both architectures, build ARM64 first and point the
+x64 build at its output:
+
+```powershell
+cmake --preset arm64
+cmake --build --preset arm64-release
+cmake --preset x64 -DANIMELOGON_ARM64_PAYLOAD_DIR="$PWD\build\arm64\bin\Release"
+cmake --build --preset x64-release
+```
 
 ## Roadmap
 
 Planned:
 
-- A theme community: browse and download themes made by others from the settings
+- Steam edition: browse, download and share themes through the Steam Workshop
 
 ## Contributing
 
@@ -124,3 +148,9 @@ Includes the headers and loader of the Microsoft Edge WebView2 SDK (BSD 3-Clause
 
 `vendor/thorvg` contains ThorVG 1.1.2 (MIT) and the licence for its embedded RapidJSON.
 Only the sandboxed scene renderer links ThorVG. See [SOURCE.md](vendor/thorvg/SOURCE.md).
+
+The settings app's page bundles npm packages, among them React and Fluent UI (MIT). The build
+writes the name, version and licence text of each.
+
+These third-party licences are installed in the `licenses` folder of the install directory, and
+**Third-party notices** in AnimeLogon's Settings opens it.

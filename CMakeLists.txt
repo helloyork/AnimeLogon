@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(AnimeLogon VERSION 0.1.0 LANGUAGES CXX RC)
+project(AnimeLogon VERSION 1.0.0 LANGUAGES CXX RC)
 
 if(NOT MSVC)
     message(FATAL_ERROR "AnimeLogon builds with MSVC.")

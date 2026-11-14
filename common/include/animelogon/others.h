@@ -1,6 +1,6 @@
 // Other programs that replace the logon screen the way AnimeLogon does. Two of them on at once
 // fight over the same Windows settings and the same screen, so AnimeLogon switches the others off
-// when it is installed or switched on. Today that is Shittim Logon.
+// when it is installed or switched on. Today there is one such program; others.cpp names it.
 #pragma once
 
 #include <windows.h>
