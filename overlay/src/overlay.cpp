@@ -349,6 +349,18 @@ double RefreshSeconds() {
     return 1.0 / 60.0;
 }
 
+// The parked wait's gate, asked once: is the logon desktop up with a screen the video may cover?
+bool LogonScreenNow() {
+    screen::GateInput in;
+    in.secure = screen::InputDesktopIsSecure();
+    in.session = screen::ReadSession(g_overlay.session);
+    in.hadUser = g_overlay.hadUser || in.session.signedIn;
+    in.shutdown = screen::ShutdownUnderway();
+    in.goingDown = GoingDown();
+    in.lockNotified = g_overlay.lockNotified;
+    return screen::Decide(in) == screen::Gate::GoLive;
+}
+
 // Development: the primary display's theme, in a window on the ordinary desktop.
 plan::Plan WindowedPlan(plan::Plan plan) {
     if (plan.displays.empty()) return plan;
@@ -1125,6 +1137,13 @@ int wmain(int argc, wchar_t **argv) {
         LiveEnd end = GoLiveOnce(presenter, scenes, opt, wc.hInstance);
         while (end == LiveEnd::Rebuild) {
             Sleep(300);  // let the mode change settle
+            // A display change can come in the middle of a shutdown (drivers unloading), so the
+            // screen is covered again only if the gate would cover it now.
+            if (!opt.windowed && !opt.now && !LogonScreenNow()) {
+                ALOG(L"overlay: the displays changed, and this is no longer a screen to cover -- staying off");
+                end = LiveEnd::Dismissed;
+                break;
+            }
             end = GoLiveOnce(presenter, scenes, opt, wc.hInstance);
         }
 
