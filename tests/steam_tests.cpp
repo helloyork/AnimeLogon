@@ -214,13 +214,19 @@ std::vector<std::wstring> Ids(const json::Value &answer) {
 
 std::wstring ItemId(int i) { return std::to_wstring(3000000000ll + i); }
 
+// A query's parameter showing every age rating, mature content included.
+const std::string kAllRatings = "\"ratings\":[\"Everyone\",\"Questionable\",\"Mature\"]";
+
 // Sixty items whose orders differ by every ranking: by trend item 59 comes first, by date 17, by
-// subscriptions 49, by rating 23. Items 3 and 8 mention sakura; 3 and 4 have mature content.
+// subscriptions 49, by rating 23. Items 3 and 8 mention sakura; 3 and 4 have mature content (3 by
+// a content descriptor, 4 by its rating tag), 5 is rated Questionable, 6 has no rating, the others
+// are rated Everyone.
 std::string SixtyItems() {
     std::string items;
     for (int i = 0; i < 60; ++i) {
-        std::string tags = i % 2 ? "[\"Video\"" : "[\"Image\"";
-        tags += i % 3 == 0 ? ",\"4K\"]" : ",\"1080p\"]";
+        std::string tags = i % 2 ? "[\"Video\"" : "[\"Picture\"";
+        tags += i % 3 == 0 ? ",\"4K\"" : ",\"1080p\"";
+        tags += i == 4 ? ",\"Mature\"]" : i == 5 ? ",\"Questionable\"]" : i == 6 ? "]" : ",\"Everyone\"]";
         std::string title = "Item " + std::to_string(i), description = "plain";
         std::string descriptors = "[]";
         if (i == 3) title = "Sakura night", descriptors = "[1]";
@@ -259,7 +265,7 @@ TEST(SteamHelperWithoutSteamsLibraryAnswersStatus) {
     Lab lab(false);
     Helper h(lab, L"--appid 480", L"");
     const json::Value s = h.Call("status");
-    CHECK(Ok(s) && s[L"steam"].Str() == L"missing_dll" && s[L"protocol"].Num() == 1);
+    CHECK(Ok(s) && s[L"steam"].Str() == L"missing_dll" && s[L"protocol"].Num() == 2);
     CHECK(s[L"appid"].Num() == 480 && !s[L"loggedOn"].Bool(true) && !s[L"ownsApp"].Bool(true) && !s[L"message"].Str().empty());
     CHECK(Error(h.Call("query")) == L"missing_dll");
     CHECK(Error(h.Call("subscribed")) == L"missing_dll");
@@ -333,54 +339,55 @@ TEST(SteamHelperRanksSearchesAndPagesTheWorkshop) {
     CHECK(h.Call("status")[L"steam"].Str() == L"ok");
 
     // Trending, Steam's pages of 50: the first one, then the rest.
-    json::Value a = h.Call("query", "\"includeMature\":true");
+    json::Value a = h.Call("query", kAllRatings);
     CHECK(Ok(a) && a[L"total"].Num() == 60 && a[L"items"].size() == 50 && a[L"next"].Num() == 2);
     CHECK(Ids(a).size() == 50 && Ids(a)[0] == ItemId(59) && Ids(a)[49] == ItemId(10));
-    a = h.Call("query", "\"includeMature\":true,\"page\":2");
+    a = h.Call("query", kAllRatings + ",\"page\":2");
     CHECK(a[L"items"].size() == 10 && a[L"next"].IsNull() && Ids(a)[9] == ItemId(0));
 
     // Pages of 20: the third takes the end of Steam's first page and all of its second.
-    a = h.Call("query", "\"includeMature\":true,\"perPage\":20,\"page\":3");
+    a = h.Call("query", kAllRatings + ",\"perPage\":20,\"page\":3");
     CHECK(a[L"items"].size() == 20 && a[L"next"].IsNull());
     CHECK(Ids(a).size() == 20 && Ids(a)[0] == ItemId(19) && Ids(a)[19] == ItemId(0));
-    a = h.Call("query", "\"includeMature\":true,\"perPage\":20,\"page\":2");
+    a = h.Call("query", kAllRatings + ",\"perPage\":20,\"page\":2");
     CHECK(a[L"items"].size() == 20 && a[L"next"].Num() == 3 && Ids(a)[0] == ItemId(39));
 
     // Each ranking.
-    CHECK(Ids(h.Call("query", "\"sort\":\"recent\",\"includeMature\":true,\"perPage\":1"))[0] == ItemId(17));
-    CHECK(Ids(h.Call("query", "\"sort\":\"subscribed\",\"includeMature\":true,\"perPage\":1"))[0] == ItemId(49));
-    CHECK(Ids(h.Call("query", "\"sort\":\"rating\",\"includeMature\":true,\"perPage\":1"))[0] == ItemId(23));
+    CHECK(Ids(h.Call("query", "\"sort\":\"recent\"," + kAllRatings + ",\"perPage\":1"))[0] == ItemId(17));
+    CHECK(Ids(h.Call("query", "\"sort\":\"subscribed\"," + kAllRatings + ",\"perPage\":1"))[0] == ItemId(49));
+    CHECK(Ids(h.Call("query", "\"sort\":\"rating\"," + kAllRatings + ",\"perPage\":1"))[0] == ItemId(23));
     CHECK(Ok(h.Call("query", "\"sort\":\"trend\",\"trendDays\":30,\"perPage\":1")));
 
-    // Searching, with mature content hidden unless asked for.
+    // Searching, with only the Everyone rating unless others are asked for.
     a = h.Call("query", "\"text\":\"sakura\"");
     CHECK(a[L"total"].Num() == 2 && Ids(a).size() == 1 && Ids(a)[0] == ItemId(8) && a[L"hidden"].Num() == 1);
-    a = h.Call("query", "\"text\":\"sakura\",\"includeMature\":true");
+    a = h.Call("query", "\"text\":\"sakura\"," + kAllRatings);
     CHECK(Ids(a).size() == 2 && a[L"hidden"].Num() == 0);
     a = h.Call("query", "\"perPage\":10");
     CHECK(Ids(a).size() == 10 && a[L"hidden"].Num() == 0);  // items 3 and 4 are not among the ten trending most
 
     // Tags: all of them, any of them, none of them.
-    a = h.Call("query", "\"requiredTags\":[\"Video\",\"4K\"],\"includeMature\":true");
+    a = h.Call("query", "\"requiredTags\":[\"Video\",\"4K\"]," + kAllRatings);
     CHECK(a[L"total"].Num() == 10);  // odd multiples of 3
-    a = h.Call("query", "\"requiredTags\":[\"Video\",\"4K\"],\"matchAnyTag\":true,\"includeMature\":true");
+    a = h.Call("query", "\"requiredTags\":[\"Video\",\"4K\"],\"matchAnyTag\":true," + kAllRatings);
     CHECK(a[L"total"].Num() == 40);
-    a = h.Call("query", "\"excludedTags\":[\"Video\"],\"includeMature\":true");
+    a = h.Call("query", "\"excludedTags\":[\"Video\"]," + kAllRatings);
     CHECK(a[L"total"].Num() == 30);
 
     // By cursor: "*" starts, the answer's "next" goes on, null at the end.
-    a = h.Call("query", "\"cursor\":\"*\",\"includeMature\":true");
+    a = h.Call("query", "\"cursor\":\"*\"," + kAllRatings);
     CHECK(a[L"items"].size() == 50 && a[L"next"].IsString() && !a[L"next"].Str().empty());
-    a = h.Call("query", "\"cursor\":" + Q(ToUtf8(a[L"next"].Str())) + ",\"includeMature\":true");
+    a = h.Call("query", "\"cursor\":" + Q(ToUtf8(a[L"next"].Str())) + "," + kAllRatings);
     CHECK(a[L"items"].size() == 10 && a[L"next"].IsNull());
 
     // One item as a query gives it.
-    a = h.Call("query", "\"text\":\"Sakura night\",\"includeMature\":true");
+    a = h.Call("query", "\"text\":\"Sakura night\"," + kAllRatings);
     CHECK(a[L"items"].size() == 1);
     const json::Value &item = a[L"items"][0];
     CHECK(item[L"id"].Str() == ItemId(3) && item[L"title"].Str() == L"Sakura night" && item[L"owner"].Str() == L"76561198000000042");
-    CHECK(item[L"preview"].Str() == L"https://example.invalid/3.jpg" && item[L"tags"].size() == 2 && item[L"tags"][0].Str() == L"Video");
+    CHECK(item[L"preview"].Str() == L"https://example.invalid/3.jpg" && item[L"tags"].size() == 3 && item[L"tags"][0].Str() == L"Video");
     CHECK(item[L"descriptors"].size() == 1 && item[L"descriptors"][0].Str() == L"nuditySexual");
+    CHECK(item[L"rating"].Str() == L"Mature");  // tagged Everyone, but with a content descriptor
     CHECK(item[L"votesUp"].Num() == 3 && item[L"votesDown"].Num() == 1 && item[L"favorites"].Num() == 2);
     CHECK(item[L"subscriptions"].Num() == 330 && item[L"fileSize"].Num() == 1003);
     CHECK(item[L"timeCreated"].Num() == 1600021000 && !item[L"subscribed"].Bool(true) && !item[L"installed"].Bool(true));
@@ -389,6 +396,51 @@ TEST(SteamHelperRanksSearchesAndPagesTheWorkshop) {
     // A short description Steam cut inside a character ends before that character.
     a = h.Call("query", "\"text\":\"Item 9\"");
     CHECK(a[L"items"].size() == 1 && a[L"items"][0][L"description"].Str() == std::wstring(127, L'\u00e9'));
+    CHECK(h.Close() == 0);
+}
+
+// One item for each way an item can be rated: by one rating tag, by none, by a content descriptor
+// over an Everyone tag, and by two rating tags.
+std::string RatedItems() {
+    return "{\"items\":["
+           "{\"id\":\"501\",\"title\":\"Everyone\",\"tags\":[\"Picture\",\"Everyone\"],\"trend\":6},"
+           "{\"id\":\"502\",\"title\":\"Questionable\",\"tags\":[\"Picture\",\"Questionable\"],\"trend\":5},"
+           "{\"id\":\"503\",\"title\":\"Mature\",\"tags\":[\"Video\",\"Mature\"],\"trend\":4},"
+           "{\"id\":\"504\",\"title\":\"Unrated\",\"tags\":[\"Video\"],\"trend\":3},"
+           "{\"id\":\"505\",\"title\":\"Described\",\"tags\":[\"Video\",\"Everyone\"],\"descriptors\":[\"nuditySexual\"],\"trend\":2},"
+           "{\"id\":\"506\",\"title\":\"Both\",\"tags\":[\"Video\",\"Questionable\",\"Mature\"],\"trend\":1}]}";
+}
+
+TEST(SteamHelperShowsOnlyTheAgeRatingsAskedFor) {
+    Lab lab;
+    Helper h(lab, L"--appid 480", lab.Fixture(RatedItems()));
+
+    // By default, Everyone only: Steam leaves out the items tagged otherwise, the helper the
+    // unrated one and the one with a content descriptor.
+    json::Value a = h.Call("query");
+    CHECK(Ok(a) && a[L"total"].Num() == 3 && Ids(a) == std::vector<std::wstring>{L"501"} && a[L"hidden"].Num() == 2);
+    a = h.Call("query", "\"ratings\":[\"Everyone\",\"Questionable\"]");
+    CHECK(a[L"total"].Num() == 4 && Ids(a) == (std::vector<std::wstring>{L"501", L"502"}) && a[L"hidden"].Num() == 2);
+
+    // Mature alone: what has no rating tag or a descriptor is Mature; an item with two rating tags
+    // shows only when both are asked for.
+    a = h.Call("query", "\"ratings\":[\"Mature\"]");
+    CHECK(a[L"total"].Num() == 2 && Ids(a) == (std::vector<std::wstring>{L"503", L"504"}) && a[L"hidden"].Num() == 0);
+
+    // Everything, each with its rating.
+    a = h.Call("query", kAllRatings);
+    CHECK(a[L"total"].Num() == 6 && a[L"items"].size() == 6 && a[L"hidden"].Num() == 0);
+    const wchar_t *const expected[] = {L"Everyone", L"Questionable", L"Mature", L"Mature", L"Mature", L"Mature"};
+    for (size_t i = 0; i < a[L"items"].size() && i < 6; ++i) CHECK(a[L"items"][i][L"rating"].Str() == expected[i]);
+
+    // Details are not filtered, and say the rating too.
+    const json::Value d = h.Call("details", "\"itemId\":\"504\"");
+    CHECK(Ok(d) && d[L"item"][L"rating"].Str() == L"Mature");
+
+    CHECK(Error(h.Call("query", "\"ratings\":[]")) == L"bad_request");
+    CHECK(Error(h.Call("query", "\"ratings\":[\"Adult\"]")) == L"bad_request");
+    CHECK(Error(h.Call("query", "\"ratings\":\"Everyone\"")) == L"bad_request");
+    CHECK(Error(h.Call("query", "\"ratings\":[\"everyone\"]")) == L"bad_request");  // the protocol's names, exactly
     CHECK(h.Close() == 0);
 }
 
@@ -415,6 +467,7 @@ TEST(SteamHelperSubscribesAndListsSubscriptions) {
     CHECK(here[L"state"][L"subscribed"].Bool() && here[L"state"][L"installed"].Bool() && !here[L"state"][L"needsUpdate"].Bool(true));
     CHECK(here[L"folder"].Str() == lab.dir + L"\\content\\100" && here[L"sizeOnDisk"].Num() == 5000);
     CHECK(here[L"preview"].Str() == L"https://example.invalid/100.jpg" && here[L"descriptors"][0].Str() == L"generalMature");
+    CHECK(here[L"rating"].Str() == L"Mature");
 
     const json::Value s = h.Call("subscribe", "\"itemId\":\"200\"");
     CHECK(Ok(s) && s[L"result"].Num() == 1);

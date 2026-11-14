@@ -314,6 +314,87 @@ TEST(SkinPanelsSayThePointTheyAreHeldBy) {
     if (SUCCEEDED(co)) CoUninitialize();
 }
 
+// What is hidden takes no room, and the space before a text goes only where something is drawn
+// before it; a text with a widest width is cut short; a text that rises is drawn higher; a plate
+// fills the padding around the ink; a panel at no opacity draws nothing.
+TEST(SkinPanelsLeaveOutTrimShiftAndPlate) {
+    const HRESULT co = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    SkinPreview preview;
+    Picture background;
+    background.width = 640;
+    background.height = 360;
+    background.bgra.assign((size_t)640 * 360 * 4, 0);
+    const RegionalFormat us{L"en-US", L"h:mm tt", L"dddd, MMMM d, yyyy"};
+    SYSTEMTIME now{};
+    now.wYear = 2026;
+    now.wMonth = 11;
+    now.wDay = 13;
+    now.wHour = 9;
+    now.wMinute = 41;
+    skin::Skin s;
+    std::wstring error;
+    CHECK(skin::Parse("<component format=\"1\" name=\"t\"><panel anchor=\"top-left\" size=\"10\" margin=\"20\">"
+                      "<line><text value=\"MM\"/><text value=\"MM\" space=\"1\"/></line>"
+                      "<backdrop opacity=\"0\" shape=\"plate\" padding-x=\"1\" padding-y=\"0.5\" color=\"#FF0000\"/>"
+                      "</panel></component>",
+                      &s, &error));
+    const float em = 36.0f, margin = 72.0f;
+    auto draw = [&](skin::Values values, Picture *out) {
+        std::vector<SkinView::Bound> bounds;
+        CHECK(preview.Render(background, skin::Resolve(s, values), ClockStyle{}, us, now, out, &bounds));
+        std::map<std::wstring, D2D1_RECT_F> at;
+        for (const SkinView::Bound &b : bounds) at[b.key] = b.rect;
+        return at;
+    };
+    Picture out;
+    auto both = draw({}, &out);
+    CHECK(both.count(L"p1.l1.t1") && both.count(L"p1.l1.t2"));
+    // Hidden, the first takes no room, and the second starts where the first did, without its space.
+    auto alone = draw({{L"p1.l1.t1.show", L"false"}}, &out);
+    CHECK(!alone.count(L"p1.l1.t1") && alone.count(L"p1.l1.t2"));
+    if (both.count(L"p1.l1.t1") && alone.count(L"p1.l1.t2")) {
+        CHECK(std::fabs(alone[L"p1.l1.t2"].left - both[L"p1.l1.t1"].left) <= 1.5f);
+        CHECK(alone[L"p1"].right - alone[L"p1"].left < both[L"p1"].right - both[L"p1"].left - em);
+    }
+    // Hidden altogether: nothing is drawn.
+    auto none = draw({{L"p1.l1.t1.show", L"false"}, {L"p1.l1.t2.show", L"false"}}, &out);
+    CHECK(!none.count(L"p1"));
+    // Cut short: no wider than its widest, an ellipsis included.
+    auto cut = draw({{L"p1.l1.t1.max", L"0.8"}}, &out);
+    if (cut.count(L"p1.l1.t1")) CHECK(cut[L"p1.l1.t1"].right - cut[L"p1.l1.t1"].left <= 0.8f * em + 1.0f);
+    // Raised by half an em: the panel's ink starts at the raised text, so the other one is drawn
+    // half an em lower than when neither rises.
+    auto inkTop = [&](const D2D1_RECT_F &r) {
+        for (int y = 0; y < (int)out.height; ++y)
+            for (int x = std::max(0, (int)r.left); x < std::min((int)out.width, (int)r.right); ++x)
+                if (out.bgra[((size_t)y * out.width + x) * 4 + 1] > 128) return (float)y;
+        return -1.0f;
+    };
+    both = draw({}, &out);
+    const float level = both.count(L"p1.l1.t1") ? inkTop(both[L"p1.l1.t1"]) : -1.0f;
+    auto raised = draw({{L"p1.l1.t2.rise", L"0.5"}}, &out);
+    if (raised.count(L"p1.l1.t1") && level >= 0.0f)
+        CHECK(std::fabs(inkTop(raised[L"p1.l1.t1"]) - level - 0.5f * em) <= 2.0f);
+    // A plate: red in its padding, left of the ink and above it, and nothing beyond it.
+    draw({{L"p1.b.opacity", L"1"}}, &out);
+    auto red = [&](int x, int y) {
+        if (x < 0 || y < 0 || x >= (int)out.width || y >= (int)out.height) return false;
+        const uint8_t *px = out.bgra.data() + ((size_t)y * out.width + x) * 4;
+        return px[2] > 200 && px[1] < 40 && px[0] < 40;
+    };
+    if (both.count(L"p1")) {
+        const D2D1_RECT_F &ink = both[L"p1"];
+        CHECK(red((int)(ink.left - 0.5f * em), (int)((ink.top + ink.bottom) / 2)));
+        CHECK(red((int)((ink.left + ink.right) / 2), (int)(ink.top - 0.25f * em)));
+        CHECK(!red((int)(ink.left - 1.2f * em), (int)((ink.top + ink.bottom) / 2)));
+        CHECK(ink.left >= margin - 2.0f);
+    }
+    // At no opacity, the panel leaves the picture as it was.
+    draw({{L"p1.opacity", L"0"}, {L"p1.b.opacity", L"1"}}, &out);
+    CHECK(std::all_of(out.bgra.begin(), out.bgra.end(), [i = 0](uint8_t v) mutable { return (i++ % 4) == 3 || v == 0; }));
+    if (SUCCEEDED(co)) CoUninitialize();
+}
+
 TEST(SkinPanelsStayOnTheirDisplay) {
     const HRESULT co = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     SkinPreview preview;
@@ -349,5 +430,33 @@ TEST(SkinPanelsStayOnTheirDisplay) {
     // An offset that keeps it on the display is left alone.
     const SkinView::Bound kept = place({{L"p1.anchor", L"top"}, {L"p1.offset-y", L"10"}});
     CHECK(std::fabs(kept.holdY[0] - (0.07f * 360 + 36.0f)) <= 1.5f);
+    if (SUCCEEDED(co)) CoUninitialize();
+}
+
+// The wallpaper is drawn at the theme's brightness, as the logon screen draws it, and the
+// components over it are not darkened.
+TEST(AppPicturesDrawTheWallpaperAtTheThemesBrightness) {
+    const HRESULT co = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    OneThemeStores stores;
+    app::Library library(stores);
+    app::Pictures pictures(library);
+    theme::Theme t = library.Edited(kTheme);
+    Picture full, dim, everything;
+    CHECK(pictures.Theme(t, 320, 180, app::Draw::WallpaperOnly, &full));
+    t.brightness = 0.5f;
+    CHECK(pictures.Theme(t, 320, 180, app::Draw::WallpaperOnly, &dim));
+    bool half = full.bgra.size() == dim.bgra.size() && !full.bgra.empty();
+    for (size_t i = 0; half && i < full.bgra.size(); i += 4)
+        for (size_t c = 0; c < 3; ++c) half = half && dim.bgra[i + c] == (uint8_t)(full.bgra[i + c] * 0.5f + 0.5f);
+    CHECK(half);
+    std::vector<app::Bound> bounds;
+    CHECK(pictures.Theme(t, 320, 180, app::Draw::Everything, &everything, &bounds));
+    uint8_t brightest = 0;
+    for (const app::Bound &b : bounds)
+        if (b.key == L"p1")
+            for (UINT y = (UINT)std::max(0.0f, b.rect.top); y < (UINT)b.rect.bottom && y < everything.height; ++y)
+                for (UINT x = (UINT)std::max(0.0f, b.rect.left); x < (UINT)b.rect.right && x < everything.width; ++x)
+                    brightest = std::max(brightest, everything.bgra[((size_t)y * everything.width + x) * 4 + 2]);
+    CHECK(brightest > 200);
     if (SUCCEEDED(co)) CoUninitialize();
 }

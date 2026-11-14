@@ -242,6 +242,8 @@ bool Pictures::Theme(const theme::Theme &theme, UINT width, UINT height, Draw dr
     Picture drawn;
     if (draw == Draw::ComponentsOnly) drawn = Clear(width, height);
     else if (!Wallpaper(theme.wallpaper, theme.fit, width, height, &drawn)) return false;
+    // At the theme's brightness, as the logon screen draws it; the components over it are not darkened.
+    else animelogon::ApplyBrightness(drawn.bgra.data(), drawn.bgra.size() / 4, 4, theme.brightness);
     if (draw != Draw::WallpaperOnly) {
         const RECT all{0, 0, (LONG)width, (LONG)height};
         const std::vector<Screen> one{{all, true}};

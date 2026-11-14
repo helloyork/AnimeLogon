@@ -71,7 +71,7 @@ bool IsSettingId(const std::wstring &id);
 // element's name and the attribute's, as in p1.l1.t1.weight, and wins over the skin's own
 // value for that attribute.
 
-enum class Control { Slider, Choice, Color, Font };
+enum class Control { Slider, Choice, Color, Font, Toggle };
 
 struct Adjustment {
     std::wstring key;  // e.g. p1.l1.t1.weight
@@ -107,6 +107,9 @@ enum class Align { Auto, Left, Center, Right };
 // it fades, growing a little while it fades, or at once.
 enum class Enter { Fade, Rise, Zoom, None };
 enum class Case { None, Upper, Lower };
+// What is drawn behind a panel: a soft glow that fades out around the ink, or a plate with
+// rounded corners around it.
+enum class Shape { Glow, Plate };
 
 // How a spectrum draws its bands: as bars, as a line through their tops, or as the area under
 // that line.
@@ -143,6 +146,7 @@ struct Spectrum {
 struct Text {
     std::wstring name;   // t1, r1, a1 ...: where it is among the line's texts, bars or spectra
     std::optional<data::Condition> when;
+    bool shown = true;   // false: left out entirely, as if the line did not hold it
     std::wstring value;  // may name data: {time}, {date} ...; a bar's is one fraction
     std::wstring font;   // empty: the default
     float size = 1.0f;   // em
@@ -153,6 +157,9 @@ struct Text {
     float tracking = 0.0f, space = 0.0f;  // em
     Case textCase = Case::None;
     bool hang = false;  // left out when the line is aligned
+    float rise = 0.0f;  // em: how far above the line's baseline it sits; negative is below
+    float max = 0.0f;   // em: wider words are cut short with an ellipsis; 0 is no limit
+    bool tabular = false;  // every figure as wide as the others, so numbers keep their width
 
     bool bar = false;  // the rest is a bar's
     float length = 6.0f, thickness = 0.12f;  // em
@@ -167,6 +174,7 @@ struct Text {
 struct Line {
     float gap = 0.2f;  // em, from the line above's baseline to the top of this line's ink
     std::optional<data::Condition> when;
+    bool shown = true;
     std::vector<Text> texts;
 };
 
@@ -183,8 +191,12 @@ struct Panel {
     Align align = Align::Auto;
     std::vector<Line> lines;
     std::vector<Shadow> shadows;
-    float backdrop = 0.0f;  // opacity of a soft dark glow behind the panel
+    float backdrop = 0.0f;  // opacity of what is behind the panel's ink
     uint32_t backdropColor = 0xFF000000;
+    Shape backdropShape = Shape::Glow;
+    float backdropRadius = 0.35f;                               // em, a plate's corners
+    float backdropPaddingX = 0.6f, backdropPaddingY = 0.4f;     // em, from the ink to a plate's edge
+    float opacity = 1.0f;  // of everything the panel draws
     std::optional<data::Condition> when;
     data::Date until;  // what until.* counts down to
     Enter enter = Enter::Fade;

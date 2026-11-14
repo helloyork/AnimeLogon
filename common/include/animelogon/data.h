@@ -101,6 +101,10 @@ struct Context {
     const Snapshot *snapshot = nullptr;  // null: no battery, nothing playing
     Date until;                          // the panel's
     uint64_t now = 0;                    // UTC FILETIME ticks, for how far playback has got
+    // The language words such as {power.status} and {until.unit} are in, as a locale name
+    // (zh-CN, ja-JP ...): the clock's. Chinese, Japanese and English have their own; any other
+    // language has English.
+    std::wstring locale;
 };
 
 // The words for a non-clock Text variable; empty when it has no value. False if `name` is not

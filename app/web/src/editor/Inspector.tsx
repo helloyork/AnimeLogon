@@ -30,7 +30,9 @@ import { useDraft } from './draft';
 import { AdjustmentField, ChoiceField, NumberField, SettingField, ToggleField, type View } from './fields';
 import { adjustment, centreOf, clamp, geometry, placeCentre } from './geometry';
 
-const COMMON_TEXT = ['font', 'weight', 'size', 'color'];
+const COMMON_TEXT = ['show', 'font', 'weight', 'size', 'color'];
+// A backdrop's corners and padding shape a plate; a glow has neither.
+const PLATE_ONLY = ['radius', 'padding-x', 'padding-y'];
 
 /* --- sections that fold --- */
 // Which sections are open stays as the person left it while the window is open, so going from one
@@ -64,8 +66,9 @@ function Section({ value, title, aside, sections, children }: { value: string; t
   );
 }
 
-// A row that opens something: a part, a layer.
-function OpenRow({ title, detail, onOpen }: { title: string; detail?: string; onOpen: () => void }) {
+// A row that opens something: a part, a layer. A part that can be left out has its switch at the
+// row's end, as a component has in the list of components.
+function OpenRow({ title, detail, onOpen, shown, onShow }: { title: string; detail?: string; onOpen: () => void; shown?: boolean; onShow?: (on: boolean) => void }) {
   return (
     <div className="item">
       <button type="button" className="go" onClick={onOpen}>
@@ -73,8 +76,9 @@ function OpenRow({ title, detail, onOpen }: { title: string; detail?: string; on
           <span className="ellipsis">{title}</span>
           {detail && <small className="ellipsis">{detail}</small>}
         </span>
-        <ChevronRight12Regular className="chev" />
+        {!onShow && <ChevronRight12Regular className="chev" />}
       </button>
+      {onShow && <Switch checked={!!shown} label={tr('inspector.show_named', { name: title })} onChange={onShow} />}
     </div>
   );
 }
@@ -150,13 +154,17 @@ function Overview() {
           {wp.modified && <ResetButton label={tr('inspector.wallpaper.reset')} onClick={() => edit('wallpaper', { ref: t.ownWallpaper })} />}
           <Button size="sm" onClick={() => openDialog({ kind: 'wallpaper' })}>{tr('inspector.wallpaper.change')}</Button>
         </div>
-        {((wp.kind === 'video' || wp.kind === 'image') || (scene && scene.settings.length > 0)) && (
+        {wp.kind !== 'none' && (
           <div className="props">
             {(wp.kind === 'video' || wp.kind === 'image') && (
               <ChoiceField id="wp-fit" label={tr('inspector.fit')} detail={tr('inspector.fit.detail')} value={t.fit} modified={t.fitModified}
                 options={[{ value: 'fill', label: tr('inspector.fit.fill') }, { value: 'fit', label: tr('inspector.fit.fit') }, { value: 'stretch', label: tr('inspector.fit.stretch') }]}
                 write={v => edit('fit', { value: v })} onReset={() => edit('fit', { value: t.ownFit })} />
             )}
+            <NumberField id="wp-brightness" label={tr('inspector.brightness')} detail={tr('inspector.brightness.detail')} min={0.1} max={1} step={0.01}
+              value={String(t.brightness)} modified={t.brightnessModified} view={{ factor: 100, digits: 0, unit: () => '%' }}
+              write={(v, gesture) => edit('brightness', { value: v, ...(gesture ? { gesture } : {}) })}
+              onReset={() => edit('brightness', { value: t.ownBrightness })} />
             {scene && scene.settings.map(st => <SettingField key={st.id} instId="wallpaper" setting={st} onReset={() => clearValues('wallpaper', [st.id])} />)}
           </div>
         )}
@@ -223,9 +231,11 @@ function Overview() {
 
 /* --- one component --- */
 function InstanceView({ inst }: { inst: Instance }) {
-  const sections = useSections('component', ['look', 'layout', 'parts']);
+  const sections = useSections('component', ['look', 'content', 'layout', 'parts']);
   const parts = (inst.parts || []).filter(p => (inst.panels ?? 1) > 1 || p.key.includes('.'));
-  const own = (inst.settings || []).filter(st => !st.folded);
+  // How it looks first, then what it shows: switches that only show or hide parts of it.
+  const own = (inst.settings || []).filter(st => !st.folded && !st.content);
+  const content = (inst.settings || []).filter(st => !st.folded && st.content);
   const keys = [...(inst.settings || []).map(st => st.id), ...(inst.parts || []).flatMap(p => p.adjustments.map(a => a.key))];
   const single = (inst.panels ?? 1) === 1;
   return (
@@ -265,7 +275,15 @@ function InstanceView({ inst }: { inst: Instance }) {
             <Section value="look" title={tr('inspector.look')} sections={sections}>
               <div className="props">
                 {single && <PanelField instId={inst.id} pk="p1" attr="size" />}
+                {single && <PanelField instId={inst.id} pk="p1" attr="opacity" />}
                 {own.map(st => <SettingField key={st.id} instId={inst.id} setting={st} onReset={() => clearValues(inst.id, [st.id])} />)}
+              </div>
+            </Section>
+          )}
+          {content.length > 0 && (
+            <Section value="content" title={tr('inspector.content')} sections={sections}>
+              <div className="props">
+                {content.map(st => <SettingField key={st.id} instId={inst.id} setting={st} onReset={() => clearValues(inst.id, [st.id])} />)}
               </div>
             </Section>
           )}
@@ -287,7 +305,11 @@ function InstanceView({ inst }: { inst: Instance }) {
           {parts.length > 0 && (
             <Section value="parts" title={tr('inspector.parts')} sections={sections}>
               <div className="list">
-                {parts.map(p => <OpenRow key={p.key} title={p.label} onOpen={() => select(inst.id, p.key)} />)}
+                {parts.map(p => {
+                  const show = p.adjustments.find(a => a.key === p.key + '.show');
+                  return <OpenRow key={p.key} title={p.label} onOpen={() => select(inst.id, p.key)}
+                    shown={show?.value !== 'false'} onShow={show && (on => setValue(inst.id, show.key, on ? 'true' : 'false'))} />;
+                })}
               </div>
             </Section>
           )}
@@ -326,6 +348,7 @@ function PartView({ inst, partKey }: { inst: Instance | SceneControls; partKey: 
         <Section value="look" title={tr('inspector.look')} sections={sections}>
           <div className="props">
             <PanelField instId={inst.id} pk={pt.key} attr="size" />
+            {inst.id !== 'wallpaper' && <PanelField instId={inst.id} pk={pt.key} attr="opacity" />}
             {look.map(field)}
             {inst.id === 'wallpaper' && <PanelField instId={inst.id} pk={pt.key} attr="align" />}
           </div>
@@ -342,7 +365,9 @@ function PartView({ inst, partKey }: { inst: Instance | SceneControls; partKey: 
       </>
     );
   } else {
-    body = <Section value="look" title={tr('inspector.look')} sections={sections}><div className="props">{pt.adjustments.map(field)}</div></Section>;
+    const glow = pt.adjustments.find(a => a.key === pt.key + '.shape')?.value === 'glow';
+    const shown = pt.adjustments.filter(a => !(glow && PLATE_ONLY.includes(attr(a.key))));
+    body = <Section value="look" title={tr('inspector.look')} sections={sections}><div className="props">{shown.map(field)}</div></Section>;
   }
   return (
     <>

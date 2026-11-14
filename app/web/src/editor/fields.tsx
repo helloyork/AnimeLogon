@@ -76,8 +76,11 @@ export function viewFor(key: string, step: number): View {
     case 'offset-y': return plain(t('unit.screen_height'), 1);
     case 'size': return panel ? plain(t('unit.screen_height'), 1) : plain(t('unit.times'), 2);
     case 'margin': return plain(t('unit.short_side'), 1);
-    case 'tracking': case 'x': case 'y': case 'blur': return plain('em', 3);
-    case 'space': case 'gap': return plain('em', 2);
+    case 'tracking': case 'x': case 'y': case 'blur': case 'rise': return plain('em', 3);
+    case 'space': case 'gap': case 'padding-x': case 'padding-y': return plain('em', 2);
+    // A plate's corners are in em; a bar's are a share of its thickness.
+    case 'radius': return /\.b\.radius$/.test(key) ? plain('em', 2) : plain('', decimals(step));
+    case 'max': return { factor: 1, digits: 1, unit: v => (v ? 'em' : t('unit.none')) };
     case 'enter-delay': case 'enter-duration': return plain(t('unit.seconds'), 2);
     case 'opacity': return { factor: 100, digits: 0, unit: v => (/\.(s\d+|b)\.opacity$/.test(key) && !v ? t('unit.none') : '%') };
   }
@@ -271,6 +274,8 @@ export function AdjustmentField({ instId, a, onReset }: { instId: string; a: Adj
       return <ColorField {...common} value={a.value} write={write} />;
     case 'font':
       return <FontField {...common} value={a.value} write={write} />;
+    case 'toggle':
+      return <ToggleField {...common} value={a.value === 'true'} write={on => write(on ? 'true' : 'false')} />;
   }
 }
 

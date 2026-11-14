@@ -16,8 +16,10 @@ constexpr size_t kMaxShadows = 4, kMaxLabel = 40, kMaxDetail = 80, kMaxTemplate 
 
 const wchar_t *const kAnchors[] = {L"top-left", L"top", L"top-right", L"left", L"center",
                                    L"right", L"bottom-left", L"bottom", L"bottom-right"};
-enum class Type { Label, Anchor, Number, Align, Template, Font, Weight, Style, Color, Case, Bool, Condition, Date, Fraction, Enter,
-                  Count, Mode, Direction, Bass, Gradient };
+enum class Type {
+    Label, Anchor, Number, Align, Template, Font, Weight, Style, Color, Case, Bool, Condition, Date, Fraction, Enter,
+    Figures, Shape, Count, Mode, Direction, Bass, Gradient
+};
 
 // `adjustable` attributes can be set by hand in the settings app.
 struct AttributeSpec {
@@ -32,30 +34,35 @@ const AttributeSpec kPanel[] = {{L"label", Type::Label, 0, 0, false}, {L"anchor"
                                 {L"offset-x", Type::Number, -50, 50}, {L"offset-y", Type::Number, -50, 50},
                                 {L"align", Type::Align},              {L"when", Type::Condition, 0, 0, false},
                                 {L"until", Type::Date, 0, 0, false}, {L"enter", Type::Enter},
-                                {L"enter-delay", Type::Number, 0, 10}, {L"enter-duration", Type::Number, 0, 5}};
+                                {L"enter-delay", Type::Number, 0, 10}, {L"enter-duration", Type::Number, 0, 5},
+                                {L"opacity", Type::Number, 0, 1}};
 const AttributeSpec kLine[] = {{L"label", Type::Label, 0, 0, false}, {L"gap", Type::Number, -2, 4},
-                               {L"when", Type::Condition, 0, 0, false}};
+                               {L"when", Type::Condition, 0, 0, false}, {L"show", Type::Bool}};
 const AttributeSpec kText[] = {{L"label", Type::Label, 0, 0, false}, {L"value", Type::Template, 0, 0, false},
                                {L"when", Type::Condition, 0, 0, false},
                                {L"font", Type::Font},                {L"size", Type::Number, 0.05, 4},
                                {L"weight", Type::Weight},            {L"style", Type::Style},
                                {L"color", Type::Color},              {L"opacity", Type::Number, 0, 1},
                                {L"tracking", Type::Number, -0.5, 1}, {L"space", Type::Number, 0, 4},
-                               {L"case", Type::Case},                {L"hang", Type::Bool}};
+                               {L"case", Type::Case},                {L"hang", Type::Bool},
+                               {L"show", Type::Bool},                {L"rise", Type::Number, -1, 1},
+                               {L"max", Type::Number, 0, 40},        {L"figures", Type::Figures}};
 const AttributeSpec kShadow[] = {{L"label", Type::Label, 0, 0, false},
                                  {L"blur", Type::Number, 0, 1},
                                  {L"opacity", Type::Number, 0, 1},
                                  {L"x", Type::Number, -1, 1},
                                  {L"y", Type::Number, -1, 1},
                                  {L"color", Type::Color}};
-const AttributeSpec kBackdrop[] = {
-    {L"label", Type::Label, 0, 0, false}, {L"opacity", Type::Number, 0, 1}, {L"color", Type::Color}};
+const AttributeSpec kBackdrop[] = {{L"label", Type::Label, 0, 0, false}, {L"opacity", Type::Number, 0, 1},
+                                   {L"color", Type::Color},              {L"shape", Type::Shape},
+                                   {L"radius", Type::Number, 0, 4},      {L"padding-x", Type::Number, 0, 4},
+                                   {L"padding-y", Type::Number, 0, 4}};
 const AttributeSpec kBar[] = {{L"label", Type::Label, 0, 0, false}, {L"value", Type::Fraction, 0, 0, false},
                               {L"when", Type::Condition, 0, 0, false}, {L"length", Type::Number, 0.2, 40},
                               {L"thickness", Type::Number, 0.02, 1},   {L"radius", Type::Number, 0, 0.5},
                               {L"color", Type::Color},                 {L"opacity", Type::Number, 0, 1},
                               {L"track", Type::Color},                 {L"track-opacity", Type::Number, 0, 1},
-                              {L"space", Type::Number, 0, 4}};
+                              {L"space", Type::Number, 0, 4},          {L"show", Type::Bool}};
 const AttributeSpec kSpectrum[] = {
     {L"label", Type::Label, 0, 0, false},   {L"when", Type::Condition, 0, 0, false},
     {L"mode", Type::Mode},                  {L"direction", Type::Direction},
@@ -68,7 +75,7 @@ const AttributeSpec kSpectrum[] = {
     {L"idle-opacity", Type::Number, 0, 1},  {L"peak", Type::Number, 0, 1},
     {L"sensitivity", Type::Number, 0.05, 10}, {L"smoothing", Type::Number, 0, 0.99},
     {L"low", Type::Number, 10, 20000},      {L"high", Type::Number, 20, 24000},
-    {L"space", Type::Number, 0, 4}};
+    {L"space", Type::Number, 0, 4},         {L"show", Type::Bool}};
 
 struct SpecList {
     const AttributeSpec *begin;
@@ -189,6 +196,8 @@ bool Check(const AttributeSpec &spec, const std::wstring &value) {
     }
     case Type::Fraction: return IsFraction(value);
     case Type::Enter: return value == L"fade" || value == L"rise" || value == L"zoom" || value == L"none";
+    case Type::Figures: return value == L"proportional" || value == L"tabular";
+    case Type::Shape: return value == L"glow" || value == L"plate";
     case Type::Count: return ParseNumber(value, &v) && v == std::floor(v) && v >= spec.min && v <= spec.max;
     case Type::Mode: return value == L"bars" || value == L"line" || value == L"area";
     case Type::Direction: return value == L"up" || value == L"down" || value == L"both";
@@ -440,6 +449,10 @@ const Offer kOffers[] = {
     {L"panel", L"enter", L"效果", L"锁屏显示时组件的入场效果。", Control::Choice, 0, 0, 0, L"fade"},
     {L"panel", L"enter-delay", L"延迟", L"壁纸开始显示后，延迟多久开始入场。", Control::Slider, 0, 5, 0.05, L"0"},
     {L"panel", L"enter-duration", L"时长", L"入场动画的持续时间。", Control::Slider, 0, 3, 0.05, L"0.4"},
+    {L"panel", L"opacity", L"不透明度", L"整个组件的不透明度。", Control::Slider, 0, 1, 0.01, L"1"},
+    {L"text", L"show", L"显示", L"关闭后不显示该文字，也不占位。", Control::Toggle, 0, 0, 0, L"true"},
+    {L"bar", L"show", L"显示", L"关闭后不显示该进度条，也不占位。", Control::Toggle, 0, 0, 0, L"true"},
+    {L"spectrum", L"show", L"显示", L"关闭后不显示该频谱，也不占位。", Control::Toggle, 0, 0, 0, L"true"},
     {L"text", L"font", L"字体", L"仅列出为所有用户安装的字体。", Control::Font, 0, 0, 0, L""},
     {L"text", L"weight", L"字重", L"字体不含所选字重时，使用最接近的字重。", Control::Slider, 100, 900, 50, L"400"},
     {L"text", L"size", L"相对大小", L"相对于组件大小。", Control::Slider, 0.05, 2, 0.01, L"1"},
@@ -448,6 +461,9 @@ const Offer kOffers[] = {
     {L"line", L"gap", L"行距", L"到上一行基线的距离，相对于组件大小。", Control::Slider, -1, 2, 0.01, L"0.2"},
     {L"text", L"color", L"颜色", L"", Control::Color, 0, 0, 0, L"#FFFFFF"},
     {L"text", L"opacity", L"不透明度", L"", Control::Slider, 0, 1, 0.01, L"1"},
+    {L"text", L"rise", L"基线偏移", L"相对于本行基线上移的距离，负值下移；相对于组件大小。", Control::Slider, -0.5, 0.5, 0.005, L"0"},
+    {L"text", L"max", L"最大宽度", L"超出时以省略号截断；为 0 时不限制。相对于组件大小。", Control::Slider, 0, 30, 0.1, L"0"},
+    {L"text", L"figures", L"数字宽度", L"等宽数字在数值变化时宽度保持不变。", Control::Choice, 0, 0, 0, L"proportional"},
     {L"text", L"style", L"字形", L"", Control::Choice, 0, 0, 0, L"normal"},
     {L"text", L"case", L"大小写", L"仅作用于拉丁字母。", Control::Choice, 0, 0, 0, L"none"},
     // Offered only where the component lets a text hang (Parts).
@@ -458,7 +474,12 @@ const Offer kOffers[] = {
     {L"shadow", L"y", L"垂直偏移", L"相对于组件大小。", Control::Slider, -0.3, 0.3, 0.005, L"0"},
     {L"shadow", L"color", L"颜色", L"", Control::Color, 0, 0, 0, L"#000000"},
     {L"backdrop", L"opacity", L"不透明度", L"在文字下方加深背景以提高可读性；为 0 时不显示。", Control::Slider, 0, 1, 0.01, L"0"},
+    {L"backdrop", L"shape", L"形状", L"柔光向四周渐隐；圆角矩形是边缘清晰的底板。", Control::Choice, 0, 0, 0, L"glow"},
     {L"backdrop", L"color", L"颜色", L"", Control::Color, 0, 0, 0, L"#000000"},
+    // Offered only for a plate (the page hides them for a glow).
+    {L"backdrop", L"radius", L"圆角", L"相对于组件大小。", Control::Slider, 0, 2, 0.01, L"0.35"},
+    {L"backdrop", L"padding-x", L"水平内边距", L"文字到底板左右边缘的距离，相对于组件大小。", Control::Slider, 0, 3, 0.01, L"0.6"},
+    {L"backdrop", L"padding-y", L"垂直内边距", L"文字到底板上下边缘的距离，相对于组件大小。", Control::Slider, 0, 3, 0.01, L"0.4"},
     {L"bar", L"length", L"长度", L"相对于组件大小。", Control::Slider, 0.5, 20, 0.1, L"6"},
     {L"bar", L"thickness", L"粗细", L"相对于组件大小。", Control::Slider, 0.02, 0.5, 0.005, L"0.12"},
     {L"bar", L"radius", L"圆角", L"0 为直角，0.5 为半圆形端点。", Control::Slider, 0, 0.5, 0.01, L"0.5"},
@@ -501,6 +522,8 @@ std::vector<Option> OptionsOf(const std::wstring &attribute) {
     if (attribute == L"case") return {{L"none", L"不转换"}, {L"upper", L"全部大写"}, {L"lower", L"全部小写"}};
     if (attribute == L"hang") return {{L"true", L"悬挂"}, {L"false", L"参与对齐"}};
     if (attribute == L"enter") return {{L"fade", L"淡入"}, {L"rise", L"上移淡入"}, {L"zoom", L"缩放淡入"}, {L"none", L"无"}};
+    if (attribute == L"figures") return {{L"proportional", L"比例"}, {L"tabular", L"等宽"}};
+    if (attribute == L"shape") return {{L"glow", L"柔光"}, {L"plate", L"圆角矩形"}};
     if (attribute == L"mode") return {{L"bars", L"柱形"}, {L"line", L"曲线"}, {L"area", L"填充曲线"}};
     if (attribute == L"direction") return {{L"up", L"向上"}, {L"down", L"向下"}, {L"both", L"双向"}};
     if (attribute == L"bass") return {{L"left", L"左侧"}, {L"middle", L"中间"}, {L"right", L"右侧"}};
@@ -885,6 +908,7 @@ Resolved Resolve(const Skin &skin, const Values &values) {
         panel.enter = enter == L"rise" ? Enter::Rise : enter == L"zoom" ? Enter::Zoom : enter == L"none" ? Enter::None : Enter::Fade;
         panel.enterDelay = a.Number(L"enter-delay", panel.enterDelay);
         panel.enterDuration = a.Number(L"enter-duration", panel.enterDuration);
+        panel.opacity = a.Number(L"opacity", panel.opacity);
         size_t lines = 0, shadows = 0;
         for (const xml::Element &e : p.children) {
             const std::wstring key = e.name == L"line"     ? pk + L".l" + std::to_wstring(++lines)
@@ -895,6 +919,7 @@ Resolved Resolve(const Skin &skin, const Values &values) {
                 Line line;
                 line.gap = c.Number(L"gap", line.gap);
                 line.when = ConditionOf(e);
+                line.shown = c.String(L"show", L"true") != L"false";
                 size_t texts = 0, bars = 0, spectra = 0;
                 for (const xml::Element &t : e.children) {
                     Text text;
@@ -905,6 +930,7 @@ Resolved Resolve(const Skin &skin, const Values &values) {
                                               : L"t" + std::to_wstring(++texts);
                     Applied ta(skin, values, t, key + L"." + text.name);
                     text.when = ConditionOf(t);
+                    text.shown = ta.String(L"show", L"true") != L"false";
                     if (text.spectrum) {
                         ReadSpectrum(ta, &text);
                         line.texts.push_back(std::move(text));
@@ -935,6 +961,9 @@ Resolved Resolve(const Skin &skin, const Values &values) {
                     const std::wstring textCase = ta.String(L"case");
                     text.textCase = textCase == L"upper" ? Case::Upper : textCase == L"lower" ? Case::Lower : Case::None;
                     text.hang = ta.String(L"hang") == L"true";
+                    text.rise = ta.Number(L"rise", 0.0f);
+                    text.max = ta.Number(L"max", 0.0f);
+                    text.tabular = ta.String(L"figures") == L"tabular";
                     line.texts.push_back(std::move(text));
                 }
                 panel.lines.push_back(std::move(line));
@@ -949,6 +978,10 @@ Resolved Resolve(const Skin &skin, const Values &values) {
             } else if (e.name == L"backdrop") {
                 panel.backdrop = c.Number(L"opacity", 0.0f);
                 panel.backdropColor = c.Color(L"color", panel.backdropColor);
+                panel.backdropShape = c.String(L"shape") == L"plate" ? Shape::Plate : Shape::Glow;
+                panel.backdropRadius = c.Number(L"radius", panel.backdropRadius);
+                panel.backdropPaddingX = c.Number(L"padding-x", panel.backdropPaddingX);
+                panel.backdropPaddingY = c.Number(L"padding-y", panel.backdropPaddingY);
             }
         }
         out.panels.push_back(std::move(panel));

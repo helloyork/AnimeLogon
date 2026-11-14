@@ -227,10 +227,19 @@ bool Refresh(const std::wstring &preview) {
                            primary.canvas.left - primary.rect.left, primary.canvas.top - primary.rect.top,
                            primary.canvas.right - primary.rect.left, primary.canvas.bottom - primary.rect.top, windowW,
                            windowH);
+    // The theme's brightness is baked in, so that the sign-in background Windows shows before the
+    // logon screen covers it, and the still the logon screen covers it with, are as dark as the
+    // wallpaper that follows. It is in the key only below 1: a theme that keeps its wallpaper as
+    // it is keeps the key, and the background, it always had.
+    const float brightness = wallpaper.brightness;
+    const bool darker = brightness < animelogon::kBrightness;
+    const std::wstring dimmed = darker ? animelogon::Format(L"|brightness %g", brightness) : std::wstring();
     // A video's key is what it was before themes, so the same video keeps the same background.
-    const std::wstring key = video ? animelogon::Format(L"%s|%s|%s", kVersion, wallpaper.id.c_str(), placed.c_str())
-                             : image ? animelogon::Format(L"%s|image %s|%s", kVersion, wallpaper.id.c_str(), placed.c_str())
-                                     : std::wstring(L"default");
+    const std::wstring key =
+        (video ? animelogon::Format(L"%s|%s|%s", kVersion, wallpaper.id.c_str(), placed.c_str())
+         : image ? animelogon::Format(L"%s|image %s|%s", kVersion, wallpaper.id.c_str(), placed.c_str())
+                 : std::wstring(L"default")) +
+        dimmed;
     if (preview.empty() && key == ReadKey()) return false;
 
     std::vector<uint8_t> png;
@@ -244,7 +253,9 @@ bool Refresh(const std::wstring &preview) {
             return false;
         }
         const layout::Mapping m = layout::Map(f.displayW, f.displayH, primary.canvas, primary.rect, wallpaper.fit);
-        if (!EncodePng(Compose(f, m, windowW, windowH, width, height), width, height, &png)) {
+        std::vector<uint8_t> bgr = Compose(f, m, windowW, windowH, width, height);
+        animelogon::ApplyBrightness(bgr.data(), bgr.size() / 3, 3, brightness);
+        if (!EncodePng(bgr, width, height, &png)) {
             ALOG(L"bake: the background could not be encoded");
             return false;
         }
@@ -257,14 +268,30 @@ bool Refresh(const std::wstring &preview) {
             return false;
         }
         const layout::Mapping m = layout::Map(pixels.width, pixels.height, primary.canvas, primary.rect, wallpaper.fit);
-        if (!EncodePng(picture::Compose(pixels, m, windowW, windowH, width, height), width, height, &png)) {
+        std::vector<uint8_t> bgr = picture::Compose(pixels, m, windowW, windowH, width, height);
+        animelogon::ApplyBrightness(bgr.data(), bgr.size() / 3, 3, brightness);
+        if (!EncodePng(bgr, width, height, &png)) {
             ALOG(L"bake: the background could not be encoded");
             return false;
         }
-    } else {
+    } else if (!darker) {
         // The built-in wallpaper is exactly the background the installer writes, so a machine
         // that never chose another never has its background rewritten.
         png = animelogon::background::Render();
+    } else {
+        // Darkened, it is drawn afresh at the display's size, as the logon screen draws it.
+        const std::vector<uint8_t> bgra = animelogon::background::Pixels(width, height);
+        std::vector<uint8_t> bgr(bgra.size() / 4 * 3);
+        for (size_t i = 0, j = 0; i + 3 < bgra.size(); i += 4, j += 3) {
+            bgr[j] = bgra[i];
+            bgr[j + 1] = bgra[i + 1];
+            bgr[j + 2] = bgra[i + 2];
+        }
+        animelogon::ApplyBrightness(bgr.data(), bgr.size() / 3, 3, brightness);
+        if (!EncodePng(bgr, width, height, &png)) {
+            ALOG(L"bake: the background could not be encoded");
+            return false;
+        }
     }
     if (!preview.empty()) {
         HANDLE h = CreateFileW(preview.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);

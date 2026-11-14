@@ -37,8 +37,8 @@ bool HasFamily(IDWriteFactory *write, const std::wstring &family) {
 // the panel's bitmap while the line is drawn. `lead` is the space before it.
 class Bar : public IDWriteInlineObject {
 public:
-    Bar(ID2D1DeviceContext *dc, const skin::Text &t, float px, float axis, float fraction)
-        : dc_(dc), t_(t), lead_(t.space * px), length_(t.length * px), height_(std::max(1.0f, t.thickness * px)),
+    Bar(ID2D1DeviceContext *dc, const skin::Text &t, float px, float lead, float axis, float fraction)
+        : dc_(dc), t_(t), lead_(lead), length_(t.length * px), height_(std::max(1.0f, t.thickness * px)),
           axis_(axis), fraction_(fraction) {}
 
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id, void **out) override {
@@ -160,6 +160,71 @@ void Through(ID2D1GeometrySink *sink, const std::vector<D2D1_POINT_2F> &points, 
     }
 }
 
+// A text that sits above or below its line's baseline (`rise`): DirectWrite has no baseline shift,
+// so the text is laid out on its own and placed in the line like a character, as a bar is. Its box
+// is the text's own, raised, so the line makes room for it; its ink is the text's ink.
+class Raised : public IDWriteInlineObject {
+public:
+    Raised(ID2D1DeviceContext *dc, ComPtr<IDWriteTextLayout> layout, ComPtr<ID2D1Brush> brush, float lead, float rise)
+        : dc_(dc), layout_(std::move(layout)), brush_(std::move(brush)), lead_(lead), rise_(rise) {
+        DWRITE_TEXT_METRICS m{};
+        DWRITE_LINE_METRICS lm{};
+        UINT32 lines = 0;
+        if (SUCCEEDED(layout_->GetMetrics(&m))) {
+            width_ = m.widthIncludingTrailingWhitespace;
+            height_ = m.height;
+        }
+        if (SUCCEEDED(layout_->GetLineMetrics(&lm, 1, &lines)) && lines) baseline_ = lm.baseline;
+        // Overhangs are measured against the layout's box, so the box is made the text's own.
+        layout_->SetMaxWidth(std::max(1.0f, width_));
+        layout_->SetMaxHeight(std::max(1.0f, height_));
+        layout_->GetOverhangMetrics(&ink_);
+    }
+
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id, void **out) override {
+        if (id == __uuidof(IUnknown) || id == __uuidof(IDWriteInlineObject)) {
+            *out = static_cast<IDWriteInlineObject *>(this);
+            AddRef();
+            return S_OK;
+        }
+        *out = nullptr;
+        return E_NOINTERFACE;
+    }
+    ULONG STDMETHODCALLTYPE AddRef() override { return ++refs_; }
+    ULONG STDMETHODCALLTYPE Release() override {
+        const ULONG left = --refs_;
+        if (!left) delete this;
+        return left;
+    }
+
+    HRESULT STDMETHODCALLTYPE Draw(void *, IDWriteTextRenderer *, FLOAT x, FLOAT y, BOOL, BOOL, IUnknown *) override {
+        // The box's top is the text's top: its baseline lands `rise` above the line's.
+        dc_->DrawTextLayout(D2D1::Point2F(x + lead_, y), layout_.Get(), brush_.Get());
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE GetMetrics(DWRITE_INLINE_OBJECT_METRICS *m) override {
+        *m = {lead_ + width_, height_, baseline_ + rise_, FALSE};
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE GetOverhangMetrics(DWRITE_OVERHANG_METRICS *o) override {
+        *o = {ink_.left - lead_, ink_.top, ink_.right, ink_.bottom};
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE GetBreakConditions(DWRITE_BREAK_CONDITION *before, DWRITE_BREAK_CONDITION *after) override {
+        *before = *after = DWRITE_BREAK_CONDITION_NEUTRAL;
+        return S_OK;
+    }
+
+private:
+    virtual ~Raised() = default;
+    std::atomic<ULONG> refs_{1};
+    ID2D1DeviceContext *dc_;
+    ComPtr<IDWriteTextLayout> layout_;
+    ComPtr<ID2D1Brush> brush_;
+    float lead_, rise_;
+    float width_ = 0.0f, height_ = 0.0f, baseline_ = 0.0f;
+    DWRITE_OVERHANG_METRICS ink_{};
+};
 // A text's words: "{media.position}" and "{media.progress}" move every second while playing.
 bool FollowsPlayback(const std::wstring &value) {
     return value.find(L"{media.position}") != std::wstring::npos || value.find(L"{media.progress}") != std::wstring::npos;
@@ -289,10 +354,10 @@ bool SkinView::Tick(const SYSTEMTIME &now, uint64_t utc) {
         const bool panelShown = holds(p.when);
         for (const skin::Line &l : p.lines) {
             auto &line = panel.emplace_back();
-            const bool lineShown = panelShown && holds(l.when);
+            const bool lineShown = panelShown && l.shown && holds(l.when);
             for (const skin::Text &t : l.texts) {
                 std::wstring w;
-                if (lineShown && holds(t.when)) {
+                if (lineShown && t.shown && holds(t.when)) {
                     double f = 0.0;
                     if (t.spectrum) w = L"~";  // shown; what it shows is drawn every frame
                     else if (!t.bar) w = Cased(FillText(t.value, format_, style_, now, &context), t.textCase, format_.locale);
@@ -317,22 +382,80 @@ std::wstring SkinView::Family(const std::wstring &wanted) const {
     return HasFamily(write_.Get(), L"Segoe UI Variable Display") ? L"Segoe UI Variable Display" : L"Segoe UI";
 }
 
+void SkinView::Figures(IDWriteTextLayout *layout, const skin::Text &text, DWRITE_TEXT_RANGE range) const {
+    if (!text.tabular) return;
+    ComPtr<IDWriteTypography> typography;
+    if (FAILED(write_->CreateTypography(&typography))) return;
+    typography->AddFontFeature({DWRITE_FONT_FEATURE_TAG_TABULAR_FIGURES, 1});
+    layout->SetTypography(typography.Get(), range);
+}
+
+ComPtr<IDWriteTextLayout> SkinView::Alone(const skin::Text &t, const std::wstring &words, float px) const {
+    ComPtr<IDWriteTextFormat> format;
+    ComPtr<IDWriteTextLayout> layout;
+    if (FAILED(write_->CreateTextFormat(Family(t.font).c_str(), nullptr, (DWRITE_FONT_WEIGHT)t.weight,
+                                        t.italic ? DWRITE_FONT_STYLE_ITALIC : DWRITE_FONT_STYLE_NORMAL,
+                                        DWRITE_FONT_STRETCH_NORMAL, px * t.size, format_.locale.c_str(), &format)) ||
+        FAILED(format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP)) ||
+        FAILED(write_->CreateTextLayout(words.c_str(), (UINT32)words.size(), format.Get(), kUnbounded, kUnbounded,
+                                        &layout)))
+        return nullptr;
+    const DWRITE_TEXT_RANGE all{0, (UINT32)words.size()};
+    ComPtr<IDWriteTextLayout1> spaced;
+    if (t.tracking != 0.0f && SUCCEEDED(layout.As(&spaced)))
+        spaced->SetCharacterSpacing(0.0f, t.tracking * px * t.size, 0.0f, all);
+    Figures(layout.Get(), t, all);
+    return layout;
+}
+
+std::wstring SkinView::Fit(const skin::Text &t, const std::wstring &words, float px) const {
+    if (t.max <= 0.0f || words.empty()) return words;
+    const float room = t.max * px;
+    auto width = [&](const std::wstring &s) {
+        DWRITE_TEXT_METRICS m{};
+        const ComPtr<IDWriteTextLayout> layout = Alone(t, s, px);
+        return layout && SUCCEEDED(layout->GetMetrics(&m)) ? m.widthIncludingTrailingWhitespace : 0.0f;
+    };
+    if (width(words) <= room) return words;
+    // The longest beginning that fits with the ellipsis after it, never ending on half a pair or
+    // on a space.
+    auto cut = [&](size_t n) {
+        if (n && words[n - 1] >= 0xD800 && words[n - 1] <= 0xDBFF) --n;
+        std::wstring s = words.substr(0, n);
+        while (!s.empty() && s.back() == L' ') s.pop_back();
+        return s + L"…";
+    };
+    size_t lo = 0, hi = words.size();
+    while (lo < hi) {
+        const size_t mid = (lo + hi + 1) / 2;
+        if (width(cut(mid)) <= room) lo = mid;
+        else hi = mid - 1;
+    }
+    return cut(lo);
+}
+
 bool SkinView::Lay(Line &line, const skin::Panel &, const skin::Line &source,
-                   const std::vector<std::wstring> &words, float px) {
+                   const std::vector<std::wstring> &given, float px) {
     struct Run {
         const skin::Text *text;
         UINT32 start, length;
+        float lead;  // the space before it: none before the first thing the line draws
     };
+    // A text may be cut short to its widest; one that rises is laid out apart and held in the
+    // line, like a bar, by one character.
+    std::vector<std::wstring> words(given.size());
+    for (size_t i = 0; i < source.texts.size() && i < given.size(); ++i)
+        words[i] = source.texts[i].bar || source.texts[i].spectrum ? given[i] : Fit(source.texts[i], given[i], px);
+    auto apart = [](const skin::Text &t) { return t.bar || t.spectrum || t.rise != 0.0f; };
     std::wstring s;
     std::vector<Run> runs;
     float largest = 0.0f;  // the largest text beside a bar, which it is centred on
     for (size_t i = 0; i < source.texts.size() && i < words.size(); ++i) {
         if (words[i].empty()) continue;
         const skin::Text &t = source.texts[i];
-        const bool object = t.bar || t.spectrum;  // laid out as one character
-        runs.push_back({&t, (UINT32)s.size(), object ? 1u : (UINT32)words[i].size()});
-        s += object ? std::wstring(1, (wchar_t)0xFFFC) : words[i];
-        if (!object) largest = std::max(largest, t.size);
+        runs.push_back({&t, (UINT32)s.size(), apart(t) ? 1u : (UINT32)words[i].size(), runs.empty() ? 0.0f : t.space * px});
+        s += apart(t) ? std::wstring(1, (wchar_t)0xFFFC) : words[i];
+        if (!t.bar && !t.spectrum) largest = std::max(largest, t.size);
     }
     line.layout.Reset();
     line.runs.clear();
@@ -362,8 +485,7 @@ bool SkinView::Lay(Line &line, const skin::Panel &, const skin::Line &source,
             const float overhang = t.audio.mode == skin::Mode::Bars ? 0.0f : std::ceil(t.audio.stroke * px / 2.0f) + 1.0f;
             auto at = std::make_shared<D2D1_POINT_2F>(D2D1::Point2F(-kUnbounded, -kUnbounded));
             ComPtr<IDWriteInlineObject> room;
-            room.Attach(new Room(t.space * px, std::max(1.0f, t.length * px), std::max(1.0f, t.audio.height * px),
-                                 overhang, at));
+            room.Attach(new Room(r.lead, std::max(1.0f, t.length * px), std::max(1.0f, t.audio.height * px), overhang, at));
             line.layout->SetInlineObject(room.Get(), range);
             line.rooms.push_back({(size_t)(r.text - source.texts.data()), std::move(at)});
             continue;
@@ -374,22 +496,32 @@ bool SkinView::Lay(Line &line, const skin::Panel &, const skin::Line &source,
             // About the middle of the figures beside it.
             const float axis = 0.35f * px * (largest > 0.0f ? largest : 1.0f);
             ComPtr<IDWriteInlineObject> bar;
-            bar.Attach(new Bar(dc_.Get(), t, px, axis, fraction));
+            bar.Attach(new Bar(dc_.Get(), t, px, r.lead, axis, fraction));
             line.layout->SetInlineObject(bar.Get(), range);
             continue;
         }
         ComPtr<ID2D1SolidColorBrush> brush;
         if (FAILED(dc_->CreateSolidColorBrush(ColorOf(t.color, t.opacity), &brush))) return false;
+        if (t.rise != 0.0f) {
+            const size_t index = (size_t)(r.text - source.texts.data());
+            const ComPtr<IDWriteTextLayout> own = Alone(t, words[index], px);
+            if (!own) return false;
+            ComPtr<IDWriteInlineObject> raised;
+            raised.Attach(new Raised(dc_.Get(), own, brush, r.lead, t.rise * px));
+            line.layout->SetInlineObject(raised.Get(), range);
+            continue;
+        }
         line.layout->SetFontFamilyName(Family(t.font).c_str(), range);
         line.layout->SetFontWeight((DWRITE_FONT_WEIGHT)t.weight, range);
         line.layout->SetFontStyle(t.italic ? DWRITE_FONT_STYLE_ITALIC : DWRITE_FONT_STYLE_NORMAL, range);
         line.layout->SetFontSize(px * t.size, range);
         line.layout->SetDrawingEffect(brush.Get(), range);
+        Figures(line.layout.Get(), t, range);
         if (spaced) {
             // Tracking is in the text's own em; the space before it in the panel's.
             const float tracking = t.tracking * px * t.size;
             if (tracking != 0.0f) spaced->SetCharacterSpacing(0.0f, tracking, 0.0f, range);
-            if (t.space != 0.0f) spaced->SetCharacterSpacing(t.space * px, tracking, 0.0f, {r.start, 1});
+            if (r.lead != 0.0f) spaced->SetCharacterSpacing(r.lead, tracking, 0.0f, {r.start, 1});
         }
     }
 
@@ -418,7 +550,9 @@ bool SkinView::Lay(Line &line, const skin::Panel &, const skin::Line &source,
         DWRITE_HIT_TEST_METRICS hit{};
         UINT32 count = 0;
         if (SUCCEEDED(line.layout->HitTestTextRange(start, end - start, 0.0f, 0.0f, &hit, 1, &count)) && count == 1) {
-            if (runs.front().text->hang) line.coreLeft = hit.left;
+            // The range starts with the space before its first text, which belongs to the gap
+            // after what hangs, not to what is aligned.
+            if (runs.front().text->hang) line.coreLeft = hit.left + firstCore->lead;
             if (runs.back().text->hang) line.coreRight = hit.left + hit.width;
         }
     }
@@ -595,7 +729,17 @@ bool SkinView::Build(Built &built, size_t index, UINT width, UINT height) {
         }
     }
 
-    if (panel.backdrop > 0.0f) {
+    if (panel.backdrop > 0.0f && panel.backdropShape == skin::Shape::Plate) {
+        // A rounded rectangle around the ink, as far out from it as the padding says.
+        const float padX = std::round(panel.backdropPaddingX * px), padY = std::round(panel.backdropPaddingY * px);
+        const D2D1_RECT_F rect = D2D1::RectF(built.at.x + refX - before - padX, built.at.y + originY + top - padY,
+                                             built.at.x + refX + after + padX, built.at.y + originY + bottom + padY);
+        const float radius = std::min({panel.backdropRadius * px, (rect.right - rect.left) / 2.0f, (rect.bottom - rect.top) / 2.0f});
+        built.plate = true;
+        built.plateArea = D2D1::RoundedRect(rect, radius, radius);
+        ComPtr<ID2D1SolidColorBrush> fill;
+        if (SUCCEEDED(dc_->CreateSolidColorBrush(ColorOf(panel.backdropColor, panel.backdrop), &fill))) built.backdrop = fill;
+    } else if (panel.backdrop > 0.0f) {
         // An ellipse around the ink, fading to nothing well before its edge.
         const float left = built.at.x + refX - before, right = built.at.x + refX + after;
         const float upper = built.at.y + originY + top, lower = built.at.y + originY + bottom;
@@ -608,12 +752,13 @@ bool SkinView::Build(Built &built, size_t index, UINT width, UINT height) {
         for (size_t k = 0; k < ARRAYSIZE(falloff); ++k)
             stops[k] = {falloff[k][0], D2D1::ColorF(c.r, c.g, c.b, c.a * falloff[k][1])};
         ComPtr<ID2D1GradientStopCollection> gradient;
-        if (FAILED(dc_->CreateGradientStopCollection(stops, ARRAYSIZE(stops), &gradient)) ||
-            FAILED(dc_->CreateRadialGradientBrush(
+        ComPtr<ID2D1RadialGradientBrush> glow;
+        if (SUCCEEDED(dc_->CreateGradientStopCollection(stops, ARRAYSIZE(stops), &gradient)) &&
+            SUCCEEDED(dc_->CreateRadialGradientBrush(
                 D2D1::RadialGradientBrushProperties(centre, D2D1::Point2F(), built.backdropArea.radiusX,
                                                     built.backdropArea.radiusY),
-                gradient.Get(), &built.backdrop)))
-            built.backdrop.Reset();
+                gradient.Get(), &glow)))
+            built.backdrop = glow;
     }
     return true;
 }
@@ -832,7 +977,10 @@ bool SkinView::Draw(ID2D1Bitmap1 *target, UINT width, UINT height, size_t slot, 
             const float blur = std::ceil(3.0f * std::max(0.5f, sh.blur * b.px)) + 1.0f;
             add(x - blur, y - blur, x + (float)size.width + blur, y + (float)size.height + blur);
         }
-        if (b.backdrop) {
+        if (b.backdrop && b.plate) {
+            const D2D1_RECT_F &r = b.plateArea.rect;
+            add(r.left, r.top, r.right, r.bottom);
+        } else if (b.backdrop) {
             const D2D1_ELLIPSE &e = b.backdropArea;
             add(e.point.x - e.radiusX, e.point.y - e.radiusY, e.point.x + e.radiusX, e.point.y + e.radiusY);
         }
@@ -845,7 +993,8 @@ bool SkinView::Draw(ID2D1Bitmap1 *target, UINT width, UINT height, size_t slot, 
         // On its way in: faded (smoothly), and for rise and zoom also moved, easing out so that it
         // settles rather than stops.
         const float k = Arrived(panel, entrance_);
-        const float shown = opacity * (panel.enter == skin::Enter::None ? k : k * k * (3.0f - 2.0f * k));
+        const float shown =
+            opacity * std::clamp(panel.opacity, 0.0f, 1.0f) * (panel.enter == skin::Enter::None ? k : k * k * (3.0f - 2.0f * k));
         if (shown <= 0.0f) continue;
         const float eased = 1.0f - (1.0f - k) * (1.0f - k) * (1.0f - k);
         const D2D1_RECT_F area = areaOf(i);
@@ -863,7 +1012,8 @@ bool SkinView::Draw(ID2D1Bitmap1 *target, UINT width, UINT height, size_t slot, 
             dc_->PushLayer(D2D1::LayerParameters1(area, nullptr, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
                                                   D2D1::IdentityMatrix(), shown),
                            nullptr);
-        if (b.backdrop) dc_->FillEllipse(b.backdropArea, b.backdrop.Get());
+        if (b.backdrop && b.plate) dc_->FillRoundedRectangle(b.plateArea, b.backdrop.Get());
+        else if (b.backdrop) dc_->FillEllipse(b.backdropArea, b.backdrop.Get());
         // The text and the spectra each have shadow effects of their own.
         for (size_t layer = 0; layer < 2; ++layer) {
             ID2D1Bitmap1 *image = layer ? b.live.Get() : b.text.Get();

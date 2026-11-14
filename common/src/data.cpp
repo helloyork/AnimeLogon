@@ -13,7 +13,8 @@ const wchar_t kBatteryGlyphs[] = {0xE850, 0xE851, 0xE852, 0xE853, 0xE854, 0xE855
                                   0xE856, 0xE857, 0xE858, 0xE859, 0xE83F};
 const wchar_t kChargingGlyphs[] = {0xE85A, 0xE85B, 0xE85C, 0xE85D, 0xE85E, 0xE85F,
                                    0xE860, 0xE861, 0xE862, 0xE83E, 0xEA93};
-constexpr wchar_t kPlayGlyph = 0xE768, kPauseGlyph = 0xE769;
+// Solid play and pause: an outline reads as a button rather than as what is happening.
+constexpr wchar_t kPlayGlyph = 0xF5B0, kPauseGlyph = 0xF8AE;
 
 const std::vector<Variable> kVariables = {
     {L"time", Kind::Text, Source::Clock, {}, L"时间"},
@@ -26,12 +27,18 @@ const std::vector<Variable> kVariables = {
     {L"year", Kind::Text, Source::Clock, {}, L"年份"},
     {L"battery.percent", Kind::Text, Source::Battery, {}, L"电量"},
     {L"battery.remaining", Kind::Text, Source::Battery, {}, L"剩余时间"},
+    // The same time in words: 3 小时 25 分钟, 3 hr 25 min.
+    {L"battery.remaining.long", Kind::Text, Source::Battery, {}, L"剩余时间"},
+    // 正在充电 or 已接通电源 while plugged in; nothing on the battery or without one.
+    {L"battery.status", Kind::Text, Source::Battery, {}, L"充电状态"},
     {L"battery.glyph", Kind::Text, Source::Battery, {}, L"电池图标"},
     {L"battery.level", Kind::Fraction, Source::Battery, {}, L"电量进度条"},
     {L"battery.state", Kind::State, Source::Battery, {L"none", L"charging", L"discharging", L"plugged"}, L""},
     // Where the power comes from: the battery, or mains power (plugged in, or no battery at all);
     // none when Windows cannot tell.
     {L"power.source", Kind::State, Source::Battery, {L"none", L"battery", L"mains"}, L""},
+    // The source in words: 交流电源, 电池供电; nothing when Windows cannot tell.
+    {L"power.status", Kind::Text, Source::Battery, {}, L"电源状态"},
     {L"media.title", Kind::Text, Source::Media, {}, L"标题"},
     {L"media.artist", Kind::Text, Source::Media, {}, L"艺术家"},
     {L"media.album", Kind::Text, Source::Media, {}, L"专辑"},
@@ -39,9 +46,16 @@ const std::vector<Variable> kVariables = {
     {L"media.position", Kind::Text, Source::Media, {}, L"当前位置"},
     {L"media.duration", Kind::Text, Source::Media, {}, L"总时长"},
     {L"media.glyph", Kind::Text, Source::Media, {}, L"播放状态图标"},
+    // 正在播放, 已暂停, or 未在播放 when nothing plays.
+    {L"media.status", Kind::Text, Source::Media, {}, L"播放状态"},
     {L"media.progress", Kind::Fraction, Source::Media, {}, L"播放进度"},
     {L"media.state", Kind::State, Source::Media, {L"none", L"playing", L"paused"}, L""},
     {L"until.days", Kind::Text, Source::Until, {}, L"剩余天数"},
+    // The words around the number, in the clock's language: 还有 12 天, あと 12 日, 12 days; and
+    // on the day itself, 就是今天.
+    {L"until.prefix", Kind::Text, Source::Until, {}, L"前缀"},
+    {L"until.unit", Kind::Text, Source::Until, {}, L"单位"},
+    {L"until.today", Kind::Text, Source::Until, {}, L"当日文字"},
     {L"until.state", Kind::State, Source::Until, {L"none", L"ahead", L"today", L"past"}, L""},
 };
 
@@ -87,6 +101,45 @@ double PositionNow(const Media &m, uint64_t now) {
 }
 
 int Level(int percent) { return std::clamp((percent + 5) / 10, 0, 10); }
+
+// The languages the logon screen has its own words in, by a locale name such as zh-CN, zh-TW or
+// ja-JP; anything else gets English.
+enum Language { kHans, kHant, kJapanese, kEnglish };
+Language LanguageOf(const std::wstring &locale) {
+    auto starts = [&](const wchar_t *prefix) { return _wcsnicmp(locale.c_str(), prefix, wcslen(prefix)) == 0; };
+    if (starts(L"zh")) {
+        const bool traditional = locale.find(L"Hant") != std::wstring::npos || starts(L"zh-TW") || starts(L"zh-HK") ||
+                                 starts(L"zh-MO");
+        return traditional ? kHant : kHans;
+    }
+    return starts(L"ja") ? kJapanese : kEnglish;
+}
+
+// Words in the four languages, in Language order.
+using Words = const wchar_t *const[4];
+const wchar_t *Say(const Words &words, const std::wstring &locale) { return words[LanguageOf(locale)]; }
+
+Words kCharging = {L"正在充电", L"正在充電", L"充電中", L"Charging"};
+Words kPluggedIn = {L"已接通电源", L"已接上電源", L"電源に接続", L"Plugged in"};
+Words kMains = {L"交流电源", L"交流電源", L"AC 電源", L"AC power"};
+Words kOnBattery = {L"电池供电", L"電池供電", L"バッテリー駆動", L"On battery"};
+Words kPlaying = {L"正在播放", L"正在播放", L"再生中", L"Playing"};
+Words kPaused = {L"已暂停", L"已暫停", L"一時停止中", L"Paused"};
+Words kNotPlaying = {L"未在播放", L"未在播放", L"再生していません", L"Not playing"};
+Words kUntilPrefix = {L"还有", L"還有", L"あと", L""};
+Words kToday = {L"今天", L"今天", L"今日", L"Today"};
+
+// 3 小时 25 分钟, 3 hr 25 min; under an hour, the minutes alone.
+std::wstring Duration(int seconds, const std::wstring &locale) {
+    const int minutes = std::max(0, seconds) / 60, h = minutes / 60, m = minutes % 60;
+    static const wchar_t *const kHours[] = {L"%d 小时", L"%d 小時", L"%d 時間", L"%d hr"};
+    static const wchar_t *const kMinutes[] = {L"%d 分钟", L"%d 分鐘", L"%d 分", L"%d min"};
+    const Language l = LanguageOf(locale);
+    wchar_t hours[32] = L"", mins[32] = L"";
+    if (h) swprintf_s(hours, kHours[l], h);
+    if (m || !h) swprintf_s(mins, kMinutes[l], m);
+    return std::wstring(hours) + (h && (m || !h) ? L" " : L"") + mins;
+}
 
 bool IsRemoved(wchar_t c) {
     return c < 0x20 || (c >= 0x7F && c <= 0x9F) || c == 0x061C || c == 0x200E || c == 0x200F ||
@@ -196,6 +249,28 @@ bool Fill(const std::wstring &name, const Context &context, const SYSTEMTIME &lo
         if (b.state != BatteryState::None && b.percent >= 0) *out = std::to_wstring(b.percent);
     } else if (name == L"battery.remaining") {
         if (b.state == BatteryState::Discharging && b.secondsLeft > 0) *out = Clock(b.secondsLeft, true);
+    } else if (name == L"battery.remaining.long") {
+        if (b.state == BatteryState::Discharging && b.secondsLeft > 0) *out = Duration(b.secondsLeft, context.locale);
+    } else if (name == L"battery.status") {
+        if (b.state == BatteryState::Charging) *out = Say(kCharging, context.locale);
+        else if (b.state == BatteryState::Plugged) *out = Say(kPluggedIn, context.locale);
+    } else if (name == L"power.status") {
+        if (b.mains) *out = Say(kMains, context.locale);
+        else if (b.state == BatteryState::Discharging) *out = Say(kOnBattery, context.locale);
+    } else if (name == L"media.status") {
+        *out = Say(m.state == MediaState::Playing  ? kPlaying
+                   : m.state == MediaState::Paused ? kPaused
+                                                   : kNotPlaying,
+                   context.locale);
+    } else if (name == L"until.prefix" || name == L"until.unit") {
+        const long long days = context.until.valid() ? DaysTo(context.until, local) : 0;
+        if (days > 0) {
+            static const wchar_t *const kDay[] = {L"天", L"天", L"日", L"day"}, *const kDays[] = {L"天", L"天", L"日", L"days"};
+            const Language l = LanguageOf(context.locale);
+            *out = name == L"until.prefix" ? Say(kUntilPrefix, context.locale) : days == 1 ? kDay[l] : kDays[l];
+        }
+    } else if (name == L"until.today") {
+        if (context.until.valid() && DaysTo(context.until, local) == 0) *out = Say(kToday, context.locale);
     } else if (name == L"battery.glyph") {
         if (b.state != BatteryState::None && b.percent >= 0) {
             const int level = Level(b.percent);

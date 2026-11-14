@@ -73,13 +73,35 @@ Every operation but `status` and `quit` checks its parameters, then fails with `
 - **Upload stages:** `idle`, `preparingConfig`, `preparingContent`, `uploadingContent`,
   `uploadingPreview`, `committing`.
 
+## Tags
+
+Every tag a Workshop item of AnimeLogon can have is listed in [`tags.json`](tags.json), in English,
+in four groups. That one list is what the settings app filters by, what publishing sets, and what
+the Workshop's tags are set up from in Steamworks; adding a tag means adding it there, in Steamworks,
+and to `res/locales` (`steam.tag.<the tag in lowercase, spaces as underscores>`, which is how the
+settings app shows it: `Custom components` is `steam.tag.custom_components`).
+
+| Group | Tags | Which |
+|---|---|---|
+| `type` | `Video`, `Picture` | The wallpaper: exactly one. |
+| `resolution` | `1080p`, `1440p`, `4K`, `Ultrawide` | By the wallpaper's height: `1080p` from 1080 pixels, `1440p` from 1440, `4K` from 2160; none below 1080. `Ultrawide` as well when it is at least 2.2 times as wide as it is high. |
+| `content` | `Sound`, `Components`, `Custom components` | `Sound`: the wallpaper has sound. `Components`: the theme shows components. `Custom components`: the `.altheme` carries components of its own (`components/<name>.xml` entries), not only the built-in ones. Publishing sets these from the theme and the package; the author does not choose them. |
+| `rating` | `Everyone`, `Questionable`, `Mature` | The age rating: exactly one, chosen by the author when publishing. |
+
+Tags are matched as they are written, so items are published with these spellings only.
+
+**An item's age rating** is its strictest rating tag. An item without one counts as `Mature` (anyone
+who owns the app can upload an item without the settings app), and so does an item with a content
+descriptor, whatever its tags say. `query` and `details` give it as `rating`; `query` shows only
+the ratings asked for.
+
 ## Item
 
 What `query` and `details` give for an item:
 
 ```json
 {"id": "3100000001", "title": "夜樱 Night Sakura", "description": "...", "owner": "76561198000000101",
- "preview": "https://...", "tags": ["Video", "4K", "Sound"], "descriptors": [],
+ "preview": "https://...", "tags": ["Video", "4K", "Sound", "Everyone"], "descriptors": [], "rating": "Everyone",
  "votesUp": 1840, "votesDown": 32, "score": 0.97, "subscriptions": 25300, "favorites": 4100,
  "fileSize": 182000000, "timeCreated": 1760000000, "timeUpdated": 1762000000,
  "subscribed": true, "installed": true}
@@ -89,6 +111,7 @@ What `query` and `details` give for an item:
   In `query` it is Steam's short description, the first 255 bytes (the helper drops a character cut
   in half); `details` gives the whole of it.
 - `preview` is the URL of the main preview picture on Steam's servers; empty when there is none.
+- `rating` is the item's age rating, as "Tags" decides it: `Everyone`, `Questionable` or `Mature`.
 - `score` is from 0 to 1. `subscriptions` is the current subscribers, `favorites` the favourites.
 - `fileSize` is the size of the item's files, in bytes.
 - `subscribed` and `installed` are this computer's state of the item.
@@ -100,7 +123,7 @@ What `query` and `details` give for an item:
 
 ```
 → {"id":1,"op":"status"}
-← {"id":1,"ok":true,"protocol":1,"steam":"ok","appid":480,"loggedOn":true,"ownsApp":true}
+← {"id":1,"ok":true,"protocol":2,"steam":"ok","appid":480,"loggedOn":true,"ownsApp":true}
 ```
 
 - `steam`: `ok`, `not_running`, `missing_dll`, `no_appid` or `init_failed`; with `message` (English)
@@ -115,7 +138,7 @@ Browses the Workshop: every item of the app that can be subscribed to.
 
 ```
 → {"id":2,"op":"query","sort":"trend","trendDays":7,"text":"sakura","requiredTags":["Video"],
-   "excludedTags":["Sound"],"matchAnyTag":false,"includeMature":false,"page":1,"perPage":30}
+   "excludedTags":["Sound"],"matchAnyTag":false,"ratings":["Everyone"],"page":1,"perPage":30}
 ← {"id":2,"ok":true,"total":128,"next":2,"items":[...],"hidden":1}
 ```
 
@@ -126,15 +149,18 @@ Browses the Workshop: every item of the app that can be subscribed to.
 | `text` | none | Matched against titles, descriptions and tags. |
 | `requiredTags`, `excludedTags` | none | Arrays of tag names. |
 | `matchAnyTag` | false | An item needs any of `requiredTags` rather than all. |
-| `includeMature` | false | False leaves out every item with a content descriptor. |
+| `ratings` | `["Everyone"]` | The age ratings shown, one or more of `Everyone`, `Questionable`, `Mature`. Steam leaves out the items tagged with the others; the helper leaves out each item whose rating (see "Tags") is not among them. An item with several rating tags shows only when all of them are asked for. |
 | `page`, `perPage` | 1, 50 | Paging by number; `perPage` is 1 to 50. |
 | `cursor` | none | Paging by cursor instead: `"*"` for the first page, then the answer's `next`. Steam's pages are always 50 items here. |
 
-- `total` is how many items match, by Steam's count, before mature content is left out.
+- `total` is how many items match, by Steam's count: after the ratings not asked for are left out by
+  their tags, before the helper leaves out the rest.
 - `next` is what to ask for to get the following page, or `null` after the last: a page number when
   paging by number, a cursor string when paging by cursor.
-- `hidden` is how many items of this page were left out for their content descriptors, so a page can
-  hold fewer than `perPage` items. Steam has no query for descriptors; the helper filters each page.
+- `hidden` is how many items of this page the helper left out for their rating: items without a
+  rating tag, and items with a content descriptor, when `Mature` is not asked for. A page can then
+  hold fewer than `perPage` items. Steam has no query for a missing tag or for descriptors, so the
+  helper filters each page.
 - Steam's pages hold 50 items; a page of another size may take two of Steam's, which the helper asks
   for in turn. Sorting the same query twice can differ slightly as votes come in.
 
@@ -168,12 +194,12 @@ What this account subscribes to, with each item's state on this computer:
      {"id":"3100000001",
       "state":{"subscribed":true,"installed":true,"needsUpdate":false,"downloading":false,"downloadPending":false},
       "folder":"D:\\Steam\\steamapps\\workshop\\content\\<appid>\\3100000001","sizeOnDisk":182000000,"timeStamp":1762000000,
-      "title":"夜樱 Night Sakura","timeUpdated":1762000000,"preview":"https://...","descriptors":[]}]}
+      "title":"夜樱 Night Sakura","timeUpdated":1762000000,"preview":"https://...","descriptors":[],"rating":"Everyone"}]}
 ```
 
 - `folder`, `sizeOnDisk` and `timeStamp` (when the files on disk were updated) are there only for an
   item with files on this computer.
-- `title`, `timeUpdated`, `preview` and `descriptors` come from a query of Steam's servers, 50 items
+- `title`, `timeUpdated`, `preview`, `descriptors` and `rating` come from a query of Steam's servers, 50 items
   at a time. When that query fails (offline, say), the answer still comes, with `"details": false`
   and those members missing.
 - An item whose `timeUpdated` is later than the one the settings app imported has an update.
@@ -196,7 +222,7 @@ Creates a Workshop item, or updates one, and uploads a folder to it.
 
 ```
 → {"id":7,"op":"publish","folder":"C:\\Users\\me\\AppData\\Local\\Temp\\export","preview":"C:\\...\\preview.jpg",
-   "title":"My theme","description":"...","visibility":"public","tags":["Video","4K"],
+   "title":"My theme","description":"...","visibility":"public","tags":["Video","4K","Mature"],
    "descriptors":["violenceGore"],"changeNote":"First version"}
 ← {"event":"progress","op":"publish","request":7,"itemId":"3100000100","stage":"uploadingContent","done":271000,"total":1000000}
 ← {"id":7,"ok":true,"itemId":"3100000100","created":true,"needsLegalAgreement":false}
@@ -210,7 +236,7 @@ Creates a Workshop item, or updates one, and uploads a folder to it.
 | `title` | Required for a new item; 1 to 128 bytes of UTF-8. |
 | `description` | Up to 7999 bytes of UTF-8. |
 | `visibility` | A visibility name. |
-| `tags` | Every tag of the item: printable, no comma, at most 255 bytes each. |
+| `tags` | Every tag of the item: printable, no comma, at most 255 bytes each. The settings app sends the tags of "Tags", one rating among them. |
 | `descriptors` | Every content descriptor of the item, by name. On an update, those not listed are taken off. |
 | `changeNote` | Shown in the item's change notes. |
 
@@ -262,7 +288,13 @@ To run the settings app's Workshop pages against it:
 3. Set `ANIMELOGON_FAKE_STEAM` to the fixture's full path in the environment the settings app starts
    in; the helper inherits it. Optionally set `ANIMELOGON_FAKE_STEAM_LOG` to a file that gets one line
    per notable call (init, shutdown, download, create, every field of an update, submit).
-4. Start the helper with any app id but 0, e.g. `--appid 480`.
+4. Start the helper with any app id but 0, e.g. `--appid 480`. The settings app starts it with the
+   app id in `ANIMELOGON_STEAM_APPID` when that is set, so set it to 480 as well.
+
+While `ANIMELOGON_FAKE_STEAM` is set, the settings app also serves the fixture's folder as
+`https://steam-fixture.animelogon.invalid/`, which its page may show pictures from: a fixture item's
+`preview` can name a picture beside the fixture, as `steam/dev/fixture.json` does
+(`previews\<id>.jpg`; put pictures there, or the page shows a plain frame).
 
 The stand-in reads the fixture when the helper connects. Subscribing, downloading and publishing
 change its items in memory only.
@@ -298,13 +330,13 @@ change its items in memory only.
   subscribing, unsubscribing, creating an item or submitting an upload, or the end of a download.
 - Rankings: `trend` sorts by the item's `trend` (default: its `subscriptions`), `recent` by
   `timeCreated`, `subscribed` by `subscriptions`, `rating` by `score`. Pages hold 50 items; cursors
-  are `o<offset>`. `text` matches titles, descriptions and tags without regard to ASCII case.
+  are `o<offset>`. `text` matches titles, descriptions and tags without regard to ASCII case, and so
+  do required and excluded tags.
 - `descriptors` are numbers (1 to 5) or the names above. `folder` is relative to the fixture's
   folder unless it is a full path; an installed item without one is in `content\<id>` there.
 - A publish applies the update's fields to the item when the upload ends, and fails with
   `FileNotFound` when the content folder does not exist.
-- Tag names in `steam/dev/fixture.json` are placeholders until the Workshop's tags are set in
-  Steamworks; preview URLs there are empty.
+- Tags in `steam/dev/fixture.json` are from the list above (see Tags).
 
 ## Checking against the SDK
 
@@ -325,4 +357,7 @@ CI, and without adding any of its files here):
 - that `SteamAPI_ManualDispatch_Init` belongs after `SteamAPI_Init`, and that connecting again after
   `SteamAPI_Shutdown` (when Steam was closed and started again) works;
 - that setting `SteamAppId` is enough for a program Steam did not start, or whether
-  `SteamAPI_RestartAppIfNecessary` is needed.
+  `SteamAPI_RestartAppIfNecessary` is needed;
+- the hosts of the preview URLs Steam gives (`preview` and `previews`), which the settings page's
+  Content-Security-Policy must allow (`app/web/index.html`): it allows
+  `https://images.steamusercontent.com` and `https://steamuserimages-a.akamaihd.net`.

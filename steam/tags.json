@@ -1,0 +1,6 @@
+{
+  "type": ["Video", "Picture"],
+  "resolution": ["1080p", "1440p", "4K", "Ultrawide"],
+  "content": ["Sound", "Components", "Custom components"],
+  "rating": ["Everyone", "Questionable", "Mature"]
+}

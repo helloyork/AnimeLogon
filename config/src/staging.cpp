@@ -218,7 +218,7 @@ Result Wallpaper(const std::wstring &source, const std::wstring &dir, const std:
 }
 
 Result Package(const std::wstring &source, const std::wstring &dir, const std::atomic<bool> &cancel,
-               const Progress &progress) {
+               const Progress &progress, const std::wstring &title) {
     package::Reader reader;
     std::wstring why;
     if (!reader.Open(source, &why)) {
@@ -238,6 +238,10 @@ Result Package(const std::wstring &source, const std::wstring &dir, const std::a
     }
     if (!kTakesScenes && t.wallpaper == L"wallpaper.alscene")
         return Error(animelogon::i18n::Tr("package.error.scene_wallpaper"));
+    if (!title.empty()) {
+        const std::wstring name = ThemeName(title);
+        if (!name.empty()) t.name = name;
+    }
 
     // The files the archive carries must be the ones theme.xml names.
     const package::Entry *wallpaper = reader.Wallpaper();

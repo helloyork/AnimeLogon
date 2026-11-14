@@ -69,6 +69,12 @@ bool ParseThemeOverride(std::wstring_view rest, std::wstring_view value, Setting
         s->themeOverrides[themeId].wakeSeconds = seconds;
         return true;
     }
+    if (what == L"brightness") {
+        float brightness = kBrightness;
+        if (!ParseBrightness(value, &brightness)) return false;
+        s->themeOverrides[themeId].brightness = brightness;
+        return true;
+    }
     const size_t inner = what.find(L'.');
     if (inner == std::wstring_view::npos) return false;
     const std::wstring instance(what.substr(0, inner));
@@ -158,6 +164,29 @@ bool ParseWakeSeconds(std::wstring_view text, float *out) {
     if (end != copy.c_str() + copy.size() || !(v >= kWakeSecondsMin && v <= kWakeSecondsMax)) return false;
     *out = (float)v;
     return true;
+}
+
+bool ParseBrightness(std::wstring_view text, float *out) {
+    if (text.empty() || text.size() > 8) return false;
+    const std::wstring copy(text);
+    wchar_t *end = nullptr;
+    const double v = std::wcstod(copy.c_str(), &end);
+    // The float of the lower bound is a hair below 0.1, so 0.1 itself passes.
+    if (end != copy.c_str() + copy.size() || !(v >= kBrightnessMin - 1e-6 && v <= kBrightness)) return false;
+    *out = (float)v;
+    return true;
+}
+
+void ApplyBrightness(uint8_t *pixels, size_t count, int stride, float brightness) {
+    if (brightness >= 1.0f) return;
+    // One multiply per byte value, looked up: the same rounding everywhere it is applied.
+    uint8_t table[256];
+    for (int v = 0; v < 256; ++v) table[v] = (uint8_t)std::min(255, (int)(v * brightness + 0.5f));
+    for (size_t i = 0; i < count; ++i, pixels += stride) {
+        pixels[0] = table[pixels[0]];
+        pixels[1] = table[pixels[1]];
+        pixels[2] = table[pixels[2]];
+    }
 }
 
 const wchar_t *ToString(ComponentDisplays displays) { return kComponentDisplays[(int)displays]; }
@@ -293,6 +322,7 @@ void AppendOverrides(const Settings &s, std::wstring *out) {
         if (o.fit) *out += prefix + L"fit = " + ToString(*o.fit) + L"\r\n";
         if (o.wake) *out += prefix + L"wake = " + ToString(*o.wake) + L"\r\n";
         if (o.wakeSeconds) *out += prefix + L"wake-duration = " + Format(L"%g", *o.wakeSeconds) + L"\r\n";
+        if (o.brightness) *out += prefix + L"brightness = " + Format(L"%g", *o.brightness) + L"\r\n";
         for (const auto &[key, value] : o.wallpaperValues)
             *out += prefix + L"wallpaper." + key + L" = " + value + L"\r\n";
         for (const auto &[instance, io] : o.instances) {

@@ -211,7 +211,7 @@ export function LockPreview({ theme: id, ratio }: { theme: string; ratio?: numbe
         <div className="lock-fill" style={leaving}>
           <img className="lock-fill" src={lockUrl(id, 'still', query)} alt="" />
           {video && (
-            <WallpaperVideo wallpaper={t.wallpaperRef} fit={t.fit} fade={false} onPlaying={() => setStarted(true)}
+            <WallpaperVideo wallpaper={t.wallpaperRef} fit={t.fit} brightness={t.brightness} fade={false} onPlaying={() => setStarted(true)}
               style={fade(started, 0)} />
           )}
           {scene && (
