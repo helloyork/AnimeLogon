@@ -64,6 +64,27 @@ TEST(GateNeverCoversAShutdown) {
     CHECK(Decide(shut) == Gate::Hold);
 }
 
+TEST(GateWaitsForTheSessionToReachItsLogonScreen) {
+    // Readings from Windows 11 26200 with a real cumulative update, 2026-11-14.
+    GateInput update = LogonDesktop(false, false);  // "You're 19% there", first boot after
+    update.session.state = WTSConnectQuery;
+    CHECK(Decide(update) == Gate::NotYet);
+    GateInput down = LogonDesktop(false, false);  // the shutdown after alt was signed out
+    down.session.state = WTSDown;
+    CHECK(Decide(down) == Gate::NotYet);
+    GateInput boot = LogonDesktop(false, false);  // the real logon screen after the update
+    boot.session.state = WTSConnected;
+    CHECK(Decide(boot) == Gate::GoLive);
+    GateInput lock = LogonDesktop(true, true);  // a lock
+    lock.session.state = WTSActive;
+    CHECK(Decide(lock) == Gate::GoLive);
+    GateInput consent = LogonDesktop(true, false);  // UAC: Active and unlocked
+    consent.session.state = WTSActive;
+    CHECK(Decide(consent) == Gate::Hold);
+    // A state that could not be read decides as before.
+    CHECK(Decide(LogonDesktop(false, false)) == Gate::GoLive);
+}
+
 TEST(SessionRecordSeesASignOutInPlace) {
     Record r;
     CHECK(r.Update(1, false, false) == Record::Change::NewSession);  // boot logon screen

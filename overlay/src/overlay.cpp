@@ -322,15 +322,19 @@ bool WaitForLogonScreen(Presenter &presenter, Scenes &scenes, bool *dismissed) {
         const screen::Gate gate = screen::Decide(in);
         if (gate == screen::Gate::GoLive) {
             g_overlay.seenAt = GetTickCount64();
-            ALOG(L"overlay: logon screen (signed in %d, locked %d, lock notified %d, had a user %d) over %s",
-                 s.signedIn, s.locked, g_overlay.lockNotified, g_overlay.hadUser, screen::DescribeDesktop().c_str());
+            ALOG(L"overlay: logon screen (signed in %d, locked %d, lock notified %d, had a user %d, session state %d) "
+                 L"over %s",
+                 s.signedIn, s.locked, g_overlay.lockNotified, g_overlay.hadUser, s.state,
+                 screen::DescribeDesktop().c_str());
             return true;
         }
-        if (gate != said && (gate == screen::Gate::GoingDown || gate == screen::Gate::SignedOutInPlace)) {
-            ALOG(L"overlay: the logon desktop is up but %s -- staying parked; on it: %s",
-                 gate == screen::Gate::GoingDown ? L"Windows is shutting down or restarting"
-                                                 : L"this session's user was signed out in place (a shutdown or restart)",
-                 screen::DescribeDesktop().c_str());
+        if (gate != said && gate != screen::Gate::Hold) {
+            const wchar_t *why = gate == screen::Gate::GoingDown ? L"Windows is shutting down or restarting"
+                                 : gate == screen::Gate::SignedOutInPlace
+                                     ? L"this session's user was signed out in place (a shutdown or restart)"
+                                     : L"the session is not at its logon screen (an update screen)";
+            ALOG(L"overlay: the logon desktop is up but %s -- staying parked; session state %d; on it: %s", why,
+                 s.state, screen::DescribeDesktop().c_str());
         }
         said = gate;
         Sleep(32);
@@ -765,6 +769,7 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
     ULONGLONG darkMs = 0, darkSince = 0;
     bool wasOn = true;
     int awayTicks = 0;
+    int notLogonTicks = 0;  // exit checks in a row with the session not at its logon screen
     // What reached the glass on the first display, for the log.
     int shownFrames = 0;
     double firstT = -1.0, lastT = 0.0;
@@ -976,6 +981,13 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
             }
             if (g_overlay.hadUser && s.console && !s.signedIn) {
                 ALOG(L"overlay: this session's user was signed out in place (a shutdown or restart) -- off the screen");
+                end = LiveEnd::Dismissed;
+                break;
+            }
+            // Two readings a second apart, so a passing state never takes the video away.
+            notLogonTicks = s.AtLogonStage() ? 0 : notLogonTicks + 1;
+            if (notLogonTicks >= 2) {
+                ALOG(L"overlay: the session left its logon screen (state %d) -- off the screen", s.state);
                 end = LiveEnd::Dismissed;
                 break;
             }

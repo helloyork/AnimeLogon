@@ -29,8 +29,10 @@ Session ReadSession(DWORD session) {
     LPWSTR raw = nullptr;
     if (WTSQuerySessionInformationW(WTS_CURRENT_SERVER_HANDLE, session, WTSSessionInfoEx, &raw, &n) && raw) {
         const auto *ex = reinterpret_cast<const WTSINFOEXW *>(raw);
-        if (n >= sizeof(WTSINFOEXW) && ex->Level == 1)
+        if (n >= sizeof(WTSINFOEXW) && ex->Level == 1) {
             s.locked = ex->Data.WTSInfoExLevel1.SessionFlags == WTS_SESSIONSTATE_LOCK;
+            s.state = static_cast<int>(ex->Data.WTSInfoExLevel1.SessionState);
+        }
         WTSFreeMemory(raw);
     }
     return s;
@@ -117,7 +119,9 @@ Gate Decide(const GateInput &in) {
     // A session that had a user and now has none, still on the console, is a shutdown or
     // restart: signing out ends the session and draws the next logon screen in a new one.
     if (!in.session.signedIn && in.hadUser) return Gate::SignedOutInPlace;
-    if (!in.session.signedIn || in.session.locked || in.lockNotified) return Gate::GoLive;
+    const bool logonScreen = !in.session.signedIn || in.session.locked || in.lockNotified;
+    if (logonScreen && !in.session.AtLogonStage()) return Gate::NotYet;
+    if (logonScreen) return Gate::GoLive;
     return Gate::Hold;
 }
 
