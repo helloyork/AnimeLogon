@@ -10,6 +10,10 @@ on:
 permissions:
   contents: write
 
+defaults:
+  run:
+    shell: pwsh
+
 jobs:
   release:
     runs-on: windows-latest
@@ -30,7 +34,6 @@ jobs:
       # v1.1.0-beta1 is version 1.1.0 with the suffix -beta1. The numbers must be the ones in
       # CMakeLists.txt, so that a tag cannot ship programs that carry another version.
       - name: Read the version from the tag
-        shell: pwsh
         run: |
           if ($env:TAG -notmatch '^v(\d+\.\d+\.\d+)(-[0-9A-Za-z.]+)?$') {
             throw "Tag $env:TAG is not v<major>.<minor>.<patch> with an optional -<suffix>"
@@ -48,7 +51,6 @@ jobs:
       # whose commits the Build workflow has already built and tested, so the tests and tools are
       # left out here.
       - name: Build
-        shell: pwsh
         run: |
           $common = @('-DBUILD_TESTING=OFF', "-DANIMELOGON_BUILD=${{ github.run_number }}", "-DANIMELOGON_VERSION_SUFFIX=$env:SUFFIX")
           cmake --preset arm64 @common
@@ -66,7 +68,6 @@ jobs:
       # that anyone can read a crash reported against this release; the project is open source,
       # so they are published with it. The log lists every file's SHA-256, as SHA256SUMS.txt does.
       - name: Package
-        shell: pwsh
         run: |
           $dist = (New-Item -ItemType Directory -Force dist).FullName
           Copy-Item build/x64/bin/Release/install.exe (Join-Path $dist "AnimeLogon-$env:VERSION-setup.exe") -ErrorAction Stop
@@ -82,7 +83,6 @@ jobs:
 
       # A draft, so that its files can be checked and its notes written before anyone sees it.
       - name: Create a draft release
-        shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

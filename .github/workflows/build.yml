@@ -4,6 +4,7 @@ on:
   push:
     branches: [master, develop]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -12,7 +13,35 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+defaults:
+  run:
+    shell: pwsh
+
 jobs:
+  # The public formats against the reader that enforces them: the component skill's examples are
+  # accepted and its attribute reference is the one the reader generates (tools/CMakeLists.txt).
+  # Only the checker is built, so this answers in a few minutes, before the full builds below.
+  interfaces:
+    name: interfaces
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      # Configuring needs Node.js and npm (app/CMakeLists.txt), though nothing here runs them.
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - name: Configure
+        run: cmake --preset x64
+
+      - name: Build the checker
+        run: cmake --build --preset x64-release --target component_check
+
+      - name: Check the component format's examples and reference
+        run: ctest --preset x64-release --tests-regex "^component_"
+
   # ARM64 is cross-built on an x64 runner, so its tests are built but not run. Its programs go to
   # the x64 job, whose install.exe carries them as a release's does.
   arm64:
@@ -73,7 +102,6 @@ jobs:
           path: arm64-programs
 
       - name: Configure
-        shell: pwsh
         run: cmake --preset x64 -DANIMELOGON_BUILD=${{ github.run_number }} "-DANIMELOGON_ARM64_PAYLOAD_DIR=$((Resolve-Path arm64-programs).Path)"
 
       - name: Build
