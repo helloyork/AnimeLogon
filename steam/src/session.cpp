@@ -49,6 +49,22 @@ const Named kPreviewTypes[] = {{steam::kPreviewImage, L"image"},
                                {steam::kPreviewEnvironmentMapCross, L"environmentMapCross"},
                                {steam::kPreviewEnvironmentMapLatLong, L"environmentMapLatLong"},
                                {steam::kPreviewClip, L"clip"}};
+// The age ratings an item is tagged with (steam/PROTOCOL.md "Tags"), mildest first.
+enum Rating { kEveryone, kQuestionable, kMature, kRatings };
+const wchar_t *const kRatingNames[kRatings] = {L"Everyone", L"Questionable", L"Mature"};
+
+// An item's age rating: the strictest rating tag it has. Anyone who owns the app can upload an item
+// without our publishing dialog, so an item without a rating tag counts as Mature, and so does
+// one whose author marked mature content with a content descriptor, whatever its tags say.
+Rating RatingOf(const std::vector<std::wstring> &tags, const std::vector<int32_t> &descriptors) {
+    if (!descriptors.empty()) return kMature;
+    int strictest = -1;
+    for (const std::wstring &tag : tags)
+        for (int r = 0; r < kRatings; ++r)
+            if (EqualsNoCase(tag, kRatingNames[r])) strictest = std::max(strictest, r);
+    return strictest < 0 ? kMature : (Rating)strictest;
+}
+
 const Named kStages[] = {{steam::kUpdateInvalid, L"idle"},
                          {steam::kUpdatePreparingConfig, L"preparingConfig"},
                          {steam::kUpdatePreparingContent, L"preparingContent"},
@@ -209,7 +225,8 @@ struct Session::QueryJob {
     uint32_t trendDays = 7;
     std::string text;
     std::vector<std::string> required, excluded;
-    bool matchAny = false, includeMature = false;
+    bool matchAny = false;
+    bool ratings[kRatings] = {true, false, false};  // the ratings shown; the others are left out
     bool byCursor = false;
     std::string cursor;
     // Paging by number: our page of perPage items covers [first, first + perPage) of all the
@@ -512,7 +529,17 @@ void Session::Query(long long request, const json::Value &args) {
     for (const std::wstring &t : required) job->required.push_back(ToUtf8(t));
     for (const std::wstring &t : excluded) job->excluded.push_back(ToUtf8(t));
     job->matchAny = args[L"matchAnyTag"].Bool(false);
-    job->includeMature = args[L"includeMature"].Bool(false);
+    std::vector<std::wstring> ratings;
+    if (!ParseStrings(args[L"ratings"], &ratings) || (!args[L"ratings"].IsNull() && ratings.empty()))
+        return Fail(request, L"bad_request", L"\"ratings\" is an array of one or more of Everyone, Questionable and Mature");
+    if (!ratings.empty()) {
+        std::fill(std::begin(job->ratings), std::end(job->ratings), false);
+        for (const std::wstring &name : ratings) {
+            const auto r = std::find_if(std::begin(kRatingNames), std::end(kRatingNames), [&](const wchar_t *n) { return name == n; });
+            if (r == std::end(kRatingNames)) return Fail(request, L"bad_request", L"no age rating \"" + name + L"\"");
+            job->ratings[r - std::begin(kRatingNames)] = true;
+        }
+    }
     const json::Value &cursor = args[L"cursor"];
     if (!cursor.IsNull()) {
         if (!cursor.IsString() || cursor.Str().empty())
@@ -540,6 +567,9 @@ void Session::SendQuery(const std::shared_ptr<QueryJob> &job) {
     if (!job->text.empty()) api_.SteamAPI_ISteamUGC_SetSearchText(ugc_, query, job->text.c_str());
     for (const std::string &t : job->required) api_.SteamAPI_ISteamUGC_AddRequiredTag(ugc_, query, t.c_str());
     for (const std::string &t : job->excluded) api_.SteamAPI_ISteamUGC_AddExcludedTag(ugc_, query, t.c_str());
+    // The ratings not shown are left out by Steam; what has no rating tag is left out below.
+    for (int r = 0; r < kRatings; ++r)
+        if (!job->ratings[r]) api_.SteamAPI_ISteamUGC_AddExcludedTag(ugc_, query, ToUtf8(kRatingNames[r]).c_str());
     if (job->matchAny) api_.SteamAPI_ISteamUGC_SetMatchAnyTag(ugc_, query, true);
     api_.SteamAPI_ISteamUGC_SetReturnLongDescription(ugc_, query, false);
     api_.SteamAPI_ISteamUGC_SetReturnAdditionalPreviews(ugc_, query, false);
@@ -580,7 +610,7 @@ void Session::SendQuery(const std::shared_ptr<QueryJob> &job) {
                       (uint64_t)job->page * job->perPage < job->total ? w.Int(job->page + 1) : w.Null();
                   w.Key(L"items").BeginArray();
                   for (const Item &item : job->items) {
-                      if (!job->includeMature && !item.descriptors.empty()) {
+                      if (!job->ratings[RatingOf(item.tags, item.descriptors)]) {
                           ++hidden;
                           continue;
                       }
@@ -713,6 +743,7 @@ void Session::SubscribedDetails(const std::shared_ptr<SubscribedJob> &job) {
                 w.Key(L"descriptors").BeginArray();
                 for (int32_t d : e.item.descriptors) w.String(NameOf(kDescriptors, d));
                 w.EndArray();
+                w.Member(L"rating", kRatingNames[RatingOf(e.item.tags, e.item.descriptors)]);
             }
             w.EndObject();
         }
@@ -927,6 +958,7 @@ void Session::WriteItem(json::Writer &w, const Item &item, bool full) {
     w.Key(L"descriptors").BeginArray();
     for (int32_t d : item.descriptors) w.String(NameOf(kDescriptors, d));
     w.EndArray();
+    w.Member(L"rating", kRatingNames[RatingOf(item.tags, item.descriptors)]);
     w.Key(L"votesUp").Int(item.votesUp).Key(L"votesDown").Int(item.votesDown);
     w.Key(L"score").Number(std::round((double)item.score * 10000) / 10000);
     w.Key(L"subscriptions").Int((long long)item.subscriptions).Key(L"favorites").Int((long long)item.favorites);

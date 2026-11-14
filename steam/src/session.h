@@ -21,7 +21,7 @@ class Writer;
 namespace steamhelper {
 
 // The protocol's version, in "status". Raised when a request or answer changes incompatibly.
-constexpr int kProtocolVersion = 1;
+constexpr int kProtocolVersion = 2;
 
 class Session {
 public:
