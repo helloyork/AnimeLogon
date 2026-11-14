@@ -8,6 +8,8 @@
 
 #include <windows.h>
 
+#include <string>
+
 namespace screen {
 
 // Is the Winlogon desktop the one on the glass?
@@ -25,6 +27,10 @@ bool CredentialMonitor(RECT *monitor);
 
 // Windows' shutdown screen is on this desktop.
 bool ShutdownUnderway();
+
+// The visible top-level windows of this desktop, topmost first (image, class, rectangle), for the
+// log: what the video is about to cover, or did.
+std::wstring DescribeDesktop(size_t most = 6);
 
 // How the parked process decides to go live.
 struct GateInput {

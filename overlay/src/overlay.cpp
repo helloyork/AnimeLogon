@@ -322,12 +322,15 @@ bool WaitForLogonScreen(Presenter &presenter, Scenes &scenes, bool *dismissed) {
         const screen::Gate gate = screen::Decide(in);
         if (gate == screen::Gate::GoLive) {
             g_overlay.seenAt = GetTickCount64();
+            ALOG(L"overlay: logon screen (signed in %d, locked %d, lock notified %d, had a user %d) over %s",
+                 s.signedIn, s.locked, g_overlay.lockNotified, g_overlay.hadUser, screen::DescribeDesktop().c_str());
             return true;
         }
         if (gate != said && (gate == screen::Gate::GoingDown || gate == screen::Gate::SignedOutInPlace)) {
-            ALOG(L"overlay: the logon desktop is up but %s -- staying parked",
+            ALOG(L"overlay: the logon desktop is up but %s -- staying parked; on it: %s",
                  gate == screen::Gate::GoingDown ? L"Windows is shutting down or restarting"
-                                                 : L"this session's user was signed out in place (a shutdown or restart)");
+                                                 : L"this session's user was signed out in place (a shutdown or restart)",
+                 screen::DescribeDesktop().c_str());
         }
         said = gate;
         Sleep(32);

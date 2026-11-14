@@ -80,6 +80,36 @@ bool ShutdownUnderway() {
     return false;
 }
 
+std::wstring DescribeDesktop(size_t most) {
+    std::wstring out;
+    size_t n = 0;
+    const DWORD self = GetCurrentProcessId();
+    for (HWND w = GetTopWindow(nullptr); w && n < most; w = GetWindow(w, GW_HWNDNEXT)) {
+        if (!IsWindowVisible(w)) continue;
+        DWORD pid = 0;
+        GetWindowThreadProcessId(w, &pid);
+        if (pid == self) continue;
+        RECT r{};
+        GetWindowRect(w, &r);
+        if (r.right <= r.left || r.bottom <= r.top) continue;
+        wchar_t cls[64] = L"";
+        GetClassNameW(w, cls, ARRAYSIZE(cls));
+        wchar_t image[MAX_PATH] = L"?";
+        if (HANDLE p = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid)) {
+            DWORD len = ARRAYSIZE(image);
+            if (!QueryFullProcessImageNameW(p, 0, image, &len)) wcscpy_s(image, L"?");
+            CloseHandle(p);
+        }
+        const wchar_t *name = wcsrchr(image, L'\\');
+        wchar_t line[256];
+        swprintf_s(line, L"%s[%s '%s' %ld,%ld %ldx%ld]", out.empty() ? L"" : L" ", name ? name + 1 : image, cls, r.left,
+                   r.top, r.right - r.left, r.bottom - r.top);
+        out += line;
+        ++n;
+    }
+    return out.empty() ? L"(nothing visible)" : out;
+}
+
 Gate Decide(const GateInput &in) {
     if (!in.secure || !in.session.console) return Gate::Hold;
     if (in.goingDown) return Gate::GoingDown;
