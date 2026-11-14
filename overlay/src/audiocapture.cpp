@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <mutex>
@@ -28,6 +29,11 @@ constexpr DWORD kPollMs = 10;
 // No samples for this long means the device is playing nothing.
 constexpr ULONGLONG kQuietMs = 30;
 constexpr ULONGLONG kRetryMs = 3000;
+// When the log says what was heard in the first seconds.
+constexpr ULONGLONG kReportMs = 5000;
+// At boot a USB device can take seconds to appear: the signed-in person's device is waited for
+// this long before the system's default is listened to instead (as AudioSystem waits to play).
+constexpr ULONGLONG kDeviceWaitMs = 12000;
 
 enum class Encoding { Float32, Int16, Int24, Int32, Unknown };
 
@@ -111,8 +117,9 @@ void AudioCapture::Shared::Listen() {
     const HRESULT com = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     bool failedBefore = false;
     std::vector<float> mono;
+    const ULONGLONG started = GetTickCount64();
     while (!stop) {
-        // The device the signed-in person's sound goes to, if it is there; else the system's default.
+        // The device the signed-in person's sound goes to, once it is there; else the system's default.
         ComPtr<IMMDeviceEnumerator> devices;
         ComPtr<IMMDevice> device;
         const std::wstring wanted = AudioSystem::ListeningDevice();
@@ -121,10 +128,15 @@ void AudioCapture::Shared::Listen() {
         if (SUCCEEDED(hr) && !wanted.empty()) {
             DWORD state = 0;
             if (SUCCEEDED(devices->GetDevice(wanted.c_str(), &device)) && SUCCEEDED(device->GetState(&state)) &&
-                state == DEVICE_STATE_ACTIVE)
+                state == DEVICE_STATE_ACTIVE) {
                 which = L"the signed-in user's output";
-            else
+            } else {
                 device.Reset();
+                if (GetTickCount64() - started < kDeviceWaitMs) {
+                    if (Stopping(250)) break;
+                    continue;
+                }
+            }
         }
         if (SUCCEEDED(hr) && !device) hr = devices->GetDefaultAudioEndpoint(eRender, eConsole, &device);
         ComPtr<IAudioClient> client;
@@ -152,6 +164,17 @@ void AudioCapture::Shared::Listen() {
         ALOG(L"spectrum: listening to %s (%lu Hz, %u channel(s))", which, format->nSamplesPerSec, format->nChannels);
         failedBefore = false;
         ULONGLONG heard = GetTickCount64();
+        // What was heard, for the log: a line a few seconds in, and one when listening ends.
+        const ULONGLONG opened = heard;
+        size_t packets = 0, silent = 0;
+        float loudest = 0.0f;
+        bool reported = false;
+        auto report = [&](const wchar_t *when) {
+            // Windows hands a loopback only silence on the logon screen while nobody is signed in,
+            // however loud the device plays (packets "marked silent"); this line says so.
+            ALOG(L"spectrum: %s, %zu packet(s) of samples (%zu marked silent), the loudest %.0f dBFS", when, packets, silent,
+                 loudest > 0.0f ? 20.0f * std::log10(loudest) : -999.0f);
+        };
         while (!stop) {
             Sleep(kPollMs);
             UINT32 packet = 0;
@@ -163,10 +186,13 @@ void AudioCapture::Shared::Listen() {
                 DWORD flags = 0;
                 hr = capture->GetBuffer(&data, &frames, &flags, nullptr, nullptr);
                 if (FAILED(hr)) break;
+                ++packets;
                 if (flags & AUDCLNT_BUFFERFLAGS_SILENT) {
+                    ++silent;
                     Push(nullptr, frames);
                 } else {
                     Mix(data, frames, format, encoding, &mono);
+                    for (float v : mono) loudest = std::max(loudest, std::fabs(v));
                     Push(mono.data(), mono.size());
                 }
                 capture->ReleaseBuffer(frames);
@@ -184,7 +210,12 @@ void AudioCapture::Shared::Listen() {
                 Push(nullptr, std::min<size_t>(kRing, (size_t)((now - heard) * format->nSamplesPerSec / 1000)));
                 heard = now;
             }
+            if (!reported && now - opened > kReportMs) {
+                report(L"in the first seconds");
+                reported = true;
+            }
         }
+        report(stop ? L"done" : L"until the device stopped");
         client->Stop();
         CoTaskMemFree(format);
         if (!stop && Stopping(500)) break;

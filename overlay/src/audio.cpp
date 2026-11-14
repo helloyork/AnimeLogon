@@ -292,6 +292,10 @@ bool AudioSystem::PlayVideoTrack(const std::wstring &wavPath, double position, f
     }
     auto t = std::make_unique<Track>();
     if (!OpenWav(wavPath, &t->file, &t->dataOffset, &t->dataBytes)) return false;
+    auto failed = [](const wchar_t *what, HRESULT hr) {
+        ALOG(L"audio: the sound track could not start: %s (0x%08X)", what, hr);
+        return false;
+    };
     WAVEFORMATEX wfx{};
     wfx.wFormatTag = WAVE_FORMAT_PCM;
     wfx.nChannels = kChannels;
@@ -299,14 +303,16 @@ bool AudioSystem::PlayVideoTrack(const std::wstring &wavPath, double position, f
     wfx.wBitsPerSample = 16;
     wfx.nBlockAlign = kFrameBytes;
     wfx.nAvgBytesPerSec = kRate * kFrameBytes;
-    if (FAILED(engine_->CreateSourceVoice(&t->voice, &wfx))) return false;
+    if (HRESULT hr = engine_->CreateSourceVoice(&t->voice, &wfx); FAILED(hr)) return failed(L"no voice", hr);
     const uint64_t frames = t->dataBytes / kFrameBytes;
     const double loop = (double)frames / kRate;
     const double within = loop > 0 ? std::fmod(std::max(0.0, position), loop) : 0.0;
     t->cursor = std::min<uint64_t>((uint64_t)(within * kRate), frames - 1) * kFrameBytes;
     t->startPosition = position;
     t->voice->SetVolume(0.0f);
-    if (!t->Feed() || FAILED(t->voice->Start(0))) return false;
+    if (!t->Feed()) return failed(L"the file could not be read", E_FAIL);
+    if (HRESULT hr = t->voice->Start(0); FAILED(hr)) return failed(L"the voice would not start", hr);
+    ALOG(L"audio: the sound track plays from %.1f s of %.1f s", within, loop);
     t->Fade(1.0f, fadeInSeconds);
     track_ = std::move(t);
     if (paused_) {
