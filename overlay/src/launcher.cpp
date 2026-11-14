@@ -36,6 +36,14 @@ std::atomic<bool> g_resumed{false};
 // Set once the settings app or uninstaller has asked for the sign-in background setting back.
 std::atomic<bool> g_restored{false};
 constexpr ULONGLONG kSignInCheckMs = 60000;
+// More time passed by the clock than the machine was awake: it slept or hibernated in between.
+constexpr ULONGLONG kAsleepMs = 5000;
+// The longest the going-down flag stays up without the pre-shutdown phase following. Pre-shutdown
+// came 1 to 2 minutes after Winlogon's request on every update shutdown measured; Windows
+// Update's own servicing runs after it, with the service already stopped. While the flag is up,
+// the gate's other rules still apply when it is lowered: a session Windows signed out in place,
+// or one not at its logon screen, is not covered either way.
+constexpr ULONGLONG kGoingDownMaxMs = 10 * 60 * 1000;
 
 std::wstring OverlayPath() { return animelogon::paths::ModuleDir() + L"overlay.exe"; }
 
@@ -156,15 +164,44 @@ void Supervise() {
     sessionrecord::Record record;
     HANDLE sessionWinlogon = nullptr;
     ULONGLONG flushedAt = 0;
+    // A resume is also seen without the power event: the tick count runs on through sleep and
+    // hibernation, the unbiased interrupt time does not. Fast startup is such a resume: the
+    // service is hibernated with the kernel instead of being stopped, so whatever it believed
+    // about the shutdown it was in the middle of has to be dropped when it wakes.
+    ULONGLONG lastTick = GetTickCount64(), lastUnbiased = 0;
+    QueryUnbiasedInterruptTime(&lastUnbiased);
+    // When the going-down flag went up, to lower one the pre-shutdown phase never followed.
+    ULONGLONG goingDownSince = 0;
 
     while (WaitForSingleObject(g_stopEvent, 0) != WAIT_OBJECT_0) {
         const DWORD session = WTSGetActiveConsoleSessionId();
         const ULONGLONG now = GetTickCount64();
 
+        ULONGLONG unbiased = 0;
+        QueryUnbiasedInterruptTime(&unbiased);
+        const ULONGLONG awake = (unbiased - lastUnbiased) / 10000, passed = now - lastTick;
+        lastTick = now;
+        lastUnbiased = unbiased;
+        if (passed > awake + kAsleepMs && !g_resumed.exchange(true))
+            ALOG(L"launcher: %llu s passed while the machine was asleep or hibernated", (passed - awake) / 1000);
+
         if (g_resumed.exchange(false)) {
             record.Forget();
             if (g_goingDownEvent) ResetEvent(g_goingDownEvent);
             ALOG(L"launcher: resumed from sleep or hibernation -- the session history is cleared");
+        }
+        // A shutdown that never reached the pre-shutdown phase (cancelled, or a fast-startup
+        // shutdown the resume was not noticed after) must not keep the video away for good.
+        const bool goingDown = g_goingDownEvent && WaitForSingleObject(g_goingDownEvent, 0) == WAIT_OBJECT_0;
+        if (!goingDown) {
+            goingDownSince = 0;
+        } else if (!goingDownSince) {
+            goingDownSince = now;
+        } else if (now - goingDownSince > kGoingDownMaxMs) {
+            ResetEvent(g_goingDownEvent);
+            goingDownSince = 0;
+            ALOG(L"launcher: Windows said it was going down %llu min ago and is still here -- the flag is lowered",
+                 kGoingDownMaxMs / 60000);
         }
         const bool ended = sessionWinlogon && WaitForSingleObject(sessionWinlogon, 0) == WAIT_OBJECT_0;
         switch (record.Update(session, SignedIn(session), ended)) {
