@@ -395,7 +395,21 @@ TEST(SkinPanelsLeaveOutTrimShiftAndPlate) {
     if (SUCCEEDED(co)) CoUninitialize();
 }
 
-TEST(SkinPanelsStayOnTheirDisplay) {
+// A panel may hang past its display's edges by up to three quarters of its box in each direction;
+// a box as long as the display or longer is centred on it. The moves are whole pixels.
+TEST(PanelShiftKeepsAQuarterOfTheBoxOnTheDisplay) {
+    CHECK(PanelShift(100.0f, 200.0f, 1000.0f) == 0.0f);   // on the display
+    CHECK(PanelShift(-75.0f, 25.0f, 1000.0f) == 0.0f);    // three quarters before its start
+    CHECK(PanelShift(975.0f, 1075.0f, 1000.0f) == 0.0f);  // three quarters past its end
+    CHECK(PanelShift(-300.0f, -200.0f, 1000.0f) == 225.0f);  // all of it before: a quarter comes back
+    CHECK(PanelShift(1500.0f, 1600.0f, 1000.0f) == -525.0f);
+    CHECK(PanelShift(-75.5f, 24.5f, 1000.0f) == 1.0f);    // whole pixels, never short of the rule
+    CHECK(PanelShift(975.5f, 1075.5f, 1000.0f) == -1.0f);
+    CHECK(PanelShift(300.0f, 1500.0f, 1000.0f) == -400.0f);  // longer than the display: centred
+    CHECK(PanelShift(0.0f, 1000.0f, 1000.0f) == 0.0f);
+}
+
+TEST(SkinPanelsMayHangPastTheirDisplay) {
     const HRESULT co = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     SkinPreview preview;
     Picture background;
@@ -410,26 +424,58 @@ TEST(SkinPanelsStayOnTheirDisplay) {
     now.wDayOfWeek = 5;
     now.wHour = 15;
     now.wMinute = 4;
-    auto place = [&](std::map<std::wstring, std::wstring> values) {
-        Picture out;
+    auto place = [&](const skin::Skin &s, std::map<std::wstring, std::wstring> values, Picture *out = nullptr) {
+        Picture drawn;
         std::vector<SkinView::Bound> bounds;
-        CHECK(preview.Render(background, skin::Resolve(skin::Default(), values), ClockStyle{}, us, now, &out, &bounds));
+        CHECK(preview.Render(background, skin::Resolve(s, values), ClockStyle{}, us, now, out ? out : &drawn, &bounds));
         const auto p1 = std::find_if(bounds.begin(), bounds.end(), [](const SkinView::Bound &b) { return b.key == L"p1"; });
         CHECK(p1 != bounds.end());
         return p1 == bounds.end() ? SkinView::Bound{} : *p1;
     };
-    // Offsets that would carry the clock past each edge stop it at that edge.
-    const SkinView::Bound right = place({{L"p1.anchor", L"top-right"}, {L"p1.offset-x", L"50"}});
-    CHECK(right.rect.right <= 640.0f && right.rect.right >= 638.0f && right.rect.left > 0.0f);
-    const SkinView::Bound corner = place({{L"p1.anchor", L"bottom-left"}, {L"p1.offset-x", L"-50"}, {L"p1.offset-y", L"50"}});
-    CHECK(corner.rect.left >= 0.0f && corner.rect.left <= 2.0f && corner.rect.bottom <= 360.0f && corner.rect.bottom >= 358.0f);
-    const SkinView::Bound up = place({{L"p1.anchor", L"top"}, {L"p1.offset-y", L"-50"}});
-    CHECK(up.rect.top >= 0.0f && up.rect.top <= 2.0f);
+    const skin::Skin clock = skin::Default();
+    auto wide = [](const SkinView::Bound &b) { return b.rect.right - b.rect.left; };
+    auto tall = [](const SkinView::Bound &b) { return b.rect.bottom - b.rect.top; };
+    // Offsets well past an edge leave a quarter of the clock on the display, the rest past it.
+    const SkinView::Bound right = place(clock, {{L"p1.anchor", L"top-right"}, {L"p1.offset-x", L"50"}});
+    CHECK(right.rect.right > 640.0f + wide(right) / 2);
+    CHECK(640.0f - right.rect.left >= wide(right) / 4 && 640.0f - right.rect.left <= wide(right) / 4 + 1.0f);
+    const SkinView::Bound corner = place(clock, {{L"p1.anchor", L"bottom-left"}, {L"p1.offset-x", L"-50"}, {L"p1.offset-y", L"50"}});
+    CHECK(corner.rect.right >= wide(corner) / 4 && corner.rect.right <= wide(corner) / 4 + 1.0f);
+    CHECK(360.0f - corner.rect.top >= tall(corner) / 4 && 360.0f - corner.rect.top <= tall(corner) / 4 + 1.0f);
+    const SkinView::Bound up = place(clock, {{L"p1.anchor", L"top"}, {L"p1.offset-y", L"-50"}});
+    CHECK(up.rect.bottom >= tall(up) / 4 && up.rect.bottom <= tall(up) / 4 + 1.0f);
     // The point it is held by moves with it, so the settings page's marks follow.
-    CHECK(right.holdX[2] <= 640.0f && corner.holdY[2] <= 360.0f);
-    // An offset that keeps it on the display is left alone.
-    const SkinView::Bound kept = place({{L"p1.anchor", L"top"}, {L"p1.offset-y", L"10"}});
+    CHECK(right.holdX[2] > right.rect.left && right.holdX[2] <= right.rect.right);
+    CHECK(corner.holdY[2] > corner.rect.top && corner.holdY[2] <= corner.rect.bottom);
+    // An offset that keeps the quarter on is left alone, also where it carries the clock past the
+    // bottom edge: the date's baseline 10% of the height lower than the anchor, below the display.
+    const SkinView::Bound kept = place(clock, {{L"p1.anchor", L"top"}, {L"p1.offset-y", L"10"}});
     CHECK(std::fabs(kept.holdY[0] - (0.07f * 360 + 36.0f)) <= 1.5f);
+    const SkinView::Bound low = place(clock, {{L"p1.anchor", L"bottom"}, {L"p1.offset-y", L"10"}});
+    CHECK(std::fabs(low.holdY[2] - (360.0f - 0.07f * 360 + 36.0f)) <= 1.5f && low.rect.bottom > 360.0f);
+    // A spectrum pushed half past the bottom edge is cut there: its bands reach the last row.
+    skin::Skin bands;
+    CHECK(BuiltInComponent(L"spectrum", &bands));
+    Picture out;
+    const SkinView::Bound cut = place(bands, {{L"p1.offset-y", L"8"}, {L"p1.s1.opacity", L"0"}}, &out);
+    CHECK(cut.rect.top < 360.0f && cut.rect.bottom > 360.0f + tall(cut) / 4);
+    bool reaches = false;
+    for (int x = std::max(0, (int)cut.rect.left); x < std::min(640, (int)cut.rect.right) && !reaches; ++x) {
+        const uint8_t *px = out.bgra.data() + ((size_t)359 * out.width + x) * 4;
+        reaches = px[0] > 100 || px[2] > 100;
+    }
+    CHECK(reaches);
+    // A panel taller than the display is centred on it, wherever its offsets say.
+    skin::Skin big;
+    std::wstring error;
+    CHECK(skin::Parse("<component format=\"1\" name=\"t\"><panel anchor=\"top\" size=\"50\">"
+                      "<line><text value=\"M\"/></line><line gap=\"0.3\"><text value=\"M\"/></line>"
+                      "<line gap=\"0.3\"><text value=\"M\"/></line></panel></component>",
+                      &big, &error));
+    for (const wchar_t *offset : {L"0", L"50", L"-50"}) {
+        const SkinView::Bound centred = place(big, {{L"p1.offset-y", offset}});
+        CHECK(tall(centred) > 360.0f && std::fabs(centred.rect.top + centred.rect.bottom - 360.0f) <= 1.5f);
+    }
     if (SUCCEEDED(co)) CoUninitialize();
 }
 
