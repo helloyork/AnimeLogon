@@ -1,13 +1,15 @@
 // Draws a skin over a still image, for judging its look without a lock screen:
 // skin_preview <background> <out.png> [--skin skin.xml] [--locale ll-CC] [--time HH:MM] [--date YYYY-MM-DD]
 //              [--hours auto|12|24] [--ampm on|off] [--date-style weekday|long|none] [--language ll-CC]
-//              [--component battery|media|countdown] [--data sample|paused|charging|mains]
+//              [--component battery|media|countdown] [--data sample|paused|charging|plugged|mains|idle]
 //              [--media "title|artist|position|duration"]
 //              [setting=value ...] [p1.l1.t1.weight=300 ...]
 // Without --skin or --component it draws the default clock. --locale stands in for the regional
 // format. Without --data there is no battery and nothing playing; with mains, a machine without a
-// battery, on mains power, playing nothing. --media says what is playing instead of the sample:
-// its title, artist, and how far in and how long it is, in seconds (the last three may be left out).
+// battery, on mains power, playing nothing; with idle, the sample battery and nothing playing; with
+// charging and plugged, a battery on mains power, charging or full. --media says what is playing
+// instead of the sample: its title, artist, and how far in and how long it is, in seconds (the last
+// three may be left out).
 #include <windows.h>
 
 #include <fcntl.h>
@@ -89,8 +91,10 @@ int wmain(int argc, wchar_t **argv) {
             snapshot = data::Sample((uint64_t)ft.dwHighDateTime << 32 | ft.dwLowDateTime);
             const std::wstring kind = argv[++i];
             if (kind == L"paused") snapshot.media.state = data::MediaState::Paused;
-            if (kind == L"charging") snapshot.battery = {data::BatteryState::Charging, 42, -1};
+            if (kind == L"charging") snapshot.battery = {data::BatteryState::Charging, 42, -1, true};
+            if (kind == L"plugged") snapshot.battery = {data::BatteryState::Plugged, 100, -1, true};
             if (kind == L"mains") snapshot = {{data::BatteryState::None, -1, -1, true}, {}};
+            if (kind == L"idle") snapshot.media = {};
             withData = true;
         } else if (arg == L"--media" && more) {
             media = argv[++i];

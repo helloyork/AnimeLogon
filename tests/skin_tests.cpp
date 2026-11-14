@@ -1,5 +1,6 @@
 #include "check.h"
 
+#include <cstdio>
 #include <string>
 
 #include "animelogon/skin.h"
@@ -173,6 +174,72 @@ TEST(SkinOffersItsParts) {
     const std::vector<std::wstring> sized = skin::AdjustmentsOf(s, L"size");
     CHECK(sized.size() == 1 && sized[0] == L"p1.size");
     CHECK(skin::AdjustmentsOf(s, L"color").size() == 3);
+}
+
+// What a component can say beyond the first version: that a text, a bar or a line is left out,
+// a text's baseline shift, widest width and figures, the shape of what is behind a panel and the
+// panel's opacity. Each is adjustable, and a switch can show or hide a part.
+TEST(SkinShowsHidesShiftsTrimsAndPlates) {
+    const std::string settings =
+        "<settings><toggle id=\"extra\" label=\"Extra\" default=\"off\" on=\"true\" off=\"false\"/></settings>";
+    const std::string panel =
+        "<panel opacity=\"0.8\"><line><text value=\"{time}\" figures=\"tabular\" max=\"6\"/>"
+        "<text value=\"x\" show=\"$extra\" rise=\"0.2\" space=\"0.3\"/>"
+        "<bar value=\"{media.progress}\" show=\"false\"/></line>"
+        "<line show=\"$extra\"><text value=\"y\"/></line>"
+        "<backdrop opacity=\"0.4\" shape=\"plate\" radius=\"0.5\" padding-x=\"1\" padding-y=\"0.25\"/></panel>";
+    skin::Skin s;
+    std::wstring error;
+    CHECK(skin::Parse(Wrap(panel, settings), &s, &error));
+    if (!error.empty()) std::printf("  %ls\n", error.c_str());
+    skin::Resolved r = skin::Resolve(s, {});
+    CHECK(r.panels.size() == 1 && r.panels[0].lines.size() == 2);
+    if (r.panels.size() != 1 || r.panels[0].lines.size() != 2) return;
+    const skin::Panel &p = r.panels[0];
+    const auto &t = p.lines[0].texts;
+    CHECK(p.opacity == 0.8f && p.backdrop == 0.4f && p.backdropShape == skin::Shape::Plate && p.backdropRadius == 0.5f);
+    CHECK(p.backdropPaddingX == 1.0f && p.backdropPaddingY == 0.25f);
+    CHECK(t[0].tabular && t[0].max == 6.0f && t[0].shown && t[0].rise == 0.0f);
+    CHECK(!t[1].shown && t[1].rise == 0.2f && !t[2].shown && !p.lines[1].shown);
+    // The switch shows them; adjustments win over the component's own values.
+    r = skin::Resolve(s, {{L"extra", L"on"}, {L"p1.l1.t1.figures", L"proportional"}, {L"p1.l1.r1.show", L"true"},
+                          {L"p1.opacity", L"0.5"}, {L"p1.b.shape", L"glow"}, {L"p1.l1.t1.max", L"0"}});
+    const skin::Panel &q = r.panels[0];
+    CHECK(q.lines[0].texts[1].shown && q.lines[1].shown && q.lines[0].texts[2].shown && !q.lines[0].texts[0].tabular);
+    CHECK(q.opacity == 0.5f && q.backdropShape == skin::Shape::Glow && q.lines[0].texts[0].max == 0.0f);
+    // A first version's component is drawn as it was: everything shown, a glow, fully opaque.
+    const skin::Resolved first = skin::Resolve(skin::Default(), {});
+    const skin::Panel &d = first.panels[0];
+    CHECK(d.opacity == 1.0f && d.backdropShape == skin::Shape::Glow && d.lines[0].texts[0].shown && d.lines[1].shown);
+    CHECK(!d.lines[0].texts[0].tabular && d.lines[0].texts[0].max == 0.0f && d.lines[0].texts[0].rise == 0.0f);
+
+    // What the settings app offers: showing a text or bar, but not one a switch already shows; a
+    // text's shift, width and figures; a plate's corners and padding; the panel's opacity.
+    auto offered = [&](const std::wstring &key) {
+        for (const skin::Part &part : skin::Parts(s))
+            for (const skin::Adjustment &a : part.adjustments)
+                if (a.key == key) return true;
+        return false;
+    };
+    CHECK(offered(L"p1.l1.t1.show") && offered(L"p1.l1.r1.show") && offered(L"p1.l1.t1.rise") && offered(L"p1.l1.t1.max"));
+    CHECK(offered(L"p1.l1.t1.figures") && offered(L"p1.b.shape") && offered(L"p1.b.radius") && offered(L"p1.b.padding-x"));
+    CHECK(offered(L"p1.opacity") && !offered(L"p1.l2.show"));
+    CHECK(skin::AdjustmentsOf(s, L"extra") == std::vector<std::wstring>{L"p1.l1.t2.show"});
+    for (const skin::Part &part : skin::Parts(s))
+        for (const skin::Adjustment &a : part.adjustments)
+            if (a.key == L"p1.l1.t1.show") CHECK(a.control == skin::Control::Toggle && skin::Effective(s, {}, a) == L"true");
+    CHECK(skin::Accepts(s, L"p1.l1.t1.show", L"false") && !skin::Accepts(s, L"p1.l1.t1.show", L"off"));
+    CHECK(skin::Accepts(s, L"p1.l1.t1.figures", L"tabular") && !skin::Accepts(s, L"p1.l1.t1.figures", L"oldstyle"));
+    CHECK(skin::Accepts(s, L"p1.b.shape", L"plate") && !skin::Accepts(s, L"p1.b.shape", L"circle"));
+    CHECK(!skin::Accepts(s, L"p1.l1.t1.rise", L"2") && !skin::Accepts(s, L"p1.opacity", L"1.5"));
+    CHECK(skin::IsAdjustmentKey(L"p1.l2.show") && skin::IsAdjustmentKey(L"p1.b.padding-y"));
+    // Values that are not theirs are refused when the component is read.
+    for (const std::string &bad : {std::string("<panel><line><text value=\"x\" show=\"no\"/></line></panel>"),
+                                   std::string("<panel><line><text value=\"x\" figures=\"wide\"/></line></panel>"),
+                                   std::string("<panel><line><text value=\"x\" max=\"-1\"/></line></panel>"),
+                                   std::string("<panel opacity=\"2\"><line><text value=\"x\"/></line></panel>"),
+                                   std::string("<panel><line><text value=\"x\"/></line><backdrop shape=\"oval\"/></panel>")})
+        CHECK(!ParsesSkin(Wrap(bad)));
 }
 
 TEST(SkinRefusesBadStructure) {

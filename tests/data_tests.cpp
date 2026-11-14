@@ -85,7 +85,7 @@ TEST(DataFillsTheBatteryWhatIsPlayingAndTheCountdown) {
     CHECK(Fill(L"media.title", c, today) == L"Song" && Fill(L"media.artist", c, today) == L"Singer");
     CHECK(Fill(L"media.position", c, today) == L"0:40");  // 10 s, and 30 s of playing since
     CHECK(Fill(L"media.duration", c, today) == L"3:20");
-    CHECK(Fill(L"media.glyph", c, today) == std::wstring(1, (wchar_t)0xE768));
+    CHECK(Fill(L"media.glyph", c, today) == std::wstring(1, (wchar_t)0xF5B0));  // solid play
     CHECK(Fill(L"until.days", c, today) == L"5");
     double f = 0;
     CHECK(data::FractionOf(L"media.progress", c, &f) && std::fabs(f - 0.2) < 1e-9);
@@ -102,7 +102,7 @@ TEST(DataFillsTheBatteryWhatIsPlayingAndTheCountdown) {
     p.battery = {data::BatteryState::Charging, 100, -1};
     c.snapshot = &p;
     CHECK(Fill(L"media.position", c, today) == L"0:10");
-    CHECK(Fill(L"media.glyph", c, today) == std::wstring(1, (wchar_t)0xE769));
+    CHECK(Fill(L"media.glyph", c, today) == std::wstring(1, (wchar_t)0xF8AE));  // solid pause
     CHECK(Fill(L"battery.glyph", c, today) == std::wstring(1, (wchar_t)0xEA93));
     CHECK(Fill(L"battery.remaining", c, today).empty());
     // A position never passes the end.
@@ -119,6 +119,50 @@ TEST(DataFillsTheBatteryWhatIsPlayingAndTheCountdown) {
     // The clock's own names are not data's.
     std::wstring out;
     CHECK(!data::Fill(L"time", c, today, &out) && !data::Fill(L"nope", c, today, &out));
+}
+
+// Words the logon screen says itself are in the clock's language: Chinese, Japanese or English,
+// and English for any other.
+TEST(DataSaysItsWordsInTheClocksLanguage) {
+    data::Snapshot s = Playing();
+    data::Context c{&s, {2026, 12, 25}, 1030 * kSecond};
+    const SYSTEMTIME today = Day(2026, 12, 20);
+    auto say = [&](const wchar_t *name, const wchar_t *locale) {
+        c.locale = locale;
+        return Fill(name, c, today);
+    };
+    CHECK(say(L"battery.remaining.long", L"zh-CN") == L"3 小时 25 分钟");
+    CHECK(say(L"battery.remaining.long", L"zh-TW") == L"3 小時 25 分鐘");
+    CHECK(say(L"battery.remaining.long", L"ja-JP") == L"3 時間 25 分");
+    CHECK(say(L"battery.remaining.long", L"en-US") == L"3 hr 25 min");
+    CHECK(say(L"battery.remaining.long", L"fr-FR") == L"3 hr 25 min");
+    CHECK(say(L"power.status", L"en-GB") == L"On battery" && say(L"battery.status", L"en-GB").empty());
+    CHECK(say(L"media.status", L"zh-CN") == L"正在播放" && say(L"media.status", L"ja-JP") == L"再生中");
+    CHECK(say(L"until.prefix", L"zh-CN") == L"还有" && say(L"until.unit", L"zh-CN") == L"天");
+    CHECK(say(L"until.prefix", L"zh-HK") == L"還有" && say(L"until.prefix", L"ja-JP") == L"あと");
+    CHECK(say(L"until.prefix", L"en-US").empty() && say(L"until.unit", L"en-US") == L"days");
+    CHECK(say(L"until.today", L"en-US").empty());
+    // An hour on the dot, minutes alone, one day, the day itself.
+    s.battery.secondsLeft = 2 * 3600;
+    CHECK(say(L"battery.remaining.long", L"en-US") == L"2 hr");
+    s.battery.secondsLeft = 40 * 60;
+    CHECK(say(L"battery.remaining.long", L"zh-CN") == L"40 分钟");
+    c.locale = L"en-US";
+    CHECK(Fill(L"until.unit", c, Day(2026, 12, 24)) == L"day" && Fill(L"until.today", c, Day(2026, 12, 25)) == L"Today");
+    CHECK(Fill(L"until.unit", c, Day(2026, 12, 25)).empty() && Fill(L"until.prefix", c, Day(2027, 1, 1)).empty());
+    // Plugged in, charging or not; no battery at all; nothing playing.
+    s.battery = {data::BatteryState::Charging, 40, -1, true};
+    CHECK(say(L"battery.status", L"zh-CN") == L"正在充电" && say(L"power.status", L"zh-CN") == L"交流电源");
+    s.battery = {data::BatteryState::Plugged, 100, -1, true};
+    CHECK(say(L"battery.status", L"en-US") == L"Plugged in" && say(L"battery.remaining.long", L"en-US").empty());
+    s.battery = {data::BatteryState::None, -1, -1, true};
+    CHECK(say(L"power.status", L"ja-JP") == L"AC 電源" && say(L"battery.status", L"ja-JP").empty());
+    s.media = {};
+    CHECK(say(L"media.status", L"en-US") == L"Not playing" && say(L"media.title", L"en-US").empty());
+    // Through a text, in the language of the clock's format.
+    const ClockStyle style;
+    CHECK(FillText(L"{power.status}", StandardFormat(L"zh-CN"), style, today, &c) == L"交流电源");
+    CHECK(FillText(L"{power.status}", StandardFormat(L"en-US"), style, today, &c) == L"AC power");
 }
 
 TEST(DataFillsTextsWithTheClock) {
@@ -303,23 +347,26 @@ TEST(BuiltInComponentsShowSomethingFittingWhenThereIsNothingToShow) {
 
     // The battery: its charge where there is a battery; where there is none, nothing unless a
     // plug and 交流电源 are switched on; nothing where Windows cannot tell. In the same line, after the
-    // battery's own texts, so that their adjustments (p1.l1.t1..t3) are where they were.
+    // battery's own texts, so that their adjustments (p1.l1.t1..t3) are where they were; whether it
+    // is charging comes last.
     skin::Skin battery;
     CHECK(BuiltInComponent(L"battery", &battery));
     skin::Resolved r = skin::Resolve(battery, {});
-    CHECK(r.panels.size() == 1 && r.panels[0].lines.size() == 1 && r.panels[0].lines[0].texts.size() == 5);
-    if (r.panels.size() != 1 || r.panels[0].lines.size() != 1 || r.panels[0].lines[0].texts.size() != 5) return;
+    CHECK(r.panels.size() == 1 && r.panels[0].lines.size() == 1 && r.panels[0].lines[0].texts.size() == 6);
+    if (r.panels.size() != 1 || r.panels[0].lines.size() != 1 || r.panels[0].lines[0].texts.size() != 6) return;
     const skin::Panel &bp = r.panels[0];
     const auto &bt = bp.lines[0].texts;
     CHECK(holds(bp.when, desktop) && holds(bp.when, laptop) && holds(bp.when, plugged) && !holds(bp.when, unknown));
-    CHECK(bt[0].value == L"{battery.glyph}" && bt[1].value == L"{battery.percent}%");
+    CHECK(bt[0].value == L"{battery.glyph}" && bt[1].value == L"{battery.percent}%" && bt[2].value == L"{battery.remaining.long}");
     CHECK(holds(bt[1].when, laptop) && !holds(bt[3].when, laptop) && !holds(bt[4].when, laptop) && !holds(bt[4].when, plugged));
     CHECK(!holds(bt[1].when, desktop) && holds(bt[3].when, desktop) && holds(bt[4].when, desktop));
-    CHECK(bt[3].value == std::wstring(1, (wchar_t)0xE95F) && bt[4].value == L"交流电源");
-    CHECK(bt[3].opacity == 0.0f && bt[4].opacity == 0.0f);
-    r = skin::Resolve(battery, {{L"mains", L"on"}});
-    CHECK(r.panels.size() == 1 && r.panels[0].lines[0].texts.size() == 5 && r.panels[0].lines[0].texts[3].opacity == 1.0f &&
-          r.panels[0].lines[0].texts[4].opacity == 1.0f);
+    CHECK(bt[3].value == std::wstring(1, (wchar_t)0xE95F) && bt[4].value == L"{power.status}");
+    CHECK(bt[5].value == L"{battery.status}" && holds(bt[5].when, plugged) && !holds(bt[5].when, laptop));
+    // Shown by default: the icon, the charge and the time left; the rest are switched on.
+    CHECK(bt[0].shown && bt[1].shown && bt[2].shown && !bt[3].shown && !bt[4].shown && !bt[5].shown);
+    r = skin::Resolve(battery, {{L"mains", L"on"}, {L"status", L"on"}, {L"icon", L"off"}});
+    CHECK(r.panels.size() == 1 && r.panels[0].lines[0].texts.size() == 6 && r.panels[0].lines[0].texts[3].shown &&
+          r.panels[0].lines[0].texts[4].shown && r.panels[0].lines[0].texts[5].shown && !r.panels[0].lines[0].texts[0].shown);
 
     // What is playing: nothing when nothing is, unless 未在播放 is switched on. Also after the
     // title in its line, so that the lines and texts keep their adjustment keys.
@@ -334,9 +381,11 @@ TEST(BuiltInComponentsShowSomethingFittingWhenThereIsNothingToShow) {
     const auto &mt = mp.lines[0].texts;
     CHECK(holds(mp.when, quiet) && holds(mt[3].when, quiet) && !holds(mp.lines[1].when, quiet) && !holds(mp.lines[2].when, quiet));
     CHECK(!holds(mt[3].when, laptop) && mt[1].value == L"{media.title}");
-    CHECK(mt[3].value == L"未在播放" && mt[2].opacity == 0.0f && mt[3].opacity == 0.0f);
+    CHECK(mt[3].value == L"{media.status}" && !mt[2].shown && !mt[3].shown);
+    // The icon before the title is there, off, for those who want it; the progress line has its own.
+    CHECK(!mt[0].shown && mt[0].hang && mp.lines[2].texts[0].value == L"{media.glyph}" && mp.lines[2].texts[0].shown);
     r = skin::Resolve(media, {{L"idle", L"on"}});
-    CHECK(r.panels.size() == 1 && r.panels[0].lines[0].texts.size() == 4 && r.panels[0].lines[0].texts[3].opacity == 0.7f);
+    CHECK(r.panels.size() == 1 && r.panels[0].lines[0].texts.size() == 4 && r.panels[0].lines[0].texts[3].shown);
 }
 
 TEST(SettingsKeepWhetherWhatIsPlayingIsShown) {

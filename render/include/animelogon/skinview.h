@@ -68,8 +68,11 @@ private:
         Microsoft::WRL::ComPtr<ID2D1Bitmap1> text;
         D2D1_POINT_2F at{};
         float px = 0.0f;  // 1 em
-        Microsoft::WRL::ComPtr<ID2D1RadialGradientBrush> backdrop;
+        // A glow fills the ellipse, a plate the rounded rectangle.
+        Microsoft::WRL::ComPtr<ID2D1Brush> backdrop;
+        bool plate = false;
         D2D1_ELLIPSE backdropArea{};
+        D2D1_ROUNDED_RECT plateArea{};
     };
     struct Slot {
         UINT width = 0, height = 0;
@@ -93,6 +96,12 @@ private:
     bool Lay(Line &line, const skin::Panel &panel, const skin::Line &source, const std::vector<std::wstring> &words,
              float px);
     std::wstring Family(const std::wstring &wanted) const;
+    // `words` laid out alone as `text` says, on one line, for measuring or for drawing apart from
+    // its line.
+    Microsoft::WRL::ComPtr<IDWriteTextLayout> Alone(const skin::Text &text, const std::wstring &words, float px) const;
+    // `words`, cut short with an ellipsis where they are wider than the text's `max`.
+    std::wstring Fit(const skin::Text &text, const std::wstring &words, float px) const;
+    void Figures(IDWriteTextLayout *layout, const skin::Text &text, DWRITE_TEXT_RANGE range) const;
 
     skin::Resolved skin_;
     ClockStyle style_;
