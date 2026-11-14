@@ -84,7 +84,7 @@ interface Drag {
   settling?: number;  // the request whose picture ends it
 }
 
-// Where the middle of the moving box is, as the panel's horizontal and vertical position say it (D60).
+// Where the middle of the moving box is, as the panel's horizontal and vertical position say it.
 const centreText = (x: number, y: number) => tr('canvas.position', { x: x.toFixed(1), y: y.toFixed(1) });
 const pad = (r: Rect, p: number): CSSProperties => ({ left: r.left - p, top: r.top - p, width: r.width + p * 2, height: r.height + p * 2 });
 

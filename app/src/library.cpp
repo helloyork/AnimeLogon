@@ -88,14 +88,57 @@ bool Folded(const skin::Skin &skin, const std::wstring &setting) {
     return true;
 }
 
+bool EndsWith(const std::wstring &s, const wchar_t *tail) {
+    const size_t n = wcslen(tail);
+    return s.size() >= n && s.compare(s.size() - n, n, tail) == 0;
+}
+
 // A switch that only shows or hides parts (the artist, the progress bar) says what the component
 // shows rather than how it looks; the page lists such switches together.
 bool Content(const skin::Skin &skin, const skin::Setting &setting) {
     if (setting.kind != skin::SettingKind::Toggle) return false;
     const std::vector<std::wstring> keys = skin::AdjustmentsOf(skin, setting.id);
-    return !keys.empty() && std::all_of(keys.begin(), keys.end(), [](const std::wstring &k) {
-        return k.size() > 5 && k.compare(k.size() - 5, 5, L".show") == 0;
-    });
+    return !keys.empty() && std::all_of(keys.begin(), keys.end(), [](const std::wstring &k) { return EndsWith(k, L".show"); });
+}
+
+// A switch that turns one value on and off: the clock's backdrop, a built-in component's plate, a
+// spectrum left out while nothing is heard. It feeds a single attribute that a slider sets, with 0
+// in one of its two states. The page shows the switch with that slider under it, which sets the
+// value while the switch is in its other state, so how strong the backdrop is can be chosen as
+// well as whether there is one. The value is offered there and nowhere else: not among the parts.
+// Turning the switch clears the slider's value (Library::SetValue), so off is off and on starts
+// again from the component's own value.
+struct Strength {
+    const skin::Adjustment *adjustment = nullptr;
+    const wchar_t *when = L"on";  // the switch's state in which the slider shows
+};
+
+bool StrengthOf(const skin::Skin &skin, const std::vector<skin::Part> &parts, const skin::Setting &setting, Strength *out) {
+    if (setting.kind != skin::SettingKind::Toggle || setting.options.size() != 2) return false;
+    const std::vector<std::wstring> keys = skin::AdjustmentsOf(skin, setting.id);
+    // A weight is chosen from named weights rather than slid through.
+    if (keys.size() != 1 || EndsWith(keys[0], L".weight")) return false;
+    double on = 0, off = 0;  // a toggle's options are "on" then "off"
+    if (!Number(setting.options[0].value, &on) || !Number(setting.options[1].value, &off) || (on == 0) == (off == 0))
+        return false;
+    for (const skin::Part &p : parts)
+        for (const skin::Adjustment &a : p.adjustments)
+            if (a.key == keys[0] && a.control == skin::Control::Slider) {
+                out->adjustment = &a;
+                out->when = on != 0 ? L"on" : L"off";
+                return true;
+            }
+    return false;
+}
+
+// How the slider under a strength switch is labelled: a backdrop's or a shadow's opacity is how
+// strong it is; anything else goes by the attribute's own name.
+std::wstring StrengthLabel(const skin::Adjustment &a) {
+    const size_t dot = a.key.rfind(L'.'), element = a.key.rfind(L'.', dot - 1);
+    const std::wstring name = a.key.substr(element + 1, dot - element - 1);
+    if (EndsWith(a.key, L".opacity") && (name == L"b" || (name.size() > 1 && name[0] == L's')))
+        return i18n::Tr("inspector.strength");
+    return i18n::Label(a.label);
 }
 
 const wchar_t *KindName(skin::SettingKind kind) {
@@ -917,17 +960,35 @@ void Library::WriteOpen(json::Writer &w) const {
             for (data::Source s : skin::SourcesOf(skin)) w.String(i18n::Label(data::LabelOf(s)));
         w.EndArray();
         if (loaded) {
-            // The settings each adjustment takes its value from, when the setting is overridden.
-            std::map<std::wstring, bool> fedModified;
-            for (const skin::Setting &s : skin.settings)
-                if (mine.count(s.id))
-                    for (const std::wstring &k : skin::AdjustmentsOf(skin, s.id)) fedModified[k] = true;
-
             const std::vector<skin::Part> parts = skin::Parts(skin);
             int panels = 0;
             for (const skin::Part &p : parts) panels += p.key.find(L'.') == std::wstring::npos;
             w.Member(L"panels", panels);
 
+            // An adjustment shows as changed when a setting that places its panel is overridden:
+            // putting the adjustment back puts that setting back too (ClearValues). Other settings
+            // that feed it (the component's colour, its font) stay as they are when it is put
+            // back, so they do not make it look changed.
+            std::set<std::wstring> fedModified;
+            for (const skin::Setting &s : skin.settings)
+                if (mine.count(s.id) && Folded(skin, s.id))
+                    for (const std::wstring &k : skin::AdjustmentsOf(skin, s.id)) fedModified.insert(k);
+
+            auto adjustment = [&](const skin::Adjustment &a, const std::wstring &label) {
+                w.Member(L"key", a.key).Member(L"label", label).Member(L"detail", i18n::Label(a.detail));
+                w.Member(L"control", ControlName(a.control)).Member(L"min", a.min).Member(L"max", a.max);
+                w.Member(L"step", a.step).Member(L"value", skin::Effective(skin, i.sets, a));
+                w.Member(L"modified", mine.count(a.key) > 0 || fedModified.count(a.key) > 0);
+                WriteOptions(w, a.options);
+            };
+
+            // What is offered with a setting rather than among the parts: the value a strength
+            // switch turns on and off, and whether a part is shown where a switch says so (the
+            // page lists those switches under Content). A part shown or hidden by hand against its
+            // switch stays among the parts, so that it can be put back. Any other value a switch
+            // feeds (a weight that a bold switch sets on several texts) stays among the parts too;
+            // turning the switch clears it there (SetValue).
+            std::set<std::wstring> withSetting, shownBySwitch;
             w.Key(L"settings").BeginArray();
             for (const skin::Setting &s : skin.settings) {
                 w.BeginObject();
@@ -937,23 +998,28 @@ void Library::WriteOpen(json::Writer &w) const {
                 w.Member(L"content", Content(skin, s));
                 w.Member(L"min", s.min).Member(L"max", s.max).Member(L"step", s.step);
                 WriteOptions(w, s.options);
+                Strength strength;
+                if (StrengthOf(skin, parts, s, &strength)) {
+                    withSetting.insert(strength.adjustment->key);
+                    w.Key(L"strength").BeginObject();
+                    adjustment(*strength.adjustment, StrengthLabel(*strength.adjustment));
+                    w.Member(L"when", strength.when);
+                    w.EndObject();
+                } else if (s.kind == skin::SettingKind::Toggle) {
+                    for (const std::wstring &k : skin::AdjustmentsOf(skin, s.id))
+                        if (EndsWith(k, L".show")) shownBySwitch.insert(k);
+                }
                 w.EndObject();
             }
             w.EndArray();
 
-            // What a switch of the component's own turns on and off (the clock's 背景暗晕 is its
-            // backdrop's 浓度) is set by that switch alone: offered again among the parts, it was a
-            // second place for the same value, and setting it there left the switch doing nothing.
-            // It still shows where it was set by hand before, so that it can be put back.
-            std::set<std::wstring> switched;
-            for (const skin::Setting &s : skin.settings)
-                if (s.kind == skin::SettingKind::Toggle)
-                    for (const std::wstring &k : skin::AdjustmentsOf(skin, s.id)) switched.insert(k);
             w.Key(L"parts").BeginArray();
             for (const skin::Part &whole : parts) {
                 skin::Part p = whole;
                 p.adjustments.erase(std::remove_if(p.adjustments.begin(), p.adjustments.end(),
-                                                   [&](const skin::Adjustment &a) { return switched.count(a.key) && !mine.count(a.key); }),
+                                                   [&](const skin::Adjustment &a) {
+                                                       return withSetting.count(a.key) || (shownBySwitch.count(a.key) && !mine.count(a.key));
+                                                   }),
                                     p.adjustments.end());
                 if (p.adjustments.empty()) continue;
                 bool modified = false;
@@ -962,11 +1028,7 @@ void Library::WriteOpen(json::Writer &w) const {
                 w.Key(L"adjustments").BeginArray();
                 for (const skin::Adjustment &a : p.adjustments) {
                     w.BeginObject();
-                    w.Member(L"key", a.key).Member(L"label", i18n::Label(a.label)).Member(L"detail", i18n::Label(a.detail));
-                    w.Member(L"control", ControlName(a.control)).Member(L"min", a.min).Member(L"max", a.max);
-                    w.Member(L"step", a.step).Member(L"value", skin::Effective(skin, i.sets, a));
-                    w.Member(L"modified", mine.count(a.key) > 0 || fedModified.count(a.key) > 0);
-                    WriteOptions(w, a.options);
+                    adjustment(a, i18n::Label(a.label));
                     w.EndObject();
                 }
                 w.EndArray().EndObject();

@@ -525,6 +525,131 @@ TEST(AppLibraryDescribesTheOpenTheme) {
     CHECK(v[L"wallpapers"][0][L"id"].Str() == L"default" && v[L"wallpapers"][3][L"id"].Str() == L"none");
 }
 
+namespace {
+
+// The open theme as the page is told it, and one of its instances, setting or part by id or key.
+json::Value Opened(const app::Library &l) {
+    json::Writer w;
+    l.WriteOpen(w);
+    json::Value v;
+    CHECK(json::Parse(w.text(), &v));
+    return v;
+}
+const json::Value *ById(const json::Value &list, const wchar_t *member, const std::wstring &id) {
+    for (const json::Value &item : list.Items())
+        if (item[member].Str() == id) return &item;
+    return nullptr;
+}
+// The adjustment `key` among an instance's parts, or nothing when the parts do not offer it.
+const json::Value *Offered(const json::Value &instance, const std::wstring &key) {
+    for (const json::Value &part : instance[L"parts"].Items())
+        if (const json::Value *a = ById(part[L"adjustments"], L"key", key)) return a;
+    return nullptr;
+}
+
+}  // namespace
+
+// The clock's backdrop switch is a switch with a slider for how strong the backdrop is, which shows
+// while the switch is on and starts at the switch's own value; the backdrop's opacity is not offered
+// again among the parts. Turning the switch clears the slider's value, and undo brings it back.
+TEST(AppLibraryFoldsAStrengthIntoItsSwitch) {
+    FakeStores s = Stores();
+    app::Library l(s);
+    l.Open(kThemeT);
+    json::Value v = Opened(l);
+    const json::Value *shade = ById(v[L"instances"][0][L"settings"], L"id", L"shade");
+    CHECK(shade && (*shade)[L"value"].Str() == L"on");
+    const json::Value &strength = (*shade)[L"strength"];
+    CHECK(strength[L"key"].Str() == L"p1.b.opacity" && strength[L"when"].Str() == L"on");
+    CHECK(strength[L"label"].Str() == L"浓度" && strength[L"control"].Str() == L"slider");
+    CHECK(app::SameValue(strength[L"value"].Str(), L"0.22") && !strength[L"modified"].Bool());
+    CHECK(strength[L"min"].Num() == 0 && strength[L"max"].Num() == 1);
+    CHECK(!Offered(v[L"instances"][0], L"p1.b.opacity") && Offered(v[L"instances"][0], L"p1.b.color"));
+
+    CHECK(l.SetValue(L"clock", L"p1.b.opacity", L"0.5", 3));
+    v = Opened(l);
+    const json::Value &moved = (*ById(v[L"instances"][0][L"settings"], L"id", L"shade"))[L"strength"];
+    CHECK(app::SameValue(moved[L"value"].Str(), L"0.5") && moved[L"modified"].Bool());
+    CHECK(!Offered(v[L"instances"][0], L"p1.b.opacity"));
+    // Back to the switch's own value is no override.
+    CHECK(l.SetValue(L"clock", L"p1.b.opacity", L"0.22", 3));
+    CHECK(Own(l, kThemeT, L"clock").empty());
+    CHECK(l.SetValue(L"clock", L"p1.b.opacity", L"0.6", 4));
+
+    CHECK(l.SetValue(L"clock", L"shade", L"off"));
+    CHECK(!Own(l, kThemeT, L"clock").count(L"p1.b.opacity") && Own(l, kThemeT, L"clock").at(L"shade") == L"off");
+    CHECK(app::SameValue((*ById(Opened(l)[L"instances"][0][L"settings"], L"id", L"shade"))[L"strength"][L"value"].Str(), L"0"));
+    CHECK(l.Undo());
+    CHECK(Own(l, kThemeT, L"clock").at(L"p1.b.opacity") == L"0.6" && !Own(l, kThemeT, L"clock").count(L"shade"));
+    // Putting the switch's row back puts back both.
+    CHECK(l.SetValue(L"clock", L"shade", L"off") && l.SetValue(L"clock", L"p1.b.opacity", L"0.4"));
+    CHECK(Own(l, kThemeT, L"clock").size() == 2);
+    CHECK(l.ClearValues(L"clock", {L"shade", L"p1.b.opacity"}));
+    CHECK(Own(l, kThemeT, L"clock").empty());
+}
+
+// A component of someone's own: only a strength switch's value and what a switch shows or hides
+// leave the parts. A switch that sets the weight of several texts, or one value to two levels
+// neither of which is 0, leaves them where they are; turning the switch clears them.
+TEST(AppLibraryKeepsWhatSwitchesFeedAmongTheParts) {
+    const std::wstring kOwn = L"0c0c0c0c0c0c0c0c";
+    FakeStores s = Stores();
+    s.store.components[kOwn] =
+        "<component format=\"1\" name=\"Own\"><settings>"
+        "<toggle id=\"bold\" label=\"B\" default=\"on\" on=\"700\" off=\"400\"/>"
+        "<toggle id=\"dim\" label=\"D\" default=\"on\" on=\"0.5\" off=\"0\"/>"
+        "<toggle id=\"fade\" label=\"F\" default=\"on\" on=\"1\" off=\"0.5\"/>"
+        "<toggle id=\"date\" label=\"E\" default=\"on\" on=\"true\" off=\"false\"/>"
+        "</settings><panel anchor=\"top-right\" size=\"4\">"
+        "<line><text value=\"{time}\" weight=\"$bold\" opacity=\"$fade\"/>"
+        "<text value=\"{date}\" weight=\"$bold\" show=\"$date\"/></line>"
+        "<shadow opacity=\"$dim\"/></panel></component>";
+    app::Library l(s);
+    l.Open(kThemeT);
+    const std::wstring id = l.AddInstance(kOwn);
+    CHECK(!id.empty());
+    json::Value v = Opened(l);
+    const json::Value *own = ById(v[L"instances"], L"id", id);
+    CHECK(own != nullptr);
+    CHECK(Offered(*own, L"p1.l1.t1.weight") && Offered(*own, L"p1.l1.t2.weight"));
+    CHECK(Offered(*own, L"p1.l1.t1.opacity"));
+    CHECK(!Offered(*own, L"p1.l1.t2.show") && !Offered(*own, L"p1.s1.opacity") && Offered(*own, L"p1.s1.blur"));
+    const json::Value &settings = (*own)[L"settings"];
+    const json::Value &dim = (*ById(settings, L"id", L"dim"))[L"strength"];
+    CHECK(dim[L"key"].Str() == L"p1.s1.opacity" && dim[L"label"].Str() == L"浓度" && dim[L"when"].Str() == L"on");
+    for (const wchar_t *plain : {L"bold", L"fade", L"date"}) CHECK((*ById(settings, L"id", plain))[L"strength"].IsNull());
+    CHECK((*ById(settings, L"id", L"date"))[L"content"].Bool());
+
+    CHECK(l.SetValue(id, L"p1.l1.t2.weight", L"300"));
+    CHECK(l.SetValue(id, L"bold", L"off"));
+    CHECK(!Own(l, kThemeT, id).count(L"p1.l1.t2.weight"));
+    // Shown by hand against its switch, a part stays among the parts until it is put back.
+    CHECK(l.SetValue(id, L"p1.l1.t2.show", L"false"));
+    CHECK(Offered(*ById(Opened(l)[L"instances"], L"id", id), L"p1.l1.t2.show"));
+}
+
+// Changing the component's colour does not mark each text's colour as changed: putting a text's
+// colour back would leave it as it is. Changing where the panel is placed does mark the panel's
+// position, which puts that setting back too.
+TEST(AppLibraryMarksChangedOnlyWhatCanBePutBack) {
+    FakeStores s = Stores();
+    app::Library l(s);
+    l.Open(kThemeT);
+    CHECK(l.SetValue(L"clock", L"color", L"#FFD27A"));
+    json::Value v = Opened(l);
+    const json::Value &clock = v[L"instances"][0];
+    CHECK(Offered(clock, L"p1.l1.t1.color") && !(*Offered(clock, L"p1.l1.t1.color"))[L"modified"].Bool());
+    CHECK((*Offered(clock, L"p1.l1.t1.color"))[L"value"].Str() == L"#FFD27A");
+    for (const json::Value &part : clock[L"parts"].Items()) CHECK(!part[L"modified"].Bool());
+    CHECK((*ById(clock[L"settings"], L"id", L"color"))[L"modified"].Bool());
+
+    CHECK(l.SetValue(L"clock", L"position", L"top-left"));
+    v = Opened(l);
+    CHECK((*Offered(v[L"instances"][0], L"p1.anchor"))[L"modified"].Bool());
+    CHECK(l.ClearValues(L"clock", {L"p1.anchor"}));
+    CHECK(Own(l, kThemeT, L"clock").size() == 1 && Own(l, kThemeT, L"clock").count(L"color"));
+}
+
 TEST(AppLibraryRemembersTheRecentThemes) {
     FakeStores s = Stores();
     app::Library l(s);

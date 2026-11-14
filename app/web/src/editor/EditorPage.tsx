@@ -1,4 +1,4 @@
-// A theme's own page (D40), under the library: a line saying which theme it is with the tools
+// A theme's own page, under the library: a line saying which theme it is with the tools
 // for it, the lock screen on the left and the panel of adjustments on the right. Changes save
 // themselves; undo and redo go back and forth through them.
 import { useEffect } from 'react';
