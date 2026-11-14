@@ -460,7 +460,8 @@ const POSITION_VIEW = (unit: string): View => ({ factor: 1, digits: 1, unit: () 
 // follows the position, as it does for a drag, and is never shown; lining a panel up with the
 // display or with other panels is what the stage's snap lines are for. The margin from the
 // display's edges is folded under a link. While the panel is dragged or resized on the stage, the fields
-// show where it is going. Every position keeps it on its display.
+// show where it is going. A position may carry it partly past the display's edges, as long as a
+// quarter of its box stays on the display in each direction (geometry.ts, edgeRange).
 function PlaceFields({ instId, pk }: { instId: string; pk: string }) {
   const draft = useDraft(instId);
   const [, redraw] = useReducer((x: number) => x + 1, 0);

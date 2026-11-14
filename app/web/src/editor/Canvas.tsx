@@ -5,8 +5,13 @@
 // A drag moves pixels at once: when the component was lifted out of the picture beforehand (on
 // hover or selection, see preview.ts), the stage shows the picture without it and moves the
 // component's own layer under the pointer; the native side draws the exact result when the drag
-// ends. Without a lift (scene layers; a component drawn on several displays of a wall) the
-// picture is redrawn live as before.
+// ends. Without a lift (scene layers; a component drawn on several displays of a wall; a panel
+// that hangs past its display's edge, whose cut-off part is in no picture) the picture is
+// redrawn live as before.
+//
+// A panel may hang past its display's edges (geometry.ts edgeRange). The pictures are cut at the
+// display's edge, as the logon screen cuts them; the marks are not, so the box and its handles
+// still show, and can be grabbed, beyond it.
 import { useEffect, useLayoutEffect, useReducer, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 import { t as tr } from '../i18n';
 import { Desktop16Regular } from '@fluentui/react-icons';
@@ -38,14 +43,15 @@ import {
   copiesOf,
   fixedCorner,
   geometry,
+  hangsOff,
   hitTest,
-  largestScale,
   middleMoved,
   offsetsScaledAbout,
   panelBounds,
   placeDragged,
   rectOf,
   roundTo,
+  scaleRange,
   unionOf,
   valueOf,
   type Geometry,
@@ -240,7 +246,7 @@ export function Canvas() {
   function startDrag(e: ReactPointerEvent, inst: string, pk: string, partOnClick: string | null) {
     const screen = getState().screen, g = geometry(inst, pk, k, stage, screen);
     if (!g) return;
-    const lift = inst !== 'wallpaper' && copiesOf(inst, pk) === 1 ? liftFor(inst) : null;
+    const lift = inst !== 'wallpaper' && copiesOf(inst, pk) === 1 && !hangsOff(g) ? liftFor(inst) : null;
     const others = othersOf(inst, pk, screen);
     const gesture = newGesture();
     let last: Record<string, string> | null = null;
@@ -278,18 +284,22 @@ export function Canvas() {
     // A layer filling the picture has no corner to keep: it grows about the point it is held by.
     const full = inst === 'wallpaper' && valueOf(inst, pk + '.anchor') === 'full';
     const origin = full ? { x: g.rx, y: g.ry } : fixedCorner(g, handle);
-    const top = full ? hi : Math.max(lo, Math.min(hi, Math.floor(s0 * largestScale(g, origin) * 2) / 2));
+    // As large and as small as keeps a quarter of it on its display; never so that the first move
+    // jumps away from the size it has.
+    const [least, most] = full ? [0, Infinity] : scaleRange(g, origin);
+    const top = full ? hi : Math.max(s0, lo, Math.min(hi, Math.floor(s0 * most * 2) / 2));
+    const bottom = full ? lo : Math.min(s0, Math.max(lo, Math.ceil(s0 * least * 2) / 2));
     // How far along the box's diagonal the pointer is, from the fixed corner; the size follows it.
     const rs = stageRef.current!.getBoundingClientRect();
     const far = { x: origin.x === g.r.left ? g.r.left + g.r.width : g.r.left, y: origin.y === g.r.top ? g.r.top + g.r.height : g.r.top };
     const dx0 = far.x - origin.x || 1, dy0 = far.y - origin.y || 1, len = dx0 * dx0 + dy0 * dy0;
     const along = (x: number, y: number) => ((x - rs.left - origin.x) * dx0 + (y - rs.top - origin.y) * dy0) / len;
     const t0 = Math.max(0.05, along(e.clientX, e.clientY));
-    const lift = inst !== 'wallpaper' && copiesOf(inst, pk) === 1 ? liftFor(inst) : null;
+    const lift = inst !== 'wallpaper' && copiesOf(inst, pk) === 1 && !hangsOff(g) ? liftFor(inst) : null;
     const gesture = newGesture();
     let last: Record<string, string> | null = null;
     track((_dx, _dy, ev) => {
-      const size = clamp(roundTo((s0 * along(ev.clientX, ev.clientY)) / t0, 0.5), lo, top);
+      const size = clamp(roundTo((s0 * along(ev.clientX, ev.clientY)) / t0, 0.5), bottom, top);
       const scale = size / s0;
       last = { [pk + '.size']: String(size) };
       if (full) last[pk + '.anchor'] = 'center';
@@ -353,8 +363,12 @@ export function Canvas() {
 
   /* --- the lifted component --- */
   const lifted = drag?.lift ?? null;
-  let sprite: CSSProperties | null = null, rest: CSSProperties | null = null;
+  let sprite: CSSProperties | null = null, rest: CSSProperties | null = null, cut: CSSProperties | null = null;
   if (lifted && drag) {
+    // Cut at the edges of the panel's own display: on a wall, what goes past them is not drawn on
+    // the next one.
+    const f = drag.g.f;
+    cut = { clipPath: `inset(${f.top}px ${stage.width - f.left - f.width}px ${stage.height - f.top - f.height}px ${f.left}px)` };
     const multi = multiPanel(drag.inst), r = drag.g.r, W = stage.width, H = stage.height, m = 8;
     const transform = drag.scale != null ? `scale(${drag.scale})` : `translate(${drag.left - r.left}px, ${drag.top - r.top}px)`;
     sprite = {
@@ -386,25 +400,28 @@ export function Canvas() {
             onPointerMove={onMove}
             onPointerLeave={() => { setOver(false); if (!dragRef.current) setHover(null); }}
           >
-            {scene && pv.width > 0 && (
-              <SceneFrames theme={t.id} width={pv.width} height={pv.height} moving={motion() && !scene.static} refresh={pv.rev}
-                onBounds={rects => { pv.bounds = pv.bounds.filter(b => b.instance !== 'wallpaper').concat(rects as Bound[]); redraw(); }} />
-            )}
-            {video && <WallpaperVideo key={wallpaper.ref} wallpaper={wallpaper.ref} fit={t.fit} brightness={t.brightness} blur={t.blur} slices={wallSlices()} />}
-            {pv.url && <Picture url={pv.url} hidden={!!lifted} />}
-            {lifted && <img className="layer" src={lifted.base} alt="" draggable={false} />}
-            {pv.url && motion() && pv.spectra.length > 0 && (
-              // The panels with a spectrum, left out of the picture, moving with the sound; the one
-              // being dragged moves with the pointer as part of its lifted layer instead.
-              <div className="live-spectra" aria-hidden="true">
-                {pv.spectra.filter(p => !drag || !p.startsWith(drag.inst + '.')).map(p => (
-                  <SpectrumFrames key={p} theme={t.id} part={p} query={liveSize} />
-                ))}
-              </div>
-            )}
-            {rest && <div className="sprite" style={rest} />}
-            {sprite && <div className="sprite" style={sprite} />}
-            {pv.previous && <Leaving url={pv.previous} />}
+            {/* What the display shows, cut at its edges. */}
+            <div className="view">
+              {scene && pv.width > 0 && (
+                <SceneFrames theme={t.id} width={pv.width} height={pv.height} moving={motion() && !scene.static} refresh={pv.rev}
+                  onBounds={rects => { pv.bounds = pv.bounds.filter(b => b.instance !== 'wallpaper').concat(rects as Bound[]); redraw(); }} />
+              )}
+              {video && <WallpaperVideo key={wallpaper.ref} wallpaper={wallpaper.ref} fit={t.fit} brightness={t.brightness} blur={t.blur} slices={wallSlices()} />}
+              {pv.url && <Picture url={pv.url} hidden={!!lifted} />}
+              {lifted && <img className="layer" src={lifted.base} alt="" draggable={false} />}
+              {pv.url && motion() && pv.spectra.length > 0 && (
+                // The panels with a spectrum, left out of the picture, moving with the sound; the one
+                // being dragged with a lift moves with the pointer as part of its lifted layer instead.
+                <div className="live-spectra" aria-hidden="true">
+                  {pv.spectra.filter(p => !drag?.lift || !p.startsWith(drag.inst + '.')).map(p => (
+                    <SpectrumFrames key={p} theme={t.id} part={p} query={liveSize} />
+                  ))}
+                </div>
+              )}
+              {rest && <div className="sprite" style={rest} />}
+              {sprite && <div className="cut" style={cut ?? undefined}><div className="sprite" style={sprite} /></div>}
+              {pv.previous && <Leaving url={pv.previous} />}
+            </div>
 
             <svg className="marks">
               {pv.screens.length > 1 && pv.screens.map((sc, i) => {
