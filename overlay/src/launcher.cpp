@@ -202,7 +202,11 @@ void Supervise() {
         if (g_resumed.exchange(false)) {
             record.Forget();
             if (g_goingDownEvent) ResetEvent(g_goingDownEvent);
-            ALOG(L"launcher: resumed from sleep or hibernation -- the session history is cleared");
+            // One resume arrives as several notices (the power events and the gap in the clock).
+            static ULONGLONG resumeSaidAt = 0;
+            if (!resumeSaidAt || now - resumeSaidAt > 10000)
+                ALOG(L"launcher: resumed from sleep or hibernation -- the session history is cleared");
+            resumeSaidAt = now;
         }
         // A shutdown that never reached the pre-shutdown phase (cancelled, or a fast-startup
         // shutdown the resume was not noticed after) must not keep the video away for good.

@@ -343,6 +343,15 @@ bool WaitForLogonScreen(Presenter &presenter, Scenes &scenes, bool *dismissed) {
         // to get ready (or one left from before to let go of).
         if (GetTickCount64() - planCheck > kPlanCheckMs) {
             planCheck = GetTickCount64();
+            // A display mode change at the desktop can reset the graphics device. Found only at the
+            // next lock, the fresh process the launcher then starts would take a moment to cover the
+            // screen, and Windows' own sign-in would show meanwhile; ending now, away from any logon
+            // screen, lets the new one be ready well before then.
+            if (!screen::InputDesktopIsSecure() && presenter.DeviceLost()) {
+                ALOG(L"overlay: the graphics device was lost while parked at the desktop -- exiting now so a fresh "
+                     L"one is ready before the next lock");
+                return false;
+            }
             if (replan.Due(parkedplan::StampOf(animelogon::paths::SettingsPath()), displaylayout::Current(), planCheck)) {
                 const plan::Plan next =
                     plan::Build(animelogon::LoadSettings(false), animelogon::EnumerateMonitors(), animelogon::DiskStore());

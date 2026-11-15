@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cwchar>
+#include <mutex>
 
 #include <windows.h>
 
@@ -416,7 +417,20 @@ Settings LoadSettings(bool requireTrusted, std::wstring *why) {
     std::vector<std::wstring> problems;
     Settings s = ParseSettings(FromUtf8(std::string_view((const char *)bytes.data() + skip, bytes.size() - skip)),
                                &problems);
-    for (const std::wstring &p : problems) ALOG(L"settings.ini %s", p.c_str());
+    // The services read the file every few seconds; a broken line is written to the log once, and
+    // again only after the file's problems change (or it was clean in between).
+    std::wstring all;
+    for (const std::wstring &p : problems) all += p + L'\n';
+    static std::mutex said;
+    static std::wstring last;
+    bool fresh = false;
+    {
+        std::lock_guard<std::mutex> l(said);
+        fresh = all != last;
+        last = all;
+    }
+    if (fresh)
+        for (const std::wstring &p : problems) ALOG(L"settings.ini %s", p.c_str());
     return s;
 }
 

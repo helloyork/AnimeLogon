@@ -84,10 +84,13 @@ TEST(LauncherCountsAbnormalExitsAsDismissed) {
     CHECK(!StartsDismissed(0, true) && !StartsDismissed(0, false));
     CHECK(StartsDismissed(2, true) && !StartsDismissed(2, false));
     CHECK(StartsDismissed(3, false));
-    for (const DWORD crash : {0xC0000005u, 0xC0000409u, 0xC0000417u, 0xC00000FDu, 0x40010004u, 1u, 259u, 0xFFFFFFFFu}) {
+    for (const DWORD crash : {0xC0000005u, 0xC0000409u, 0xC0000417u, 0xC00000FDu, 1u, 259u, 0xFFFFFFFFu}) {
         CHECK(Judge(crash) == overlayexit::Verdict::Abnormal);
         CHECK(StartsDismissed(crash, false));
     }
+    // Ended by Windows with its session: said so in the log, and still counted as dismissed.
+    CHECK(Judge(0x40010004u) == overlayexit::Verdict::SessionEnded);
+    CHECK(StartsDismissed(0x40010004u, false));
     CHECK(overlayexit::kDismissed == 3 && overlayexit::kNoDevice == 2 && overlayexit::kNotWoken == 0);
 }
 

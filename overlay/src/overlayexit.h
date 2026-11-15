@@ -20,10 +20,15 @@ constexpr DWORD kNotWoken = 0;   // left without anybody having waved the screen
 constexpr DWORD kNoDevice = 2;   // no Direct3D device at the start: nothing was ever shown
 constexpr DWORD kDismissed = 3;  // the screen it leaves had been waved away (also the watchdog's, and abort()'s)
 
+// The code Windows ends a session's processes with when the session goes (a sign-out, a restart or
+// a shutdown): DBG_TERMINATE_PROCESS.
+constexpr DWORD kEndedWithSession = 0x40010004;
+
 enum class Verdict {
     NotDismissed,  // the next overlay may cover the next logon screen at once
     Unchanged,     // nothing was shown: what the launcher believed before still holds
     Dismissed,     // the screen was waved away
+    SessionEnded,  // Windows ended it with its session: dismissed, as an abnormal ending is
     Abnormal,      // a crash or another unplanned ending: dismissed too
 };
 
@@ -32,6 +37,7 @@ inline Verdict Judge(DWORD code) {
     case kNotWoken: return Verdict::NotDismissed;
     case kNoDevice: return Verdict::Unchanged;
     case kDismissed: return Verdict::Dismissed;
+    case kEndedWithSession: return Verdict::SessionEnded;
     default: return Verdict::Abnormal;
     }
 }
@@ -52,6 +58,7 @@ inline const wchar_t *Describe(Verdict v) {
     case Verdict::NotDismissed: return L"the next one may cover the screen";
     case Verdict::Unchanged: return L"it never showed anything";
     case Verdict::Dismissed: return L"the screen had been waved away -- the next one starts dismissed";
+    case Verdict::SessionEnded: return L"Windows ended it along with its session (a sign-out, restart or shutdown)";
     case Verdict::Abnormal: return L"an abnormal exit -- counted as dismissed, the next one starts dismissed";
     }
     return L"";
