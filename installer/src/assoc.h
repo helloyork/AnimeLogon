@@ -46,6 +46,8 @@ public:
 
 // The machine's, in the 64-bit view of the registry.
 std::unique_ptr<Classes> MachineClasses();
+// The same over any key, `base` below `root` standing for Classes: the tests use one of their own.
+std::unique_ptr<Classes> RegistryClasses(HKEY root, const std::wstring &base);
 
 // Writes Entries. The ProgID is written afresh, so that an update leaves exactly what this version
 // writes, wherever it is installed. Returns the first failure, having written all it could.

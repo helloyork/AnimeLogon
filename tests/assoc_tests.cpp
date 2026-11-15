@@ -160,6 +160,50 @@ TEST(InstallLeavesAnotherProgramsAlthemeAlone) {
     CHECK(later.keys.count(L"animelogon.theme") == 0);
 }
 
+TEST(InstallWritesAndUninstallTakesAwayInTheRegistry) {
+    // The same with the registry itself, under a key of the test's own in HKEY_CURRENT_USER standing
+    // for HKLM\Software\Classes, so that nothing is registered for real.
+    const std::wstring parent = L"Software\\AnimeLogon-tests";
+    const std::wstring base = parent + L"\\assoc-" + std::to_wstring(GetCurrentProcessId());
+    RegDeleteTreeW(HKEY_CURRENT_USER, base.c_str());
+    const std::unique_ptr<assoc::Classes> c = assoc::RegistryClasses(HKEY_CURRENT_USER, base);
+    auto exists = [&](const std::wstring &key) {
+        HKEY k = nullptr;
+        if (RegOpenKeyExW(HKEY_CURRENT_USER, (base + L"\\" + key).c_str(), 0, KEY_READ, &k) != ERROR_SUCCESS) return false;
+        RegCloseKey(k);
+        return true;
+    };
+    std::wstring v;
+    CHECK(assoc::Register(*c, kDir, L"AnimeLogon 主题包") == ERROR_SUCCESS);
+    for (const assoc::Entry &e : assoc::Entries(kDir, L"AnimeLogon 主题包"))
+        CHECK(c->Get(e.key, e.name, &v) && v == e.data);
+    CHECK(assoc::IsDefault(*c));
+    CHECK(assoc::Unregister(*c) == ERROR_SUCCESS);
+    CHECK(!exists(L"AnimeLogon.Theme") && !exists(L".altheme"));
+
+    // Another program's value stays, and so do the keys that hold it.
+    c->Set(L".altheme\\OpenWithProgids", L"Other.Theme", L"");
+    assoc::Register(*c, kDir, L"AnimeLogon Theme Package");
+    CHECK(c->Get(L".altheme\\OpenWithProgids", L"AnimeLogon.Theme", &v) && v.empty());
+    CHECK(assoc::Unregister(*c) == ERROR_SUCCESS);
+    CHECK(!c->Get(L".altheme\\OpenWithProgids", L"AnimeLogon.Theme", &v));
+    CHECK(c->Get(L".altheme\\OpenWithProgids", L"Other.Theme", &v) && v.empty());
+    CHECK(!c->Get(L".altheme", L"", &v) && !exists(L"AnimeLogon.Theme"));
+
+    // A default that is not a string is somebody else's: it reads as "?" and is left as it is.
+    const DWORD number = 7;
+    CHECK(RegSetKeyValueW(HKEY_CURRENT_USER, (base + L"\\.altheme").c_str(), nullptr, REG_DWORD, &number, sizeof number) ==
+          ERROR_SUCCESS);
+    CHECK(c->Get(L".altheme", L"", &v) && v == L"?");
+    assoc::Register(*c, kDir, L"AnimeLogon Theme Package");
+    CHECK(!assoc::IsDefault(*c));
+    assoc::Unregister(*c);
+    CHECK(c->Get(L".altheme", L"", &v) && v == L"?");
+
+    RegDeleteTreeW(HKEY_CURRENT_USER, base.c_str());
+    RegDeleteKeyW(HKEY_CURRENT_USER, parent.c_str());  // only once no other run's key is under it
+}
+
 TEST(AppReadsAFileToImportOnItsCommandLine) {
     app::Arguments a;
     // What a double click runs.
