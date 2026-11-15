@@ -9,9 +9,13 @@ on:
 permissions:
   contents: read
 
+# One run per branch at a time. A pull request's newer push cancels the run in progress, since only
+# its latest commit matters. A push to master or develop lets the run in progress finish: several
+# changes can land a few minutes apart, and cancelling each run for the next would mean the tests,
+# which take longer than that gap, never finish at all. Only the newest waiting run is kept.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 defaults:
   run:
