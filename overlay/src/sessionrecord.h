@@ -25,6 +25,11 @@ public:
     // One reading: the console session id, whether somebody is signed in to it, and whether the
     // session this record is about has ended (its winlogon.exe exited) since the last reading.
     Change Update(DWORD console, bool signedIn, bool ended) {
+        // While the console moves from one session to another -- "Switch user", a sign-out -- it
+        // belongs to none for a few milliseconds. That reading changes nothing: the record keeps
+        // the session being left, so the next reading still knows which one it was, and whether
+        // its user is still signed in (switch user) or gone (sign-out).
+        if (console == kNone) return Change::None;
         if (console != session_ || ended) {
             session_ = console;
             hadUser_ = signedIn;

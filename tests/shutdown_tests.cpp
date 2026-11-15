@@ -114,6 +114,21 @@ TEST(SessionRecordStartsAgainWithEachSession) {
     CHECK(!r.EmptiedInPlace());
 }
 
+TEST(SessionRecordKeepsTheSessionLeftWhileTheConsoleHasNone) {
+    // "Switch user": the console is session 2, belongs to none for a few milliseconds, then is 3.
+    constexpr DWORD kNone = 0xFFFFFFFF;
+    Record r;
+    r.Update(2, true, false);
+    CHECK(r.Update(kNone, false, false) == Record::Change::None);
+    CHECK(r.Session() == 2 && r.HadUser());  // still the session being left, read before the next update
+    CHECK(r.Update(3, false, false) == Record::Change::NewSession);
+    CHECK(r.Session() == 3);
+    // After a resume the record knows no session; a reading of none still changes nothing.
+    r.Forget();
+    CHECK(r.Update(kNone, false, false) == Record::Change::None);
+    CHECK(r.Update(3, false, false) == Record::Change::NewSession);
+}
+
 TEST(SessionRecordForgetsAfterAResume) {
     Record r;
     r.Update(1, true, false);
