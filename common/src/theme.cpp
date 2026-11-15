@@ -363,10 +363,19 @@ bool Parse(std::string_view utf8, Form form, Theme *theme, std::wstring *error, 
 
 std::string DefaultText() {
     return R"(<?xml version="1.0" encoding="utf-8"?>
-<!-- The theme that comes with AnimeLogon: the bundled wallpaper (kBundledWallpaper) and the clock. -->
+<!-- The theme that comes with AnimeLogon: the bundled wallpaper (kBundledWallpaper) and the clock.
+     The wallpaper is a light lavender, where the clock's dark shade reads as a grey smudge: it is
+     off here, and a soft deep-indigo shadow lifts the white strokes instead, which still reads on
+     the dark built-in gradient shown when the bundled wallpaper is missing. -->
 <theme format="1" name="默认" author="AnimeLogon">
   <wallpaper ref="0000000000000001" fit="fill"/>
-  <component id="clock" ref="clock"/>
+  <component id="clock" ref="clock">
+    <set key="shade" value="off"/>
+    <set key="p1.s1.opacity" value="0.5"/>
+    <set key="p1.s1.color" value="#34285F"/>
+    <set key="p1.s1.blur" value="0.09"/>
+    <set key="p1.s1.y" value="0.02"/>
+  </component>
 </theme>
 )";
 }

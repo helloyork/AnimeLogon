@@ -449,9 +449,11 @@ TEST(ResolveDefaultTheme) {
           fallback.wallpaper->kind == WallpaperKind::Image);
     CHECK(problems.size() == 1 && problems[0].find(kBundledWallpaper) != std::wstring::npos);
     CHECK(r.components.size() == 1 && r.components[0].instance == L"clock" && r.components[0].component == L"clock");
-    CHECK(r.components.size() == 1 && r.components[0].values.empty());
-    CHECK(r.components.size() == 1 &&
-          SameDrawing(skin::Resolve(r.components[0].skin, r.components[0].values), skin::Resolve(skin::Default(), {})));
+    // The default theme's own clock look (its shade off, an indigo shadow) reaches the drawing.
+    CHECK(r.components.size() == 1 && r.components[0].values.count(L"shade") &&
+          r.components[0].values.at(L"shade") == L"off");
+    CHECK(r.components.size() == 1 && SameDrawing(skin::Resolve(r.components[0].skin, r.components[0].values),
+                                                  skin::Resolve(skin::Default(), theme::Default().components[0].sets)));
     s.themeOverrides[L"default"].instances[L"clock"].values[L"color"] = L"#12ABEF";
     r = ResolveTheme(s, kMonitorA, store);
     CHECK(r.components.size() == 1 && r.components[0].values.at(L"color") == L"#12ABEF");

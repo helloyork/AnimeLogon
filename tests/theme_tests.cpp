@@ -315,7 +315,11 @@ TEST(ThemeDefaultIsBuiltIn) {
     CHECK(!d.name.empty() && d.wallpaper == kBundledWallpaper && d.fit == Scaling::Fill);
     CHECK(IsWallpaperId(kBundledWallpaper) && IsWallpaperRef(kBundledWallpaper));
     CHECK(d.components.size() == 1 && d.components[0].id == L"clock" && d.components[0].ref == L"clock");
-    CHECK(d.components[0].visible && d.components[0].sets.empty());
+    // On its light wallpaper the clock's shade is off and a soft indigo shadow lifts the strokes.
+    CHECK(d.components[0].visible && d.components[0].sets.size() == 5);
+    CHECK(d.components[0].sets.count(L"shade") && d.components[0].sets.at(L"shade") == L"off");
+    CHECK(d.components[0].sets.count(L"p1.s1.opacity") && d.components[0].sets.at(L"p1.s1.opacity") == L"0.5");
+    CHECK(d.components[0].sets.count(L"p1.s1.color") && d.components[0].sets.at(L"p1.s1.color") == L"#34285F");
     std::wstring error;
     theme::Theme parsed;
     CHECK(theme::Parse(theme::DefaultText(), theme::Form::Installed, &parsed, &error) && error.empty());
