@@ -30,6 +30,12 @@ target_include_directories(animelogon_tests PRIVATE ${PROJECT_SOURCE_DIR}/overla
 # The installer taking back an uninstall's deletions at the next restart.
 target_sources(animelogon_tests PRIVATE restart_tests.cpp ${PROJECT_SOURCE_DIR}/installer/src/restart.cpp)
 target_include_directories(animelogon_tests PRIVATE ${PROJECT_SOURCE_DIR}/installer/src)
+# What install.exe carries against the list it was made from (installer/CMakeLists.txt), read out
+# of the install.exe this build made, and which architecture a machine gets.
+target_sources(animelogon_tests PRIVATE payload_tests.cpp ${PROJECT_SOURCE_DIR}/installer/src/payload.cpp)
+target_include_directories(animelogon_tests PRIVATE ${ANIMELOGON_PAYLOAD_INCLUDE})
+add_dependencies(animelogon_tests installer)
+target_compile_definitions(animelogon_tests PRIVATE "ANIMELOGON_INSTALL_EXE=\"$<TARGET_FILE:installer>\"")
 target_link_libraries(animelogon_tests PRIVATE animelogon_common)
 # The strings, read in Simplified Chinese (common_tests.cpp's main), which the tests expect.
 animelogon_locales_rc(test_locales)

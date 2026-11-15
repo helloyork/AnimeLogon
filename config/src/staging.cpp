@@ -171,6 +171,22 @@ std::wstring PackageWallpaperName(const std::wstring &source, bool picture) {
     return L"wallpaper.png";
 }
 
+// Where `dir` really is: the path Windows reaches it by once every junction and link on the way is
+// followed, with long names. Empty if that cannot be told.
+std::wstring RealPath(const std::wstring &dir) {
+    HANDLE h = CreateFileW(dir.c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                           OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return L"";
+    std::vector<wchar_t> buf(32768);
+    const DWORD n = GetFinalPathNameByHandleW(h, buf.data(), (DWORD)buf.size(), FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+    CloseHandle(h);
+    if (!n || n >= buf.size()) return L"";
+    std::wstring real(buf.data(), n);
+    // \\?\C:\... is a drive path; \\?\UNC\server\... is not one the elevated side takes anyway.
+    if (real.compare(0, 4, L"\\\\?\\") == 0 && real.size() > 6 && real[5] == L':') real.erase(0, 4);
+    return real;
+}
+
 }  // namespace
 
 std::wstring NewImportDir() {
@@ -179,7 +195,14 @@ std::wstring NewImportDir() {
     for (int attempt = 0; attempt < 8; ++attempt) {
         const std::wstring dir = base + L"\\import\\" + RandomHex(6);
         if (GetFileAttributesW(dir.c_str()) != INVALID_FILE_ATTRIBUTES) continue;
-        if (paths::CreateDirectories(dir)) return dir;
+        if (!paths::CreateDirectories(dir)) continue;
+        // The elevated side reads staged files only by the path they really have, and refuses
+        // one reached through a junction (secure::OpenPlainFile). Where the profile or AppData was
+        // moved with mklink /J, %LOCALAPPDATA% is such a path; the import directory is named by
+        // where it really is instead, which is the same directory.
+        const std::wstring real = RealPath(dir);
+        if (!real.empty() && real != dir) ALOG(L"import: %s is really %s", dir.c_str(), real.c_str());
+        return real.empty() ? dir : real;
     }
     return L"";
 }

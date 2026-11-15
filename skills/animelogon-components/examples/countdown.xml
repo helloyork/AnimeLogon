@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Days to a date the user picks: "12 days" while it is ahead, "Today" on the day, and nothing
+     after it. The words follow the clock's language. -->
+<component format="1" name="Countdown" author="AnimeLogon">
+  <settings>
+    <date id="target" label="Date" detail="Hidden after this date." default="2027-01-01"/>
+    <choice id="position" label="Position" default="bottom-right">
+      <option value="bottom-left" label="Bottom left"/>
+      <option value="bottom-right" label="Bottom right"/>
+    </choice>
+    <number id="size" label="Size" default="5" min="2" max="15" step="0.1"/>
+    <color id="color" label="Color" default="#FFFFFF"/>
+  </settings>
+  <panel anchor="$position" size="$size" margin="4.5" until="$target" when="until.state!=past">
+    <line>
+      <text label="Before" value="{until.prefix}" color="$color" size="0.35" rise="0.02"/>
+      <text label="Days" value="{until.days}" weight="bold" color="$color" space="0.15" figures="tabular"/>
+      <text label="Unit" value="{until.unit}" color="$color" size="0.35" space="0.15" rise="0.02"/>
+      <text label="Today" value="{until.today}" when="until.state=today" weight="bold" color="$color"/>
+    </line>
+    <shadow blur="0.06" opacity="0.4" y="0.02"/>
+  </panel>
+</component>

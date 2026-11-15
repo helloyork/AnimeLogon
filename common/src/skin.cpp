@@ -11,11 +11,20 @@
 namespace animelogon::skin {
 namespace {
 
-constexpr size_t kMaxSettings = 32, kMaxOptions = 32, kMaxPanels = 8, kMaxLines = 8, kMaxTexts = 8;
-constexpr size_t kMaxShadows = 4, kMaxLabel = 40, kMaxDetail = 80, kMaxTemplate = 256;
-
 const wchar_t *const kAnchors[] = {L"top-left", L"top", L"top-right", L"left", L"center",
                                    L"right", L"bottom-left", L"bottom", L"bottom-right"};
+// The words each attribute that takes one of a few words may be, by its Type.
+const wchar_t *const kAligns[] = {L"auto", L"left", L"center", L"right"};
+const wchar_t *const kStyles[] = {L"normal", L"italic"};
+const wchar_t *const kCases[] = {L"none", L"upper", L"lower"};
+const wchar_t *const kBools[] = {L"true", L"false"};
+const wchar_t *const kEnters[] = {L"fade", L"rise", L"zoom", L"none"};
+const wchar_t *const kFigures[] = {L"proportional", L"tabular"};
+const wchar_t *const kShapes[] = {L"glow", L"plate"};
+const wchar_t *const kModes[] = {L"bars", L"line", L"area"};
+const wchar_t *const kDirections[] = {L"up", L"down", L"both"};
+const wchar_t *const kBasses[] = {L"left", L"right", L"middle"};
+const wchar_t *const kGradients[] = {L"horizontal", L"vertical", L"level"};
 enum class Type {
     Label, Anchor, Number, Align, Template, Font, Weight, Style, Color, Case, Bool, Condition, Date, Fraction, Enter,
     Figures, Shape, Count, Mode, Direction, Bass, Gradient, Stops
@@ -110,6 +119,46 @@ int IndexOf(const wchar_t *const (&names)[N], const std::wstring &value) {
     return -1;
 }
 
+struct WordList {
+    const wchar_t *const *begin;
+    size_t size;
+};
+template <size_t N>
+constexpr WordList Words(const wchar_t *const (&words)[N]) {
+    return {words, N};
+}
+// The words an attribute of this type may be; none for a type that is not written as a word.
+WordList WordsOf(Type type) {
+    switch (type) {
+    case Type::Anchor: return Words(kAnchors);
+    case Type::Align: return Words(kAligns);
+    case Type::Style: return Words(kStyles);
+    case Type::Case: return Words(kCases);
+    case Type::Bool: return Words(kBools);
+    case Type::Enter: return Words(kEnters);
+    case Type::Figures: return Words(kFigures);
+    case Type::Shape: return Words(kShapes);
+    case Type::Mode: return Words(kModes);
+    case Type::Direction: return Words(kDirections);
+    case Type::Bass: return Words(kBasses);
+    case Type::Gradient: return Words(kGradients);
+    default: return {nullptr, 0};
+    }
+}
+bool IsWordOf(Type type, const std::wstring &value) {
+    const WordList words = WordsOf(type);
+    for (size_t i = 0; i < words.size; ++i)
+        if (value == words.begin[i]) return true;
+    return false;
+}
+
+const struct {
+    const wchar_t *name;
+    int weight;
+} kWeights[] = {{L"thin", 100},     {L"extralight", 200}, {L"light", 300}, {L"regular", 400},
+                {L"medium", 500},   {L"semibold", 600},   {L"bold", 700},  {L"extrabold", 800},
+                {L"black", 900}};
+
 bool ParseNumber(const std::wstring &text, double *out) {
     if (text.empty() || text.size() > 24) return false;
     wchar_t *end = nullptr;
@@ -120,13 +169,7 @@ bool ParseNumber(const std::wstring &text, double *out) {
 }
 
 int WeightOf(const std::wstring &text) {
-    static const struct {
-        const wchar_t *name;
-        int weight;
-    } names[] = {{L"thin", 100},     {L"extralight", 200}, {L"light", 300}, {L"regular", 400},
-                 {L"medium", 500},   {L"semibold", 600},   {L"bold", 700},  {L"extrabold", 800},
-                 {L"black", 900}};
-    for (const auto &n : names)
+    for (const auto &n : kWeights)
         if (text == n.name) return n.weight;
     double v = 0;
     return ParseNumber(text, &v) && v >= 1 && v <= 999 && v == std::floor(v) ? (int)v : 0;
@@ -173,19 +216,26 @@ bool Check(const AttributeSpec &spec, const std::wstring &value) {
     double v = 0;
     switch (spec.type) {
     case Type::Label: return IsLabel(value);
-    case Type::Anchor: return IndexOf(kAnchors, value) >= 0;
+    case Type::Anchor:
+    case Type::Align:
+    case Type::Style:
+    case Type::Case:
+    case Type::Bool:
+    case Type::Enter:
+    case Type::Figures:
+    case Type::Shape:
+    case Type::Mode:
+    case Type::Direction:
+    case Type::Bass:
+    case Type::Gradient: return IsWordOf(spec.type, value);
     case Type::Number: return ParseNumber(value, &v) && v >= spec.min && v <= spec.max;
-    case Type::Align: return value == L"auto" || value == L"left" || value == L"center" || value == L"right";
     case Type::Template: return IsTemplate(value);
     case Type::Font: return value.empty() || IsFontFamilyName(value);
     case Type::Weight: return WeightOf(value) > 0;
-    case Type::Style: return value == L"normal" || value == L"italic";
     case Type::Color: {
         uint32_t c = 0;
         return ParseRgba(value, &c);
     }
-    case Type::Case: return value == L"none" || value == L"upper" || value == L"lower";
-    case Type::Bool: return value == L"true" || value == L"false";
     case Type::Condition: {
         data::Condition c;
         return data::ParseCondition(value, &c);
@@ -195,14 +245,7 @@ bool Check(const AttributeSpec &spec, const std::wstring &value) {
         return data::ParseDate(value, &d);
     }
     case Type::Fraction: return IsFraction(value);
-    case Type::Enter: return value == L"fade" || value == L"rise" || value == L"zoom" || value == L"none";
-    case Type::Figures: return value == L"proportional" || value == L"tabular";
-    case Type::Shape: return value == L"glow" || value == L"plate";
     case Type::Count: return ParseNumber(value, &v) && v == std::floor(v) && v >= spec.min && v <= spec.max;
-    case Type::Mode: return value == L"bars" || value == L"line" || value == L"area";
-    case Type::Direction: return value == L"up" || value == L"down" || value == L"both";
-    case Type::Bass: return value == L"left" || value == L"right" || value == L"middle";
-    case Type::Gradient: return value == L"horizontal" || value == L"vertical" || value == L"level";
     case Type::Stops: {
         std::vector<Stop> stops;
         return ParseStops(value, &stops);
@@ -242,7 +285,12 @@ public:
         if (root.name != L"component") return Fail(root, L"the root element must be <component>");
         for (const auto &[name, value] : root.attributes) {
             if (name == L"format") {
-                if (value != L"1") return Fail(root, L"unsupported format " + value);
+                if (value != L"1") {
+                    // As theme.xml says it: a later format is one this version cannot read yet.
+                    double n = 0;
+                    const bool newer = ParseNumber(value, &n) && n > 1 && n == std::floor(n);
+                    return Fail(root, newer ? L"format " + value + L" needs a newer AnimeLogon" : L"unsupported format " + value);
+                }
             } else if (name == L"name" || name == L"author") {
                 if (!IsLabel(value) && !(name == L"author" && value.empty()))
                     return Fail(root, L"a bad " + name);
@@ -703,7 +751,7 @@ const Setting *Skin::Find(const std::wstring &id) const {
 }
 
 bool IsSettingId(const std::wstring &id) {
-    if (id.empty() || id.size() > 32) return false;
+    if (id.empty() || id.size() > kMaxSettingId) return false;
     for (wchar_t c : id)
         if (!((c >= L'a' && c <= L'z') || (c >= L'0' && c <= L'9') || c == L'-')) return false;
     return true;
@@ -1078,6 +1126,48 @@ const Skin &Default() {
         return s;
     }();
     return skin;
+}
+
+std::vector<AttributeInfo> Attributes() {
+    auto typeName = [](Type t) -> const wchar_t * {
+        switch (t) {
+        case Type::Label: return L"label";
+        case Type::Number: return L"number";
+        case Type::Count: return L"count";
+        case Type::Template: return L"template";
+        case Type::Font: return L"font";
+        case Type::Weight: return L"weight";
+        case Type::Color: return L"color";
+        case Type::Stops: return L"colors";
+        case Type::Condition: return L"condition";
+        case Type::Date: return L"date";
+        case Type::Fraction: return L"fraction";
+        default: return L"words";
+        }
+    };
+    std::vector<AttributeInfo> out;
+    for (const wchar_t *element : {L"panel", L"line", L"text", L"bar", L"spectrum", L"shadow", L"backdrop"}) {
+        const SpecList list = SpecsOf(element);
+        for (size_t i = 0; i < list.size; ++i) {
+            const AttributeSpec &spec = list.begin[i];
+            AttributeInfo a;
+            a.element = element;
+            a.name = spec.name;
+            a.type = typeName(spec.type);
+            if (spec.type == Type::Number || spec.type == Type::Count) a.min = spec.min, a.max = spec.max;
+            const WordList words = WordsOf(spec.type);
+            for (size_t w = 0; w < words.size; ++w) a.words.push_back(words.begin[w]);
+            if (spec.type == Type::Weight)
+                for (const auto &n : kWeights) a.words.push_back(n.name);
+            a.adjustable = spec.adjustable;
+            // What Resolve uses when the attribute is not written is what the settings app offers
+            // as its value then; a line's `show`, which it does not offer, is drawn.
+            if (const Offer *offer = OfferFor(element, spec.name)) a.fallback = offer->fallback;
+            else if (spec.type == Type::Bool) a.fallback = L"true";
+            out.push_back(std::move(a));
+        }
+    }
+    return out;
 }
 
 }  // namespace animelogon::skin

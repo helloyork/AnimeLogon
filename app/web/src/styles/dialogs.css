@@ -99,6 +99,9 @@
 .pick .browse { display: grid; place-items: center; background: var(--surface-3); color: var(--text-2); }
 .pick .browse svg { width: 20px; height: 20px; }
 .shielded { display: flex; align-items: center; gap: 6px; }
+/* A way to import while another import runs: not offered until that one ends. */
+.choice:disabled,
+.pick:disabled { opacity: .4; cursor: default; pointer-events: none; }
 
 /* Several pictures to choose from: a box in the picture's corner, shown while pointed at and once
    chosen, as in the Wallpaper Engine dialog. */

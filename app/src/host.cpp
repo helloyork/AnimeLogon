@@ -1,6 +1,7 @@
 #include "host.h"
 #include "sceneimport.h"
 
+#include <commctrl.h>
 #include <commdlg.h>
 #include <sddl.h>
 #define SECURITY_WIN32
@@ -34,6 +35,11 @@
 #include "fonts.h"
 #include "resources.h"
 #include "tray.h"
+#include "traymenu.h"
+
+// TaskDialogIndirect, for the question asked when the window is closed during an import or an export. The
+// program's manifest asks for version 6 of the common controls, which has it.
+#pragma comment(lib, "comctl32.lib")
 
 using Microsoft::WRL::Callback;
 using Microsoft::WRL::ComPtr;
@@ -53,6 +59,10 @@ constexpr UINT kPageMessage = WM_APP + 12;
 constexpr UINT kWorkshopFound = WM_APP + 13;
 constexpr UINT kReveal = WM_APP + 14;  // the icon asked: the window comes forward
 constexpr UINT kReread = WM_APP + 15;  // the icon changed settings.ini
+constexpr UINT kExportDone = WM_APP + 17;
+// The window's timers: the one that lets go of idle scene previews, and the one that reads the
+// displays again once a change of them has settled (Windows says so several times in a row).
+constexpr UINT_PTR kIdleTimer = 1, kDisplaysTimer = 2;
 
 // A folder of Wallpaper Engine's wallpapers, read-only, so the page can show their previews and
 // play their videos before they are imported: r0.workshop.animelogon.invalid for the first.
@@ -284,14 +294,88 @@ std::vector<uint8_t> IconPng(int px) {
     return png;
 }
 
+// Same displays, in the same places, with the same names: nothing the page shows of them changed.
+bool SameDisplays(const std::vector<MonitorInfo> &a, const std::vector<MonitorInfo> &b) {
+    return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin(), [](const MonitorInfo &x, const MonitorInfo &y) {
+               return x.key == y.key && x.name == y.name && x.gdiName == y.gdiName && x.primary == y.primary &&
+                      EqualRect(&x.rect, &y.rect);
+           });
+}
+
+// A sandbox's made-up displays: displays.txt in its folder, a line for each display,
+// "left,top,width,height,primary,name" in physical pixels, primary 1 or 0 (# starts a comment).
+// Empty when there is no such file or nothing in it can be read.
+std::vector<MonitorInfo> SandboxDisplays() {
+    std::vector<MonitorInfo> list;
+    std::vector<uint8_t> bytes;
+    if (paths::Sandbox().empty() || !secure::ReadFileBytes(paths::Sandbox() + L"\\displays.txt", &bytes, 64 * 1024))
+        return list;
+    const std::wstring text = FromUtf8(std::string(bytes.begin(), bytes.end()));
+    for (size_t at = !text.empty() && text[0] == 0xFEFF ? 1 : 0; at < text.size();) {
+        size_t end = text.find(L'\n', at);
+        if (end == std::wstring::npos) end = text.size();
+        std::wstring line = text.substr(at, end - at);
+        at = end + 1;
+        if (!line.empty() && line.back() == L'\r') line.pop_back();
+        if (line.empty() || line[0] == L'#') continue;
+        long v[5]{};
+        size_t from = 0;
+        bool ok = true;
+        for (long &n : v) {
+            const size_t comma = line.find(L',', from);
+            if (comma == std::wstring::npos) { ok = false; break; }
+            n = wcstol(line.c_str() + from, nullptr, 10);
+            from = comma + 1;
+        }
+        if (!ok || v[2] < 16 || v[3] < 16 || list.size() >= 8) continue;
+        MonitorInfo m;
+        m.name = line.substr(from);
+        m.rect = {v[0], v[1], v[0] + v[2], v[1] + v[3]};
+        m.primary = v[4] != 0;
+        m.gdiName = L"\\\\.\\DISPLAY" + std::to_wstring(list.size() + 1);
+        m.key = HashKey(L"sandbox display " + std::to_wstring(list.size() + 1) + L" " + m.name);
+        list.push_back(std::move(m));
+    }
+    // In EnumerateMonitors' order: the main one first.
+    std::stable_sort(list.begin(), list.end(), [](const MonitorInfo &a, const MonitorInfo &b) { return a.primary && !b.primary; });
+    return list;
+}
+
 }  // namespace
 
-Host::Host() : library_(DiskStores()), pictures_(library_) { monitors_ = EnumerateMonitors(); }
+std::vector<MonitorInfo> Host::Displays() {
+    std::vector<MonitorInfo> made = SandboxDisplays();
+    if (!made.empty()) {
+        ALOG(L"displays: %zu made up by the sandbox's displays.txt", made.size());
+        return made;
+    }
+    return EnumerateMonitors();
+}
+
+void Host::DisplaysChanged() {
+    std::vector<MonitorInfo> now = Displays();
+    if (SameDisplays(now, monitors_)) return;
+    ALOG(L"displays: %zu now, was %zu; the page is told", now.size(), monitors_.size());
+    monitors_ = std::move(now);
+    if (!ready_) return;
+    // The page asks for its pictures again once it sees the displays changed (store.ts).
+    SendEnvironment();
+}
+
+Host::Host() : library_(DiskStores()), pictures_(library_) { monitors_ = Displays(); }
 
 Host::~Host() {
     if (worker_.joinable()) {
+        // Closed during an import: the worker stops, and what it staged goes with it.
         cancel_ = true;
         worker_.join();
+        for (const ImportJob &j : importJobs_) secure::RemoveTree(j.dir);
+    }
+    if (exporter_.joinable()) {
+        // Closed during an export: the worker stops where it can, and what it wrote goes.
+        exportCancel_ = true;
+        exporter_.join();
+        if (exportOk_) DeleteFileW(exportPath_.c_str());
     }
     if (scanner_.joinable()) scanner_.join();
 }
@@ -336,7 +420,7 @@ bool Host::Create(int show, const std::wstring &reveal) {
     UpdateWindow(hwnd_);
     StartSteam();
     StartWebView();
-    SetTimer(hwnd_,1,500,nullptr);
+    SetTimer(hwnd_, kIdleTimer, 500, nullptr);
     // Opening the app brings the icon back, after "退出" in its menu too.
     if (library_.settings().tray) StartTray();
     return true;
@@ -406,16 +490,29 @@ LRESULT Host::Handle(UINT msg, WPARAM wp, LPARAM lp) {
         Fit();
         return 0;
     case WM_TIMER:
+        if (wp == kDisplaysTimer) {
+            KillTimer(hwnd_, kDisplaysTimer);
+            DisplaysChanged();
+            return 0;
+        }
         spectra_.Idle();
         for (auto it=scenePreviews_.begin();it!=scenePreviews_.end();) {
             if (GetTickCount64()-it->second.used > 1500) it=scenePreviews_.erase(it); else ++it;
         }
+        return 0;
+    case WM_DISPLAYCHANGE:
+        // A display plugged in or taken away, moved, made the main one or set to another resolution.
+        // Read again once Windows has finished saying so.
+        SetTimer(hwnd_, kDisplaysTimer, 300, nullptr);
         return 0;
     case WM_DPICHANGED: {
         const RECT *r = reinterpret_cast<const RECT *>(lp);
         SetWindowPos(hwnd_, nullptr, r->left, r->top, r->right - r->left, r->bottom - r->top,
                      SWP_NOZORDER | SWP_NOACTIVATE);
         SetIcons();
+        // A display's scale changed (or the window moved to one with another): Windows may have
+        // moved the displays beside it.
+        SetTimer(hwnd_, kDisplaysTimer, 300, nullptr);
         return 0;
     }
     case WM_GETMINMAXINFO: {
@@ -429,6 +526,9 @@ LRESULT Host::Handle(UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     case kImportDone:
         FinishImport();
+        return 0;
+    case kExportDone:
+        FinishExport();
         return 0;
     case WM_COPYDATA:
         return OnAsked(*reinterpret_cast<const COPYDATASTRUCT *>(lp));
@@ -452,12 +552,20 @@ LRESULT Host::Handle(UINT msg, WPARAM wp, LPARAM lp) {
         }
         return 0;
     case WM_CLOSE:
-        if (importing_) cancel_ = true;
+        // Closing cancels an import under way, which may have been converting a video for
+        // minutes, or an export: that is asked first. The question is asked once, however often
+        // the window is asked to close while it is up (the installer asks too).
+        if (importing_ || exporting_) {
+            if (askingToClose_ || !CloseCancels(!importing_)) return 0;
+            // Either may have finished while the question was up.
+            if (importing_) cancel_ = true;
+            if (exporting_) exportCancel_ = true;
+        }
         SavePlacement(hwnd_);
         DestroyWindow(hwnd_);
         return 0;
     case WM_DESTROY:
-        scenePreviews_.clear(); KillTimer(hwnd_,1);
+        scenePreviews_.clear(); KillTimer(hwnd_, kIdleTimer); KillTimer(hwnd_, kDisplaysTimer);
         StopSteam();
         if (controller_) controller_->Close();
         PostQuitMessage(0);
@@ -694,10 +802,13 @@ void Host::SendEnvironment() {
     Extensions(w, L"picture", importable::kPictures);
     Extensions(w, L"package", importable::kPackages);
     w.EndObject();
+    // Each display by the name Windows has for it and where it is beside the main one, which tell
+    // two displays apart where their names do not (traymenu.h).
     w.Key(L"monitors").BeginArray();
-    int n = 0;
-    for (const MonitorInfo &m : monitors_) {
-        w.BeginObject().Member(L"key", m.key).Member(L"name", i18n::Tr("monitor.name", {{L"n", std::to_wstring(++n)}})).Member(L"model", m.name);
+    for (size_t n = 0; n < monitors_.size(); ++n) {
+        const MonitorInfo &m = monitors_[n];
+        w.BeginObject().Member(L"key", m.key).Member(L"name", DisplayName(m, n)).Member(L"model", m.name);
+        w.Member(L"place", PlaceName(PlaceOf(m, monitors_)));
         w.Member(L"left", (int)m.rect.left).Member(L"top", (int)m.rect.top);
         w.Member(L"width", (int)(m.rect.right - m.rect.left)).Member(L"height", (int)(m.rect.bottom - m.rect.top));
         w.Member(L"primary", m.primary).EndObject();
@@ -931,18 +1042,20 @@ void Host::OnResource(ICoreWebView2WebResourceRequestedEventArgs *args) {
         const auto id=path.substr(6,path.size()-10);
         if (library_.Entry(id)) {
             const UINT width=ParamSize(query,L"w",960,3840); UINT height=ParamSize(query,L"h",0,2400);
-            if (!height) Shape(id,width,&height);
+            const bool shaped = height == 0;
+            if (shaped) Shape(id,width,&height);
             const double time=wcstod(Param(query,L"t").c_str(),nullptr)/1000;
             int frameW = 0, frameH = 0;
             if (std::isfinite(time) && time >= 0 && time <= 86400 &&
                 SceneFrame(id,width,height,time,Param(query,L"motion") == L"1",&body,&sceneBounds) &&
                 bitmap::ReadSize(body.data(), body.size(), body.size(), &frameW, &frameH)) {
-                // At the theme's brightness and blur, as the logon screen draws the scene; the frame's
-                // own size is the one its header gives.
+                // At the theme's brightness and blur, as the logon screen draws the scene, each display
+                // of a wall on its own; the frame's own size is the one its header gives.
                 const theme::Theme t = library_.Edited(id);
                 uint8_t *pixels = body.data() + bitmap::kHeaderBytes;
                 ApplyBrightness(pixels, (size_t)frameW * frameH, 4, t.brightness);
-                blur::Apply(pixels, frameW, frameH, 4, blur::Sigma(t.blur, frameH));
+                BlurWallpaper(pixels, (UINT)frameW, (UINT)frameH, t.blur,
+                              shaped ? Wall((UINT)frameW, (UINT)frameH) : std::vector<Screen>());
             }
         }
         type=L"image/bmp";
@@ -1262,7 +1375,9 @@ void Host::OnMessage(const json::Value &m) {
     } else if (op == L"importWallpaper") {
         Import(true);
     } else if (op == L"cancelImport") {
-        cancel_ = true;
+        // The busy bar's Cancel, for whichever of the two is under way.
+        if (importing_) cancel_ = true;
+        if (exporting_) exportCancel_ = true;
     } else if (op == L"workshop") {
         FindWorkshop();
     } else if (op == L"importWorkshop") {
@@ -1324,8 +1439,40 @@ void Host::OnMessage(const json::Value &m) {
 
 // --- what needs the elevated helper ----------------------------------------------------------
 
+bool Host::RefuseWhileBusy() {
+    if (!importing_ && !exporting_) return false;
+    Toast(i18n::Tr(importing_ ? "msg.import_busy" : "msg.export_busy"));
+    return true;
+}
+
+bool Host::CloseCancels(bool exporting) {
+    const std::string what = exporting ? "app.close_exporting" : "app.close_importing";
+    const std::wstring instruction = i18n::Tr(what), detail = i18n::Tr(what + ".detail");
+    const std::wstring close = i18n::Tr(what + ".close"), keep = i18n::Tr(what + ".keep");
+    constexpr int kClose = 100, kKeep = 101;
+    const TASKDIALOG_BUTTON buttons[] = {{kClose, close.c_str()}, {kKeep, keep.c_str()}};
+    TASKDIALOGCONFIG config{};
+    config.cbSize = sizeof config;
+    config.hwndParent = hwnd_;
+    // Esc and the title bar's close button keep the window, as Keep importing (exporting) does.
+    config.dwFlags = TDF_ALLOW_DIALOG_CANCELLATION | TDF_POSITION_RELATIVE_TO_WINDOW;
+    config.pszWindowTitle = L"AnimeLogon";
+    config.pszMainIcon = TD_WARNING_ICON;
+    config.pszMainInstruction = instruction.c_str();
+    config.pszContent = detail.c_str();
+    config.cButtons = ARRAYSIZE(buttons);
+    config.pButtons = buttons;
+    config.nDefaultButton = kKeep;
+    int pressed = kKeep;
+    askingToClose_ = true;
+    const HRESULT hr = TaskDialogIndirect(&config, &pressed, nullptr, nullptr);
+    askingToClose_ = false;
+    if (FAILED(hr)) ALOG(L"close: the question could not be asked (0x%08lX)", (unsigned long)hr);
+    return SUCCEEDED(hr) && pressed == kClose;
+}
+
 void Host::Import(bool wallpaper, importable::Kind kind) {
-    if (importing_) return;
+    if (RefuseWhileBusy()) return;
     const std::vector<importable::Filter> filters = wallpaper ? importable::WallpaperFilters() : importable::ThemeFilters(kind);
     ALOG(L"import: %s, file dialog opens on %s", wallpaper ? L"wallpaper" : importable::NameOf(kind), filters[0].patterns.c_str());
     const std::wstring source = PickFile(hwnd_, FiltersOf(filters).c_str(), nullptr, false, L"");
@@ -1334,7 +1481,7 @@ void Host::Import(bool wallpaper, importable::Kind kind) {
 }
 
 void Host::StartImport(std::vector<ImportJob> jobs, bool wallpaper) {
-    if (importing_ || jobs.empty()) return;
+    if (jobs.empty() || RefuseWhileBusy()) return;
     for (ImportJob &j : jobs) {
         j.dir = staging::NewImportDir();
         if (j.dir.empty()) {
@@ -1555,6 +1702,7 @@ void Host::ImportWorkshop(const json::Value &ids, bool wallpaper) {
 }
 
 void Host::ImportComponent(bool add) {
+    if (RefuseWhileBusy()) return;
     const std::wstring path = PickFile(hwnd_, Filters({{i18n::Tr("filter.components"), L"*.xml"}, {i18n::Tr("filter.all"), L"*.*"}}).c_str(), L"xml", false, L"");
     if (path.empty()) return;
     const std::wstring dir = staging::NewImportDir();
@@ -1689,17 +1837,67 @@ void Host::RemoveTheme(const std::wstring &id) {
 }
 
 void Host::ExportTheme(const std::wstring &id) {
+    if (RefuseWhileBusy()) return;
     const ThemeEntry *e = library_.Entry(id);
     if (!e) return;
+    const std::wstring name = e->builtIn ? i18n::Label(e->name) : e->name;
     const std::wstring path = PickFile(hwnd_, Filters({{i18n::Tr("filter.theme_export"), L"*.altheme"}, {i18n::Tr("filter.all"), L"*.*"}}).c_str(), L"altheme",
-                                       true, FileNameFor(e->name) + L".altheme");
-    if (path.empty()) return;
-    HCURSOR was = SetCursor(LoadCursorW(nullptr, IDC_WAIT));
-    std::wstring error;
-    const bool ok = exporter::Export(id, library_.settings(), path, &error);
-    SetCursor(was);
-    if (ok) Toast(i18n::Tr("msg.exported", {{L"path", path}}));
-    else Problem(error);
+                                       true, FileNameFor(name) + L".altheme");
+    if (path.empty() || RefuseWhileBusy()) return;
+    // Putting the sound back into a video and packing it can take a while for a long one, which
+    // the window does not wait for. The exporter says nothing of how far it is, so the bar only
+    // says that it is under way.
+    exportPath_ = path;
+    exportError_.clear();
+    exportOk_ = false;
+    exportCancel_ = false;
+    exporting_ = true;
+    Busy(i18n::Tr("busy.exporting", {{L"name", name}}), -1);
+    ALOG(L"export: %s to %s", id.c_str(), path.c_str());
+    // The theme as it is now: the settings are copied, and the stores are only read.
+    exporter_ = std::thread([this, id, path, settings = library_.settings()] {
+        const HRESULT co = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+        std::wstring error;
+        bool ok = false;
+        // As exporter::Export does it, with a look between gathering the files (the sound encoded
+        // into the video) and packing them, so that a cancel stops there.
+        const std::wstring work = exporter::NewWorkDir();
+        if (work.empty()) {
+            error = i18n::Tr("error.temp_dir");
+        } else {
+            std::vector<package::Item> items;
+            ok = exporter::Build(id, settings, DiskStore(), work, &items, &error);
+            std::wstring why;
+            if (ok && !exportCancel_ && !package::Write(items, path, &why)) {
+                ALOG(L"export: %s", why.c_str());
+                error = i18n::Tr("export.error.write", {{L"path", path}});
+                ok = false;
+            }
+            secure::RemoveTree(work);
+        }
+        // Cancelled after the archive was written: it is not left there either.
+        if (exportCancel_ && ok && DeleteFileW(path.c_str())) ok = false;
+        if (SUCCEEDED(co)) CoUninitialize();
+        exportError_ = error;
+        exportOk_ = ok;
+        PostMessageW(hwnd_, kExportDone, 0, 0);
+    });
+}
+
+void Host::FinishExport() {
+    if (exporter_.joinable()) exporter_.join();
+    exporting_ = false;
+    Busy(L"", 0);
+    if (exportCancel_.load()) {
+        // Cancelled from the busy bar while the archive was being written.
+        if (exportOk_ && DeleteFileW(exportPath_.c_str())) exportOk_ = false;
+        ALOG(L"export: cancelled");
+        Toast(i18n::Tr("msg.export_cancelled"));
+    } else if (exportOk_) {
+        Toast(i18n::Tr("msg.exported", {{L"path", exportPath_}}));
+    } else {
+        Problem(exportError_.empty() ? i18n::Tr("export.error.failed") : exportError_);
+    }
 }
 
 void Host::Switch(bool on) {

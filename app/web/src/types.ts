@@ -2,8 +2,9 @@
 
 export interface Monitor {
   key: string;
-  name: string;   // Display 1, Display 2…, in the page's language
+  name: string;   // the name Windows has for it (its model), else Display n with Windows' number for it
   model: string;
+  place: 'main' | 'left' | 'right' | 'above' | 'below';  // where it is beside the main display
   left: number;
   top: number;
   width: number;
@@ -114,6 +115,12 @@ export interface Setting {
   modified: boolean;
   folded?: boolean;   // shown with a part's adjustments rather than with the component's style
   content?: boolean;  // a switch that only shows or hides parts: listed under what the component shows
+  // A switch that turns one value on and off (the clock's backdrop): the slider for that value,
+  // shown under the switch while it is in the state `when`. The value is not among the parts.
+  strength?: Adjustment & { when: 'on' | 'off' };
+  // The one value this setting is all there is to (a spectrum's colours), which is offered here and
+  // not among the parts: `value` is the value in effect, and putting the setting back puts back both.
+  adjusts?: string;
   min: number;
   max: number;
   step: number;
@@ -227,7 +234,7 @@ export type FromNative =
   | { type: 'preview'; rev: number; seq: number; width: number; height: number; layer: boolean; bounds: Bound[]; screens: ScreenRect[] }
   | { type: 'toast'; text: string }
   | { type: 'problem'; text: string }
-  | { type: 'busy'; label: string | null; percent?: number }
+  | { type: 'busy'; label: string | null; percent?: number }  // percent < 0: under way, how far not known
   | { type: 'added'; instance: string }
   | { type: 'navigate'; theme: string }
   | { type: 'show'; what: 'switch' | 'lock' }

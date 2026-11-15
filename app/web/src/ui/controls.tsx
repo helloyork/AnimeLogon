@@ -238,7 +238,14 @@ export function SearchSelect({ id, label, options, value, onChange, size = 'sm',
 }
 
 /* --- progress and breadcrumbs --- */
-export function Progress({ value, label }: { value: number; label: string }) {
+// `value` in percent, or null while how far it is is not known: then a short stretch runs across.
+export function Progress({ value, label }: { value: number | null; label: string }) {
+  if (value === null)
+    return (
+      <div className="progress indeterminate" role="progressbar" aria-label={label}>
+        <i />
+      </div>
+    );
   return (
     <div className="progress" role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(value)}>
       <i style={{ width: Math.max(0, Math.min(100, value)) + '%' }} />

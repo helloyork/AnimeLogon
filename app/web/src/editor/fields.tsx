@@ -18,6 +18,7 @@ interface Common {
   detail?: string;
   modified: boolean;
   onReset: () => void;
+  sub?: boolean;  // set under the row above it, which turns it on (a strength under its switch)
 }
 
 // What a value is, said on the label: a tooltip, for those who point at it.
@@ -35,10 +36,10 @@ function Reset({ modified, onReset }: { modified: boolean; onReset?: () => void 
 }
 
 // A row of the grid: the label in the first column, the control and its reset button in the second.
-export function Prop({ id, label, detail, modified = false, onReset, top, children }: Partial<Common> & { label: string; top?: boolean; children: ReactNode }) {
+export function Prop({ id, label, detail, modified = false, onReset, top, sub, children }: Partial<Common> & { label: string; top?: boolean; children: ReactNode }) {
   return (
     <>
-      <label className={cx('plabel', top && 'top')} htmlFor={id} id={id ? id + '-label' : undefined}>
+      <label className={cx('plabel', top && 'top', sub && 'sub')} htmlFor={id} id={id ? id + '-label' : undefined}>
         <Name label={label} detail={detail} />
       </label>
       <div className="pctl">
@@ -91,7 +92,7 @@ export function viewFor(key: string, step: number): View {
   return plain('', decimals(step));
 }
 
-export function NumberField({ id, label, detail, min, max, step, value, modified, view, write, onReset }: Common & {
+export function NumberField({ id, label, detail, min, max, step, value, modified, view, write, onReset, sub }: Common & {
   min: number;
   max: number;
   step: number;
@@ -114,7 +115,7 @@ export function NumberField({ id, label, detail, min, max, step, value, modified
   };
   const f = view.factor, display = +(shown * f).toFixed(view.digits);
   return (
-    <Prop id={id} label={label} detail={detail} modified={modified} onReset={onReset}>
+    <Prop id={id} label={label} detail={detail} modified={modified} onReset={onReset} sub={sub}>
       <Slider id={id} label={label} min={min} max={max} step={step} value={shown} onDone={end}
         onChange={v => {
           if (!gesture.current) gesture.current = newGesture();
@@ -448,10 +449,10 @@ export function writer(instId: string, key: string) {
   return (v: string | number, gesture?: number) => (gesture ? liveSet(instId, { [key]: String(v) }, gesture) : setValue(instId, key, v));
 }
 
-export function AdjustmentField({ instId, a, onReset }: { instId: string; a: Adjustment; onReset: () => void }) {
+export function AdjustmentField({ instId, a, onReset, sub }: { instId: string; a: Adjustment; onReset: () => void; sub?: boolean }) {
   const id = `adj-${instId}-${a.key}`.replace(/\./g, '_');
   const write = writer(instId, a.key);
-  const common = { id, label: a.label, detail: a.detail || undefined, modified: a.modified, onReset };
+  const common = { id, label: a.label, detail: a.detail || undefined, modified: a.modified, onReset, sub };
   switch (a.control) {
     case 'slider':
       // A font's weight is one of its named weights, as Windows' and Office's font lists say them.
@@ -474,10 +475,31 @@ export function AdjustmentField({ instId, a, onReset }: { instId: string; a: Adj
   }
 }
 
-export function SettingField({ instId, setting: s, onReset }: { instId: string; setting: Setting; onReset: () => void }) {
+// A switch that turns one value on and off, with the slider for that value under it while the
+// switch is in the state that shows it (the clock's backdrop and how strong it is). The slider
+// starts at the switch's own value; turning the switch puts the slider back, so off is off and on
+// starts again from there. The switch's reset puts back both. The slider also shows where its value
+// was set by hand in the other state, so that what is drawn can be seen and put back.
+function StrengthField({ instId, setting: s, strength, onReset }: { instId: string; setting: Setting; strength: NonNullable<Setting['strength']>; onReset: (keys: string[]) => void }) {
+  const write = writer(instId, s.id);
+  return (
+    <>
+      <ToggleField id={`set-${instId}-${s.id}`} label={s.label} detail={s.detail || undefined} modified={s.modified || strength.modified}
+        value={s.value === 'on'} write={on => write(on ? 'on' : 'off')} onReset={() => onReset([s.id, strength.key])} />
+      {(s.value === strength.when || strength.modified) && (
+        <AdjustmentField instId={instId} a={strength} sub onReset={() => onReset([strength.key])} />
+      )}
+    </>
+  );
+}
+
+// `onReset` is given the keys to put back: the setting's own, with a strength its slider's, and the
+// one value it stands for when it is all there is to it (the native side writes either, as the value asked takes).
+export function SettingField({ instId, setting: s, onReset }: { instId: string; setting: Setting; onReset: (keys: string[]) => void }) {
+  if (s.kind === 'toggle' && s.strength) return <StrengthField instId={instId} setting={s} strength={s.strength} onReset={onReset} />;
   const id = `set-${instId}-${s.id}`;
   const write = writer(instId, s.id);
-  const common = { id, label: s.label, detail: s.detail || undefined, modified: s.modified, onReset };
+  const common = { id, label: s.label, detail: s.detail || undefined, modified: s.modified, onReset: () => onReset(s.adjusts ? [s.id, s.adjusts] : [s.id]) };
   switch (s.kind) {
     case 'number':
       return <NumberField {...common} min={s.min} max={s.max} step={s.step} value={s.value} view={viewFor(s.id, s.step)} write={write} />;

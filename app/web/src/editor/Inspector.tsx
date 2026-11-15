@@ -1,7 +1,7 @@
-// The panel beside the picture (D40). It shows one level at a time, as the selection says: the
-// wallpaper and the list of components; one component; one part of it (Components / Clock / Time). The
-// breadcrumbs at its top go back up. Each level is a few sections that fold, their values in a
-// grid of labels and controls.
+// The panel beside the picture, where a theme is edited on its own page. It shows one level at a
+// time, as the selection says: the wallpaper and the list of components; one component; one part
+// of it (Components / Clock / Time). The breadcrumbs at its top go back up. Each level is a few
+// sections that fold, their values in a grid of labels and controls.
 import { useEffect, useLayoutEffect, useReducer, useRef, useState, type ReactNode } from 'react';
 import { Menu, MenuItem, MenuList, MenuPopover, MenuTrigger } from '@fluentui/react-components';
 import {
@@ -30,7 +30,7 @@ import { useDraft } from './draft';
 import { AdjustmentField, ChoiceField, NumberField, SettingField, ToggleField, type View } from './fields';
 import { adjustment, centreOf, clamp, geometry, placeCentre } from './geometry';
 
-const COMMON_TEXT = ['show', 'font', 'weight', 'size', 'color'];
+const COMMON_TEXT = ['show', 'font', 'weight', 'size', 'color', 'opacity'];
 // A backdrop's corners and padding shape a plate; a glow has neither.
 const PLATE_ONLY = ['radius', 'padding-x', 'padding-y'];
 
@@ -66,8 +66,9 @@ function Section({ value, title, aside, sections, children }: { value: string; t
   );
 }
 
-// A row that opens something: a part, a layer. A part that can be left out has its switch at the
-// row's end, as a component has in the list of components.
+// A row that opens something: a part, a layer. A part that can be left out has its switch near the
+// row's end, as a component has in the list of components; the chevron after it still says that
+// the row opens, and opens it too.
 function OpenRow({ title, detail, onOpen, shown, onShow }: { title: string; detail?: string; onOpen: () => void; shown?: boolean; onShow?: (on: boolean) => void }) {
   return (
     <div className="item">
@@ -78,7 +79,13 @@ function OpenRow({ title, detail, onOpen, shown, onShow }: { title: string; deta
         </span>
         {!onShow && <ChevronRight12Regular className="chev" />}
       </button>
-      {onShow && <Switch checked={!!shown} label={tr('inspector.show_named', { name: title })} onChange={onShow} />}
+      {onShow && (
+        <>
+          <Switch checked={!!shown} label={tr('inspector.show_named', { name: title })} onChange={onShow} />
+          {/* Only for the pointer: the name before it is the row's button for the keyboard. */}
+          <span className="chev-after" aria-hidden="true" onClick={onOpen}><ChevronRight12Regular className="chev" /></span>
+        </>
+      )}
     </div>
   );
 }
@@ -240,7 +247,12 @@ function InstanceView({ inst }: { inst: Instance }) {
   // How it looks first, then what it shows: switches that only show or hide parts of it.
   const own = (inst.settings || []).filter(st => !st.folded && !st.content);
   const content = (inst.settings || []).filter(st => !st.folded && st.content);
-  const keys = [...(inst.settings || []).map(st => st.id), ...(inst.parts || []).flatMap(p => p.adjustments.map(a => a.key))];
+  // Everything the component's reset puts back: its settings, the values its switches turn on and the
+  // values its settings stand for, its parts.
+  const keys = [
+    ...(inst.settings || []).flatMap(st => [st.id, ...(st.strength ? [st.strength.key] : []), ...(st.adjusts ? [st.adjusts] : [])]),
+    ...(inst.parts || []).flatMap(p => p.adjustments.map(a => a.key)),
+  ];
   const single = (inst.panels ?? 1) === 1;
   return (
     <>
@@ -272,22 +284,35 @@ function InstanceView({ inst }: { inst: Instance }) {
           <div className="notice"><Warning16Regular /><span>{tr('inspector.missing_file')}</span></div>
         </div>
       ) : (
-        // What a component looks like comes first; where it is, mostly set by dragging it on the
-        // stage, is folded until opened; the parts that can be set one by one follow.
+        // What a component looks like and what it shows come first, then its parts one by one; how
+        // its lines sit together follows, and where it is (mostly set by dragging it on the stage)
+        // and how it comes in are folded until opened. Its opacity as a whole ends the first
+        // section, apart from the settings of its own, so that it is not taken for one of them.
         <>
           {(single || own.length > 0) && (
             <Section value="look" title={tr('inspector.look')} sections={sections}>
               <div className="props">
                 {single && <PanelField instId={inst.id} pk="p1" attr="size" />}
-                {single && <PanelField instId={inst.id} pk="p1" attr="opacity" />}
-                {own.map(st => <SettingField key={st.id} instId={inst.id} setting={st} onReset={() => clearValues(inst.id, [st.id])} />)}
+                {own.map(st => <SettingField key={st.id} instId={inst.id} setting={st} onReset={k => clearValues(inst.id, k)} />)}
+                {single && <PanelField instId={inst.id} pk="p1" attr="opacity" label={tr('inspector.component_opacity')} />}
               </div>
             </Section>
           )}
           {content.length > 0 && (
             <Section value="content" title={tr('inspector.content')} sections={sections}>
               <div className="props">
-                {content.map(st => <SettingField key={st.id} instId={inst.id} setting={st} onReset={() => clearValues(inst.id, [st.id])} />)}
+                {content.map(st => <SettingField key={st.id} instId={inst.id} setting={st} onReset={k => clearValues(inst.id, k)} />)}
+              </div>
+            </Section>
+          )}
+          {parts.length > 0 && (
+            <Section value="parts" title={tr('inspector.parts')} sections={sections}>
+              <div className="list">
+                {parts.map(p => {
+                  const show = p.adjustments.find(a => a.key === p.key + '.show');
+                  return <OpenRow key={p.key} title={p.label} onOpen={() => select(inst.id, p.key)}
+                    shown={show?.value !== 'false'} onShow={show && (on => setValue(inst.id, show.key, on ? 'true' : 'false'))} />;
+                })}
               </div>
             </Section>
           )}
@@ -304,17 +329,6 @@ function InstanceView({ inst }: { inst: Instance }) {
           {single && (
             <Section value="enter" title={tr('inspector.enter')} sections={sections}>
               <EnterFields instId={inst.id} pk="p1" />
-            </Section>
-          )}
-          {parts.length > 0 && (
-            <Section value="parts" title={tr('inspector.parts')} sections={sections}>
-              <div className="list">
-                {parts.map(p => {
-                  const show = p.adjustments.find(a => a.key === p.key + '.show');
-                  return <OpenRow key={p.key} title={p.label} onOpen={() => select(inst.id, p.key)}
-                    shown={show?.value !== 'false'} onShow={show && (on => setValue(inst.id, show.key, on ? 'true' : 'false'))} />;
-                })}
-              </div>
             </Section>
           )}
         </>
@@ -387,12 +401,12 @@ function PartView({ inst, partKey }: { inst: Instance | SceneControls; partKey: 
 }
 
 // One of a panel's own adjustments (its size, how its lines align), showing what a resize on the
-// stage is about to set while it is under way.
-function PanelField({ instId, pk, attr }: { instId: string; pk: string; attr: string }) {
+// stage is about to set while it is under way. `label` names it where its own name is not enough.
+function PanelField({ instId, pk, attr, label }: { instId: string; pk: string; attr: string; label?: string }) {
   const draft = useDraft(instId);
   const a = adjustment(instId, pk + '.' + attr);
   if (!a) return null;
-  return <AdjustmentField instId={instId} a={{ ...a, value: draft?.[a.key] ?? a.value }} onReset={() => clearValues(instId, [a.key])} />;
+  return <AdjustmentField instId={instId} a={{ ...a, label: label ?? a.label, value: draft?.[a.key] ?? a.value }} onReset={() => clearValues(instId, [a.key])} />;
 }
 
 // How a panel's lines sit together, in one place: how they align, whether a text that may hang
@@ -442,11 +456,12 @@ function EnterFields({ instId, pk }: { instId: string; pk: string }) {
 
 const POSITION_VIEW = (unit: string): View => ({ factor: 1, digits: 1, unit: () => unit });
 
-// Where a panel is (D60): where the middle of its box is, in percent of its display. The anchor
+// Where a panel is: where the middle of its box is, in percent of its display. The anchor
 // follows the position, as it does for a drag, and is never shown; lining a panel up with the
 // display or with other panels is what the stage's snap lines are for. The margin from the
 // display's edges is folded under a link. While the panel is dragged or resized on the stage, the fields
-// show where it is going. Every position keeps it on its display.
+// show where it is going. A position may carry it partly past the display's edges, as long as a
+// quarter of its box stays on the display in each direction (geometry.ts, edgeRange).
 function PlaceFields({ instId, pk }: { instId: string; pk: string }) {
   const draft = useDraft(instId);
   const [, redraw] = useReducer((x: number) => x + 1, 0);

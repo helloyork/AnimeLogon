@@ -1,9 +1,12 @@
 #include "check.h"
 
+#include <cmath>
 #include <cstdio>
+#include <map>
 #include <string>
 
 #include "animelogon/skin.h"
+#include "animelogon/text.h"
 #include "animelogon/xml.h"
 
 using namespace animelogon;
@@ -291,4 +294,67 @@ TEST(SkinSettingValues) {
     color.kind = skin::SettingKind::Color;
     CHECK(skin::IsValue(color, L"#12AB34") && skin::IsValue(color, L"#12AB3480") && !skin::IsValue(color, L"#12AB3"));
     CHECK(skin::IsSettingId(L"date-style") && !skin::IsSettingId(L"Date") && !skin::IsSettingId(L"a.b"));
+}
+
+// A component of a later format says that it needs a newer AnimeLogon, as a theme does.
+TEST(ComponentOfALaterFormatSaysItNeedsANewerVersion) {
+    const std::string panel = "<panel><line><text value=\"x\"/></line></panel>";
+    std::wstring error;
+    CHECK(!ParsesSkin("<component format=\"2\" name=\"t\">" + panel + "</component>", &error));
+    CHECK(error.find(L"format 2 needs a newer AnimeLogon") != std::wstring::npos);
+    CHECK(!ParsesSkin("<component format=\"one\" name=\"t\">" + panel + "</component>", &error));
+    CHECK(error.find(L"unsupported format one") != std::wstring::npos);
+}
+
+// The format as skin::Attributes describes it for documentation is the one the reader takes: each
+// attribute is accepted on its element with a value of its type, its default and each of its words,
+// a number past its range is refused, and an element takes no attribute the description leaves out.
+// Adjustable attributes are the ones an adjustment key may name.
+TEST(DescribedAttributesAreTheOnesTheReaderTakes) {
+    // One of each element, with `attribute="value"` on the one named.
+    auto component = [](const std::wstring &element, const std::wstring &attribute, const std::wstring &value) {
+        auto on = [&](const wchar_t *name, std::wstring own) {
+            if (element != name) return own;
+            if (attribute == L"value") own.clear();
+            return own + L" " + attribute + L"=\"" + value + L"\"";
+        };
+        return ToUtf8(L"<component format=\"1\" name=\"t\"><panel" + on(L"panel", L"") + L"><line" + on(L"line", L"") +
+                      L"><text" + on(L"text", L" value=\"x\"") + L"/><bar" + on(L"bar", L" value=\"{media.progress}\"") +
+                      L"/><spectrum" + on(L"spectrum", L"") + L"/></line><shadow" + on(L"shadow", L"") +
+                      L"/><backdrop" + on(L"backdrop", L"") + L"/></panel></component>");
+    };
+    auto sample = [](const skin::AttributeInfo &a) -> std::wstring {
+        if (a.type == L"number" || a.type == L"count") return std::to_wstring((long long)std::ceil(a.min));
+        if (a.type == L"words") return a.words.front();
+        if (a.type == L"label") return L"Label";
+        if (a.type == L"template") return L"{time} {battery.percent}%";
+        if (a.type == L"fraction") return L"{media.progress}";
+        if (a.type == L"condition") return L"media.state!=paused";
+        if (a.type == L"date") return L"2027-01-01";
+        if (a.type == L"font") return L"Segoe UI";
+        if (a.type == L"weight") return L"bold";
+        if (a.type == L"color") return L"#20406080";
+        if (a.type == L"colors") return L"#FFFFFF 0%, #000000 100%";
+        return L"";
+    };
+    const std::vector<skin::AttributeInfo> attributes = skin::Attributes();
+    CHECK(attributes.size() > 80);
+    const std::map<std::wstring, std::wstring> paths = {{L"panel", L"p1"},      {L"line", L"p1.l1"},
+                                                        {L"text", L"p1.l1.t1"},  {L"bar", L"p1.l1.r1"},
+                                                        {L"spectrum", L"p1.l1.a1"}, {L"shadow", L"p1.s1"},
+                                                        {L"backdrop", L"p1.b"}};
+    for (const skin::AttributeInfo &a : attributes) {
+        std::wstring error;
+        const bool sampled = ParsesSkin(component(a.element, a.name, sample(a)), &error);
+        if (!sampled) std::printf("  %ls.%ls: %ls\n", a.element.c_str(), a.name.c_str(), error.c_str());
+        CHECK(sampled);
+        if (!a.fallback.empty()) CHECK(ParsesSkin(component(a.element, a.name, a.fallback)));
+        for (const std::wstring &word : a.words) CHECK(ParsesSkin(component(a.element, a.name, word)));
+        if (a.type == L"number" || a.type == L"count") {
+            CHECK(ParsesSkin(component(a.element, a.name, Format(L"%g", a.max))));
+            CHECK(!ParsesSkin(component(a.element, a.name, Format(L"%g", a.max + 1))));
+        }
+        CHECK(skin::IsAdjustmentKey(paths.at(a.element) + L"." + a.name) == a.adjustable);
+    }
+    for (const auto &[element, path] : paths) CHECK(!ParsesSkin(component(element, L"nonsense", L"1")));
 }

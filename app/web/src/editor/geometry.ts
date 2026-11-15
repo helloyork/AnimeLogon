@@ -92,30 +92,55 @@ export function geometry(instId: string, pk: string, k: number, stage: { width: 
 const anchorX = (g: Geometry, col: number) => g.f.left + [g.M, g.W / 2, g.W - g.M][col];
 const anchorY = (g: Geometry, row: number) => g.f.top + [g.M, g.H / 2, g.H - g.M][row];
 
-// How far a panel's offsets may go, in percent, with its box still on its display, when it is
-// placed by the given column and row. The native side stops a panel at the display's edges in
-// any case (skinview.cpp), so past these an offset would change nothing on the screen.
+// A panel may hang past the edges of its display, cut off there as the logon screen cuts it, but
+// at least this much of its box stays on the display in each direction, so it is never lost and
+// can always be grabbed back. The native side keeps the same rule (skinview.h kPanelStaysOn), so
+// the stage shows where the logon screen will put a panel.
+export const STAYS_ON = 0.25;
+
+// Where the near edge (left or top) of a box `size` long may lie on a display that starts at
+// `start` and is `length` long: from three quarters of the box before the start to a quarter of
+// it before the end. A box at least as long as the display is centred on it.
+export function edgeRange(size: number, start: number, length: number): [number, number] {
+  if (size >= length) {
+    const mid = start + (length - size) / 2;
+    return [mid, mid];
+  }
+  return [start - (1 - STAYS_ON) * size, start + length - STAYS_ON * size];
+}
+
+// Whether part of a panel's box is past its display's edges, so not on the stage's picture.
+export function hangsOff(g: Geometry) {
+  const { f, r } = g, e = 0.5;
+  return r.left < f.left - e || r.top < f.top - e || r.left + r.width > f.left + f.width + e || r.top + r.height > f.top + f.height + e;
+}
+
+// How far a panel's offsets may go, in percent, when it is placed by the given column and row:
+// as far as keeps a quarter of its box on its display, within the offsets' own ±50. The native
+// side stops a panel there in any case (skinview.cpp), so past these an offset would change
+// nothing on the screen.
 export function offsetLimits(g: Geometry, col = g.col, row = g.row) {
   const { f, W, H, r } = g;
   const bx = anchorX(g, col), by = anchorY(g, row);
-  // The box either side of the point it is held by.
-  const left = g.hx[col] - r.left, right = r.left + r.width - g.hx[col];
-  const above = g.hy[row] - r.top, below = r.top + r.height - g.hy[row];
+  // Where the box's left and top edges may go, and how far each is from the point it is held by.
+  const [l0, l1] = edgeRange(r.width, f.left, W), [t0, t1] = edgeRange(r.height, f.top, H);
+  const left = g.hx[col] - r.left, above = g.hy[row] - r.top;
   const span = (lo: number, hi: number): [number, number] => {
-    if (lo > hi) {
-      const mid = clamp(roundTo((lo + hi) / 2, 0.1), -50, 50);  // larger than the display: centred
+    if (hi - lo < 1e-9) {
+      const mid = clamp(roundTo(lo, 0.1), -50, 50);  // larger than the display: centred
       return [mid, mid];
     }
-    return [Math.max(-50, Math.ceil(lo * 10 - 1e-6) / 10), Math.min(50, Math.floor(hi * 10 + 1e-6) / 10)];
+    const a = clamp(Math.ceil(lo * 10 - 1e-6) / 10, -50, 50), b = clamp(Math.floor(hi * 10 + 1e-6) / 10, -50, 50);
+    return [a, Math.max(a, b)];
   };
-  const [x0, x1] = span(((f.left + left - bx) / W) * 100, ((f.left + W - right - bx) / W) * 100);
-  const [y0, y1] = span(((f.top + above - by) / H) * 100, ((f.top + H - below - by) / H) * 100);
-  return { x0, x1: Math.max(x0, x1), y0, y1: Math.max(y0, y1) };
+  const [x0, x1] = span(((l0 + left - bx) / W) * 100, ((l1 + left - bx) / W) * 100);
+  const [y0, y1] = span(((t0 + above - by) / H) * 100, ((t1 + above - by) / H) * 100);
+  return { x0, x1, y0, y1 };
 }
 
-// The offsets the panel is shown at: the stored ones, unless the display's edges stop it short of
-// them (an older setting, or a theme made on a display of another shape). The picture's pixels are
-// whole, so within a pixel and a half the stored values are taken as exact.
+// The offsets the panel is shown at: the stored ones, unless keeping a quarter of it on its display
+// stops it short of them (an older setting, or a theme made on a display of another shape). The
+// picture's pixels are whole, so within a pixel and a half the stored values are taken as exact.
 export function shownOffset(g: Geometry) {
   const vx = ((g.rx - g.bx) / g.W) * 100, vy = ((g.ry - g.by) / g.H) * 100;
   return {
@@ -135,15 +160,17 @@ export interface SnapLine {
 const SNAP = 6;  // how near, in stage pixels, a panel has to come to a line to snap to it
 
 // Where a panel dragged by (dx, dy) lands, said the way the sliders say it: the nearest of the
-// nine anchors and an offset from it. Its box stays on its display. Unless `free`, it snaps when
-// the point it would be held by comes near an anchor's line (the offset is then exactly zero,
-// which puts that point on the anchor, not the middle of its box), when an edge comes near the
-// display's edge, or when an edge or its middle comes near another panel's.
+// nine anchors and an offset from it. It may go past the display's edges until only a quarter of
+// its box is left on (edgeRange). Unless `free`, it snaps when the point it would be held by comes
+// near an anchor's line (the offset is then exactly zero, which puts that point on the anchor, not
+// the middle of its box), when an edge comes near the display's edge -- so an edge stops flush
+// with it first, and dragging on carries it past -- or when an edge or its middle comes near
+// another panel's.
 export function placeDragged(g: Geometry, dx: number, dy: number, opt: { free?: boolean; others?: Rect[] } = {}) {
   const { f, W, H, r } = g;
-  const within = (d: number, lo: number, hi: number) => (lo > hi ? (lo + hi) / 2 : clamp(d, lo, hi));
-  const keepX = (d: number) => within(d, f.left - r.left, f.left + W - r.left - r.width);
-  const keepY = (d: number) => within(d, f.top - r.top, f.top + H - r.top - r.height);
+  const [l0, l1] = edgeRange(r.width, f.left, W), [t0, t1] = edgeRange(r.height, f.top, H);
+  const keepX = (d: number) => clamp(d, l0 - r.left, l1 - r.left);
+  const keepY = (d: number) => clamp(d, t0 - r.top, t1 - r.top);
   dx = keepX(dx);
   dy = keepY(dy);
   const lines: SnapLine[] = [];
@@ -195,10 +222,11 @@ export function placeDragged(g: Geometry, dx: number, dy: number, opt: { free?: 
   return { anchor: ANCHORS[row * 3 + col], ox, oy, col, row, bx, by, rx, ry, left: L0, top: T0, lines };
 }
 
-// Where a panel is, as the panel beside the stage says it (D60): its middle, in percent of its
-// display's width and height from the left and top edges, and how far that can go with the box
-// still on the display. The middle is the point the panel is held by when it is centred (the
-// middle of its lines without a marker that hangs beside them, such as AM/PM, D57), so a clock
+// Where a panel is, as the panel beside the stage says it: its middle, in percent of its
+// display's width and height from the left and top edges, and how far that can go with a quarter
+// of the box still on the display (below 0 or above 100 when the panel hangs past an edge). The
+// middle is the point the panel is held by when it is centred (the
+// middle of its lines without a marker that hangs beside them, such as AM/PM), so a clock
 // snapped to the display's middle reads 50. It is reckoned from the stored offsets, not the
 // picture's whole pixels, so a value typed in reads back as typed.
 function middle(g: Geometry) {
@@ -207,13 +235,14 @@ function middle(g: Geometry) {
 }
 export function centreOf(g: Geometry) {
   const { f, W, H, r } = g, m = middle(g);
-  const span = (before: number, after: number, size: number): [number, number] => {
-    const lo = (before / size) * 100, hi = 100 - (after / size) * 100;
-    if (lo > hi) return [50, 50];
+  // From where the box's near edge may go (edgeRange) and how far the middle is from that edge.
+  const span = ([e0, e1]: [number, number], before: number, start: number, size: number): [number, number] => {
+    if (e1 - e0 < 1e-9) return [50, 50];  // larger than the display: centred
+    const lo = ((e0 + before - start) / size) * 100, hi = ((e1 + before - start) / size) * 100;
     return [Math.ceil(lo * 10 - 1e-6) / 10, Math.floor(hi * 10 + 1e-6) / 10];
   };
-  const [x0, x1] = span(g.hx[1] - r.left, r.left + r.width - g.hx[1], W);
-  const [y0, y1] = span(g.hy[1] - r.top, r.top + r.height - g.hy[1], H);
+  const [x0, x1] = span(edgeRange(r.width, f.left, W), g.hx[1] - r.left, f.left, W);
+  const [y0, y1] = span(edgeRange(r.height, f.top, H), g.hy[1] - r.top, f.top, H);
   return { x: roundTo(((m.x - f.left) / W) * 100, 0.1), y: roundTo(((m.y - f.top) / H) * 100, 0.1), x0, x1, y0, y1 };
 }
 // Where the middle is after the panel has been moved by (dx, dy), or scaled about a point.
@@ -238,16 +267,30 @@ export function fixedCorner(g: Geometry, handle: string) {
   const { r } = g;
   return { x: handle.includes('w') ? r.left + r.width : r.left, y: handle.includes('n') ? r.top + r.height : r.top };
 }
-// The largest scale about that corner that keeps the box on its display.
-export function largestScale(g: Geometry, o: { x: number; y: number }) {
+// The smallest and largest scales about that corner that keep a quarter of the box on its display
+// in each direction (edgeRange), and the box shorter than the display, which would centre it. The
+// corner itself may be past an edge: shrinking towards it could then take the box off the display.
+export function scaleRange(g: Geometry, o: { x: number; y: number }): [number, number] {
   const { f, W, H, r } = g;
-  const ex = (o.x === r.left ? r.left + r.width : r.left) - o.x, ey = (o.y === r.top ? r.top + r.height : r.top) - o.y;
-  let m = Infinity;
-  if (ex > 0) m = Math.min(m, (f.left + W - o.x) / ex);
-  else if (ex < 0) m = Math.min(m, (f.left - o.x) / ex);
-  if (ey > 0) m = Math.min(m, (f.top + H - o.y) / ey);
-  else if (ey < 0) m = Math.min(m, (f.top - o.y) / ey);
-  return m;
+  let least = 0, most = Infinity;
+  // Along one direction: the box runs from the fixed `at` to `far`, `start` and `length` the display.
+  const along = (at: number, far: number, start: number, length: number) => {
+    const n = Math.abs(far - at);
+    if (!n) return;
+    most = Math.min(most, length / n);
+    if (far > at) {
+      // Its near edge stays at `at`; its far end grows towards and past the display's end.
+      most = Math.min(most, (start + length - at) / (STAYS_ON * n));
+      if (at < start) least = Math.max(least, (start - at) / ((1 - STAYS_ON) * n));
+    } else {
+      // Its near edge moves back from `at`, towards and past the display's start.
+      most = Math.min(most, (at - start) / (STAYS_ON * n));
+      if (at > start + length) least = Math.max(least, (at - start - length) / ((1 - STAYS_ON) * n));
+    }
+  };
+  along(o.x, o.x === r.left ? r.left + r.width : r.left, f.left, W);
+  along(o.y, o.y === r.top ? r.top + r.height : r.top, f.top, H);
+  return [least, most];
 }
 export function offsetsScaledAbout(g: Geometry, o: { x: number; y: number }, scale: number) {
   const shown = shownOffset(g);
@@ -255,13 +298,17 @@ export function offsetsScaledAbout(g: Geometry, o: { x: number; y: number }, sca
   return { ox: clamp(roundTo(shown.ox + ((hx - g.rx) / g.W) * 100, 0.1), -50, 50), oy: clamp(roundTo(shown.oy + ((hy - g.ry) / g.H) * 100, 0.1), -50, 50) };
 }
 
-// The smallest panel or text under a point of the stage.
+// The smallest panel or text under a point of the stage. Bounds are whole boxes, also where a
+// panel hangs past its display's edge; on a wall of displays, the part past the edge is not on
+// the next display, so a point there does not hit it.
 export function hitTest(x: number, y: number, k: number): Bound | null {
   if (!k) return null;
   const px = x / k, py = y / k, pad = 4 / k;
   let best: Bound | null = null, area = 0;
   for (const b of pv.bounds) {
     if (px < b.left - pad || px > b.right + pad || py < b.top - pad || py > b.bottom + pad) continue;
+    const s = b.instance !== 'wallpaper' && pv.screens.length > 1 ? pv.screens[b.screen] : undefined;
+    if (s && (px < s.left || px > s.right || py < s.top || py > s.bottom)) continue;
     const a = (b.right - b.left) * (b.bottom - b.top);
     if (!best || a < area) {
       best = b;

@@ -282,7 +282,8 @@ To run the settings app's Workshop pages against it:
    Copy-Item "$bin\animelogon-steam.exe" "$bin\steam\"
    Copy-Item 'build\x64\fake-steam\Release\steam_api64.dll' "$bin\steam\"
    ```
-2. Copy `steam/dev/fixture.json` somewhere outside the repository (for example `D:\tmp\steam-dev\`).
+2. Copy `steam/dev/fixture.json` to a folder of its own outside the repository (for example
+   `%TEMP%\steam-dev\`).
    Installed items' folders are relative to the fixture (`content\<id>`); put a `.altheme` in each to
    try importing them.
 3. Set `ANIMELOGON_FAKE_STEAM` to the fixture's full path in the environment the settings app starts

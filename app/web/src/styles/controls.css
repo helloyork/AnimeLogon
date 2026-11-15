@@ -202,6 +202,9 @@
 /* --- progress --- */
 .progress { width: 120px; height: 4px; border-radius: 2px; background: var(--track); overflow: hidden; flex: none; }
 .progress > i { display: block; height: 100%; background: var(--accent); transition: width .2s; }
+/* How far it is not known: a third of the bar runs across it, as Windows' own bar does. */
+.progress.indeterminate > i { width: 33%; animation: progress-run 1.4s cubic-bezier(.45, 0, .55, 1) infinite; }
+@keyframes progress-run { from { transform: translateX(-100%); } to { transform: translateX(300%); } }
 
 /* --- where one is: 主题库 / 4K --- */
 .crumbs { display: flex; align-items: center; gap: 6px; min-width: 0; }
@@ -224,4 +227,6 @@
 
 @media (prefers-reduced-motion: reduce) {
   .btn, .field, .switch, .switch::after, .slider::-webkit-slider-thumb, .progress > i { transition: none; }
+  /* Still: the whole bar, fainter, says it is under way. */
+  .progress.indeterminate > i { width: 100%; opacity: .5; animation: none; }
 }

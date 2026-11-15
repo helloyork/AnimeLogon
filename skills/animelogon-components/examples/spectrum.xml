@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- An audio spectrum of what the PC plays, across the bottom of the display, with a gradient the
+     user can change and a choice of style. The toggle fades it out while nothing is heard. -->
+<component format="1" name="Wide spectrum" author="AnimeLogon">
+  <settings>
+    <number id="size" label="Height" detail="In percent of the display's height." default="7" min="2" max="30" step="0.1"/>
+    <number id="width" label="Width" detail="In multiples of the height." default="14" min="2" max="40" step="0.1"/>
+    <choice id="mode" label="Style" default="bars">
+      <option value="bars" label="Bars"/>
+      <option value="line" label="Line"/>
+      <option value="area" label="Filled line"/>
+    </choice>
+    <colors id="colors" label="Colors" default="#8FD3FF 0%, #C6B9FF 50%, #F3A6FF 100%"/>
+    <toggle id="hide" label="Hide in silence" detail="Fades out while nothing is heard." default="on" on="0" off="1"/>
+  </settings>
+  <panel anchor="bottom" size="$size" margin="5">
+    <line>
+      <spectrum label="Spectrum" length="$width" mode="$mode" colors="$colors" idle-opacity="$hide" bands="72" bass="middle" gap="0.3" peak="0.6"/>
+    </line>
+  </panel>
+</component>

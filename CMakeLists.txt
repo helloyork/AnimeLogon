@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(AnimeLogon VERSION 0.1.0 LANGUAGES CXX RC)
+project(AnimeLogon VERSION 1.0.0 LANGUAGES CXX RC)
 
 if(NOT MSVC)
     message(FATAL_ERROR "AnimeLogon builds with MSVC.")
@@ -8,6 +8,10 @@ endif()
 
 set(ANIMELOGON_BUILD 0 CACHE STRING "Build number in the version resource; CI passes its run number")
 set(ANIMELOGON_VERSION_SUFFIX "" CACHE STRING "Pre-release suffix, for example -beta1")
+# One setup program for both architectures: an x64 build pointed at an ARM64 Release build's
+# bin directory carries that build's programs too, and installs whichever the machine needs.
+set(ANIMELOGON_ARM64_PAYLOAD_DIR "" CACHE PATH
+    "bin directory of an ARM64 Release build whose programs install.exe also carries (x64 builds only)")
 
 set(ANIMELOGON_VERSION "${PROJECT_VERSION}${ANIMELOGON_VERSION_SUFFIX}")
 set(ANIMELOGON_DISPLAY_NAME "AnimeLogon")

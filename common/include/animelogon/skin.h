@@ -25,6 +25,15 @@
 
 namespace animelogon::skin {
 
+// The most a component may hold, besides the limits of the file itself (xml::Limits).
+constexpr size_t kMaxSettings = 32, kMaxOptions = 32;  // settings; options of one choice
+constexpr size_t kMaxPanels = 8, kMaxLines = 8;        // panels; lines of one panel
+constexpr size_t kMaxTexts = 8;                        // texts, bars and spectra of one line
+constexpr size_t kMaxShadows = 4;                      // shadows of one panel, besides one backdrop
+constexpr size_t kMaxLabel = 40, kMaxDetail = 80;      // characters of a name or label; of a detail
+constexpr size_t kMaxTemplate = 256;                   // characters of a text's value
+constexpr size_t kMaxSettingId = 32;                   // characters of a setting id
+
 // Colors: a list of colours at places along a gradient (Stop, ParseStops).
 enum class SettingKind { Choice, Toggle, Number, Color, Font, Date, Colors };
 
@@ -228,5 +237,23 @@ bool Listens(const Resolved &skin);
 bool IsDataName(const std::wstring &name);
 // The sources of the data the component shows or tests, besides the clock, in data::Source order.
 std::vector<data::Source> SourcesOf(const Skin &skin);
+
+// --- the format, described ---------------------------------------------------------------
+//
+// Every attribute each element may carry, as Parse checks it, for documentation and tools
+// (tools/component_check). Reading a component does not go through this.
+
+struct AttributeInfo {
+    std::wstring element, name;  // e.g. text, weight
+    // How the value is written: number, count (a whole number), color, colors, font, weight,
+    // words (one of `words`), label, template, fraction, condition or date.
+    std::wstring type;
+    double min = 0, max = 0;          // number, count
+    std::vector<std::wstring> words;  // words; for a weight, the names it may be given by
+    bool adjustable = false;          // may be adjusted element by element (p1.l1.t1.weight)
+    std::wstring fallback;            // what it is when not written; empty when nothing is drawn for it
+};
+// Panel, line, text, bar, spectrum, shadow and backdrop, each attribute in the reader's order.
+std::vector<AttributeInfo> Attributes();
 
 }  // namespace animelogon::skin

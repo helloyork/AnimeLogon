@@ -1,4 +1,4 @@
-// A theme's own page (D40), under the library: a line saying which theme it is with the tools
+// A theme's own page, under the library: a line saying which theme it is with the tools
 // for it, the lock screen on the left and the panel of adjustments on the right. Changes save
 // themselves; undo and redo go back and forth through them.
 import { useEffect } from 'react';
@@ -105,7 +105,7 @@ function useKeys() {
       const pk = panelKey(sel), now = performance.now();
       if (now - nudge.at > 700) nudge.gesture = newGesture();
       nudge.at = now;
-      // From where the panel is shown, and no further than keeps it on its display.
+      // From where the panel is shown, and no further than keeps a quarter of it on its display.
       const pending = pendingValues(inst.id);
       const full = valueOf(inst.id, pk + '.anchor') === 'full';
       const g = pv.width && !full ? geometry(inst.id, pk, 1, { width: pv.width, height: pv.height }, s.screen) : null;

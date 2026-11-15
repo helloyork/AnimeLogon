@@ -1,26 +1,29 @@
 // The lock screen as it will behave, full window: the still covers the screen at once, a video
 // wallpaper starts over it, and the components come in last. A key or a click "wakes" it: all of
-// that fades out over a sketch of the Windows sign-in screen. With `ratio`, it is shown as a
-// display of that shape would show it, with black bars around it.
+// that fades out over a sketch of the Windows sign-in screen (on a wall of displays, over the main
+// display, the others showing what follows the wake there). With `ratio`, it is shown as a display
+// of that shape would show it, with black bars around it.
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { t as tr } from '../i18n';
 import { SceneFrames, SpectrumFrames, WallpaperVideo } from '../media';
 import { calm } from '../motion';
 import { lockUrl, ORIGIN } from '../native';
 import { motion } from '../preview';
-import { setState, shapeOf, themeOf, useStore } from '../store';
-import { Button } from '../ui/controls';
+import { setState, shapeOf, themeOf, useStore, wallSlices, type Slice } from '../store';
+import { Button, cx } from '../ui/controls';
 
 // What Windows 11 shows once the lock screen has gone, drawn after its own layout at 1920 x 1080
 // and scaled with the display (sizes are in cqh of the frame): the wallpaper blurred and darkened
 // as Windows does behind the password box, the account picture, the name, the PIN box and its two
 // links, and the network, accessibility and power buttons in the corner. It is a sketch: nothing
 // in it can be typed into.
-function SignIn({ still }: { still: string }) {
+// `slice`: on a wall of displays, the main display's part of it, which the sign-in screen fills; the
+// still is of the whole wall, and only that part of it shows behind the sketch.
+function SignIn({ still, slice }: { still: string; slice?: Slice }) {
   const { env } = useStore();
   return (
     <div className="lock-signin" aria-hidden="true">
-      <img className="lock-blur" src={still} alt="" />
+      <img className="lock-blur" src={still} alt="" style={slice && { ...within(slice), transformOrigin: `${((slice.x + slice.w / 2) * 100).toFixed(2)}% ${((slice.y + slice.h / 2) * 100).toFixed(2)}%` }} />
       <div className="lock-box">
         {env.accountPicture ? (
           <img className="lock-avatar" src={ORIGIN + 'account'} alt="" />
@@ -42,6 +45,35 @@ function SignIn({ still }: { still: string }) {
         <span>{''}</span>
       </div>
     </div>
+  );
+}
+
+// A picture of the whole wall placed in one display's part of it so that that part shows: the
+// display's box is the slice, the picture is as much larger as the wall is, and moved by where the
+// display is on it.
+const within = (s: Slice): CSSProperties => ({
+  left: `${((-s.x / s.w) * 100).toFixed(3)}%`, top: `${((-s.y / s.h) * 100).toFixed(3)}%`,
+  width: `${(100 / s.w).toFixed(3)}%`, height: `${(100 / s.h).toFixed(3)}%`,
+});
+const box = (s: Slice): CSSProperties => ({
+  left: `${(s.x * 100).toFixed(3)}%`, top: `${(s.y * 100).toFixed(3)}%`, width: `${(s.w * 100).toFixed(3)}%`, height: `${(s.h * 100).toFixed(3)}%`,
+});
+
+// What a wall of displays shows once woken, as the logon screen leaves it: Windows draws its sign-in
+// screen on the main display alone, and each of the others shows what the setting for them says
+// (overlay/src/otherdisplays.*): the wallpaper's still blurred and darkened as Windows does behind
+// the password box, the still as it is, or nothing. Approximately: the blur here is the browser's.
+function AfterWake({ still, slices, others }: { still: string; slices: Slice[]; others: 'blur' | 'picture' | 'black' }) {
+  return (
+    <>
+      {slices.map(s => (
+        <div key={s.key} className="lock-screen" style={box(s)}>
+          {s.primary ? <SignIn still={still} slice={s} />
+            : others !== 'black' && <img className={cx('lock-still', others === 'blur' && 'blurred')} src={still} alt=""
+              style={{ ...within(s), transformOrigin: `${((s.x + s.w / 2) * 100).toFixed(2)}% ${((s.y + s.h / 2) * 100).toFixed(2)}%` }} />}
+        </div>
+      ))}
+    </>
   );
 }
 
@@ -70,7 +102,7 @@ const wait = (ms: number) => new Promise(ok => setTimeout(ok, ms));
 // the preview opens, so the panels wait for it, for at most three seconds. Panels that show what
 // is playing are drawn again every second; all are again as the clock turns (the query changes).
 // The pictures shown stay until the new ones are decoded, so nothing blinks.
-function useEntering(id: string, query: string) {
+function useEntering(id: string, query: string, wall: boolean) {
   const [parts, setParts] = useState<Entering[] | null>(null);
   const shownFor = useRef(id);
   useEffect(() => {
@@ -83,8 +115,10 @@ function useEntering(id: string, query: string) {
     const draw = async (e: Panel, q: string): Promise<Entering | null> => {
       try {
         // A panel with a spectrum moves only where the page may move things; otherwise it is one
-        // picture like the rest, with the made-up sound previews show.
-        const audio = e.audio && motion();
+        // picture like the rest, with the made-up sound previews show. Not on a wall of displays
+        // either, where the moving frames would be drawn as on one display the wall's size, out of
+        // place: there it is the picture placed on its display, as the theme page shows it.
+        const audio = e.audio && motion() && !wall;
         const r = await fetch(audio ? `${ORIGIN}spectrum/${id}/${e.part}.png?${q}&lock=1` : `${ORIGIN}lock/${id}/part/${e.part}.png?${q}`);
         if (!r.ok) return null;
         const url = URL.createObjectURL(await r.blob());
@@ -111,7 +145,7 @@ function useEntering(id: string, query: string) {
       }
       if (!alive) return;
       setParts(out);
-      const live = list.parts.filter(p => p.live && !(p.audio && motion()));
+      const live = list.parts.filter(p => p.live && !(p.audio && motion() && !wall));
       for (let n = 1; alive && live.length; ++n) {
         await wait(1000);
         const fresh = new Map<string, Entering>();
@@ -133,7 +167,7 @@ function useEntering(id: string, query: string) {
       alive = false;
       urls.forEach(u => URL.revokeObjectURL(u));
     };
-  }, [id, query]);
+  }, [id, query, wall]);
   return parts;
 }
 
@@ -173,12 +207,14 @@ export function LockPreview({ theme: id, ratio }: { theme: string; ratio?: numbe
   const shape = shapeOf(id);
   const w = Math.min(2560, Math.round(screen.width * (window.devicePixelRatio || 1)));
   const aspect = ratio || shape.width / shape.height, h = Math.round(w / aspect);
+  // Spanning, the preview is the whole wall (unless shown as one display of another shape).
+  const slices = ratio ? [] : wallSlices();
   const query = `w=${w}${ratio ? '&h=' + h : ''}&r=${t?.revision ?? 0}.${s.tick}`;
   const video = !!t && t.wallpaperKind === 'video' && motion();
   const scene = !!t && t.wallpaperKind === 'scene';
   const [started, setStarted] = useState(!(video || scene));
   const [woke, setWoke] = useState(false);
-  const parts = useEntering(id, query);
+  const parts = useEntering(id, query, slices.length > 1);
   // As the logon screen does: the components start coming in once the wallpaper is up (moving,
   // for a video or a scene), each after its own delay. A frame later, so that each picture is
   // first drawn where it starts from.
@@ -218,13 +254,14 @@ export function LockPreview({ theme: id, ratio }: { theme: string; ratio?: numbe
   return (
     <div ref={root} className="lock" role="dialog" aria-label={tr('lock.label')} tabIndex={-1} onPointerDown={() => setWoke(true)}>
       <div className="lock-frame" style={{ width: `min(100vw, ${(100 * aspect).toFixed(2)}vh)`, height: `min(100vh, ${(100 / aspect).toFixed(2)}vw)` }}>
-        <SignIn still={lockUrl(id, 'still', query)} />
+        {slices.length > 1 ? <AfterWake still={lockUrl(id, 'still', query)} slices={slices} others={s.lib?.settings.otherDisplays ?? 'blur'} />
+          : <SignIn still={lockUrl(id, 'still', query)} />}
 
         <div className="lock-fill" style={leaving}>
           <img className="lock-fill" src={lockUrl(id, 'still', query)} alt="" />
           {video && (
             <WallpaperVideo wallpaper={t.wallpaperRef} fit={t.fit} brightness={t.brightness} blur={t.blur} fade={false} onPlaying={() => setStarted(true)}
-              style={fade(started, 0)} />
+              style={fade(started, 0)} slices={slices} />
           )}
           {scene && (
             <SceneFrames theme={id} width={w} height={ratio ? h : 0} moving={motion() && !t.sceneStatic} onFrame={() => setStarted(true)}

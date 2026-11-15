@@ -1,5 +1,7 @@
 // install.exe: installs AnimeLogon, carrying every file it installs (payload.h). Requires
-// administrator rights (res/admin.manifest).
+// administrator rights (res/admin.manifest). A release's is the x64 program with the programs of
+// both x64 and ARM64 in it, and installs those of the processor Windows runs on; where it has none
+// for that processor it installs nothing and says so.
 //
 // Without arguments it shows the wizard (wizards.h). The first page says what installing turns off
 // in Windows, unless the Windows lock screen is off already. --quiet asks nothing, shows nothing
@@ -11,7 +13,8 @@
 //                  and other programs drawing the logon screen are left as they are, and the
 //                  settings app opens on a wizard that says what switching on changes and does it.
 //                  An update keeps AnimeLogon on or off as it was. Steam's install script runs this.
-// Exit codes: 0 installed, 1 failed, 1223 (ERROR_CANCELLED) cancelled.
+// Exit codes: 0 installed, 1 failed (or nothing to install for this processor), 1223
+// (ERROR_CANCELLED) cancelled.
 
 #include <windows.h>
 #include <objbase.h>
@@ -63,6 +66,10 @@ std::wstring FullPath(const wchar_t *path) {
 }  // namespace
 
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
+    // This runs elevated from wherever it was downloaded to: every DLL loaded from now on by name
+    // comes from System32, never from that folder. The ones it imports already do
+    // (/DEPENDENTLOADFLAG, installer/CMakeLists.txt).
+    SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32);
     int argc = 0;
     wchar_t **argv = CommandLineToArgvW(GetCommandLineW(), &argc);
     const bool quiet = HasArg(argc, argv, L"--quiet");
