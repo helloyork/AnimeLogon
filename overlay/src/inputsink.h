@@ -1,5 +1,7 @@
 // Registers keyboard and mouse raw input so presses reach this window even though it never
 // holds focus, and drains them into a wake::Intent. See wake.h for what is and is not kept.
+// A pen or a finger touching the screen is not raw input here: it reaches whichever window it
+// touched as WM_POINTERDOWN (overlay.cpp), which already tells contact from hovering.
 #pragma once
 
 #include <windows.h>

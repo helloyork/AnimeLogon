@@ -14,6 +14,7 @@
 #include <wtsapi32.h>
 
 #include <atomic>
+#include <cstdlib>
 #include <map>
 #include <memory>
 #include <set>
@@ -42,6 +43,8 @@
 #include "inputsink.h"
 #include "keyhook.h"
 #include "otherdisplays.h"
+#include "overlayexit.h"
+#include "parkedplan.h"
 #include "plan.h"
 #include "player.h"
 #include "presenter.h"
@@ -49,6 +52,7 @@
 #include "staticcover.h"
 #include "screen.h"
 #include "wake.h"
+#include "watchdog.h"
 
 namespace {
 
@@ -58,14 +62,18 @@ constexpr float kFadeSeconds = 0.5f;
 // How long after the compositor's frame the next picture is drawn: right after one frame
 // leaves nearly a whole frame of slack for the next, which a late wake-up would not.
 constexpr double kAfterComposeSeconds = 0.001;
-// A live screen whose loop has not turned for this long is ended, so it can never hold the
-// password box hostage; so is one stuck closing its videos, so it can never stop the next lock.
-constexpr ULONGLONG kHangMs = 5000;
-// Exit code telling the launcher to start the next overlay parked (see kDismissedFlag).
-constexpr int kExitDismissed = 3;
+// How often the frame loop turns while the display is off.
+constexpr double kRestingSeconds = 0.25;
+// Exit code telling the launcher to start the next overlay parked (see kDismissedFlag); the
+// watchdog's too (overlayexit.h).
+constexpr int kExitDismissed = (int)overlayexit::kDismissed;
 constexpr wchar_t kDismissedFlag[] = L"--dismissed";
 // How often a parked overlay looks at whether the sign-in background needs baking again.
 constexpr ULONGLONG kBakeCheckMs = 5000;
+// How often a parked overlay looks at whether settings.ini or the displays changed (parkedplan.h).
+constexpr ULONGLONG kPlanCheckMs = 2000;
+// How often a parked overlay away from the logon desktop reads its session's state.
+constexpr ULONGLONG kSessionReadMs = 500;
 // How long the windows stay hidden waiting for the first frame. Until they show, Windows'
 // own background -- that same frame -- is what is on the screen.
 constexpr ULONGLONG kFirstFrameWaitMs = 1500;
@@ -119,12 +127,34 @@ Overlay g_overlay;
 OtherDisplays g_otherDisplays;
 const GUID kConsoleDisplayState = {0x6fe69556, 0x704a, 0x47a0, {0x8f, 0x24, 0xc2, 0x8d, 0x93, 0x6f, 0xda, 0x47}};
 
-// The watchdog's view of the main thread: whether it is timing it -- while a screen is live, and
-// while its videos are being closed -- and when it last moved on.
+// The watchdog's view of the main thread (watchdog.h): whether it is timing it -- from the moment
+// an appearance starts being prepared, while its screen is up, and while its videos are being
+// closed -- when it last moved on, how long it may go without moving, and what it is doing.
+// A main thread stuck anywhere in there could hold the password box hostage, or stop every later
+// lock; the process is ended instead and Windows' own screen shows.
 std::atomic<bool> g_watched{false};
 std::atomic<ULONGLONG> g_heartbeat{0};
+std::atomic<ULONGLONG> g_limit{watchdog::kLiveMs};
+std::atomic<const wchar_t *> g_phase{L""};
 
 void Beat() { g_heartbeat.store(GetTickCount64()); }
+
+// Starts (or goes on) timing the main thread: `limit` without a beat while it is `phase`.
+void Watch(ULONGLONG limit, const wchar_t *phase) {
+    Beat();
+    g_limit.store(limit);
+    g_phase.store(phase);
+    g_watched.store(true);
+}
+
+// Tells the launcher, once per change, whether this overlay is parked dismissed (events::kDismissed):
+// it carries that over to the overlay of the next session after "Switch user".
+void PublishDismissed(bool on) {
+    static int said = -1;
+    if (said == (int)on) return;
+    if (!events::Signal(events::kDismissed, on)) return;  // no launcher: a development run
+    said = on;
+}
 
 bool g_still = false;
 
@@ -167,6 +197,17 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 Wake(L"a press seen by raw input");
         }
         return DefWindowProcW(hwnd, msg, wp, lp);
+    case WM_POINTERDOWN: {
+        // A pen or a finger touching the screen wakes it as a click does, on whichever of the
+        // windows it touched; nothing is withheld. A pen hovering or coming into range sends no
+        // WM_POINTERDOWN. The mouse is left to raw input: without EnableMouseInPointer it sends
+        // no pointer messages, and a touchpad's clicks are mouse clicks.
+        POINTER_INPUT_TYPE type = PT_POINTER;
+        const bool penOrTouch = GetPointerType(GET_POINTERID_WPARAM(wp), &type) && (type == PT_PEN || type == PT_TOUCH);
+        if (g_overlay.intent.ObservePointer(penOrTouch, (DWORD)GetMessageTime()))
+            Wake(type == PT_PEN ? L"a pen touching the screen" : L"a touch on the screen");
+        return DefWindowProcW(hwnd, msg, wp, lp);
+    }
     case keyhook::kWakeMessage:  // a withheld wake key, from the hook thread
         Wake(L"the wake key, withheld");
         return 0;
@@ -272,20 +313,38 @@ bool LoadStill(Presenter &presenter) {
 // cleared there, and the next genuine lock brings the video back. Returns false to exit.
 bool WaitForLogonScreen(Presenter &presenter, Scenes &scenes, bool *dismissed) {
     ULONGLONG bakedAt = 0;
-    ULONGLONG sceneCheck = 0;
+    ULONGLONG planCheck = 0;
+    parkedplan::Watch replan;
     screen::CancelWatch cancel;
     screen::Gate said = screen::Gate::Hold;  // the last reason to stay parked that was logged
+    screen::Session s;
+    ULONGLONG sessionAt = 0;
     for (;;) {
         Beat();
         if (events::IsSet(events::kStop) || animelogon::machine::Paused()) return false;
         if (!PumpMessages()) return false;
-        if (GetTickCount64()-sceneCheck > 2000) {
-            scenes.Prepare(presenter,plan::Build(animelogon::LoadSettings(false),animelogon::EnumerateMonitors(),animelogon::DiskStore()));
-            sceneCheck = GetTickCount64();
+        // Scene wallpapers' renderers are made ready ahead of the lock: planned again only when
+        // settings.ini or the displays change, and handed to the scenes only when there is a scene
+        // to get ready (or one left from before to let go of).
+        if (GetTickCount64() - planCheck > kPlanCheckMs) {
+            planCheck = GetTickCount64();
+            if (replan.Due(parkedplan::StampOf(animelogon::paths::SettingsPath()), displaylayout::Current(), planCheck)) {
+                const plan::Plan next =
+                    plan::Build(animelogon::LoadSettings(false), animelogon::EnumerateMonitors(), animelogon::DiskStore());
+                const bool scene = std::any_of(next.displays.begin(), next.displays.end(),
+                                               [](const plan::Display &d) { return d.wallpaper.source == plan::Source::Scene; });
+                if (scene || replan.Scene()) scenes.Prepare(presenter, next);
+                replan.Planned(scene);
+            }
         }
         scenes.Tick({},false,60);
         const bool secure = screen::InputDesktopIsSecure();
-        const screen::Session s = screen::ReadSession(g_overlay.session);
+        // On the logon desktop the session's state decides at once. Away from it, it only feeds
+        // the slower checks below, so it is read twice a second rather than every turn.
+        if (secure || GetTickCount64() - sessionAt >= kSessionReadMs) {
+            s = screen::ReadSession(g_overlay.session);
+            sessionAt = GetTickCount64();
+        }
         if (!secure && s.console && s.signedIn && !s.locked && !g_overlay.lockNotified) scenes.Unlocked();
         if (s.signedIn) g_overlay.hadUser = true;
 
@@ -310,8 +369,10 @@ bool WaitForLogonScreen(Presenter &presenter, Scenes &scenes, bool *dismissed) {
 
         // A dismissed appearance stays dismissed until the screen is used again.
         if (*dismissed) {
+            PublishDismissed(true);
             if (!secure || (s.signedIn && !s.locked && !g_overlay.lockNotified)) {
                 *dismissed = false;
+                PublishDismissed(false);
             } else {
                 // Woken by any message too, so that a still whose display goes is dealt with at
                 // once (otherdisplays.h), not after the rest of the wait.
@@ -321,6 +382,7 @@ bool WaitForLogonScreen(Presenter &presenter, Scenes &scenes, bool *dismissed) {
             }
         }
         g_otherDisplays.Clear();  // the password screen is over
+        PublishDismissed(false);
 
         screen::GateInput in;
         in.secure = secure;
@@ -401,6 +463,16 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
     g_overlay.displayOffInput = 0;
     g_overlay.leaving = false;
     g_overlay.displaysChanged = false;
+
+    // Timed from here: covering the screen, opening the videos and setting up the components may
+    // take a while, but a step that never returns -- a decoder that never hands over its first
+    // frame -- must not leave the cover over the password box, nor the process stuck so that no
+    // later lock shows anything. Untimed again however this returns.
+    Watch(watchdog::kPrepareMs, L"preparing the screen");
+    ALOG(L"watchdog: timing the preparation of the screen (%llu s without a step ends it)", watchdog::kPrepareMs / 1000);
+    struct Unwatch {
+        ~Unwatch() { g_watched.store(false); }
+    } unwatch;
 
     // A device lost while parked is replaced by starting a fresh process.
     if (presenter.DeviceLost()) {
@@ -606,6 +678,7 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
         ALOG(L"cover: %s is up, %llu ms after the logon screen", still ? L"the sign-in background" : L"the wallpaper",
              GetTickCount64() - g_overlay.seenAt);
     }
+    Beat();
     scenes.Begin();
     replaceUnplayable();
 
@@ -646,6 +719,7 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
         withComponents = layer.size() > 0;
         if (withComponents) presenter.SetComponents(&layer, perTarget);
     };
+    Beat();
     setUpComponents();
     if (withComponents && feed.Poll(&snapshot)) layer.SetData(snapshot);
     if (withComponents) {
@@ -674,6 +748,7 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
     placeComponents();
 
     // Without raw input nothing could wake the screen, so it is never covered.
+    Beat();
     if (!inputsink::Register(g_overlay.inputWindow)) {
         ALOG(L"overlay: raw input could not be registered (%lu) -- leaving the screen to Windows", GetLastError());
         presenter.DestroyWindows();
@@ -715,6 +790,7 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
     }
     bool done = false;
     LiveEnd end = LiveEnd::Leave;
+    Beat();
 
     // The audio configuration is global (the audio system's own); the only source a theme has
     // is its wallpaper's sound track, when the wallpaper is a video with one.
@@ -732,6 +808,7 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
     bool readingTrack = false;  // said once in the log
     if (listening) capture.Start(AudioSystem::ListeningDevice);
     const double refresh = RefreshSeconds();
+    Beat();
     if (!opt.windowed && !done) {
         AudioSystem::RememberConsoleDefault();
         const plan::Wallpaper &first = targets.front().wallpaper;
@@ -822,9 +899,9 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
     Beat();
     if (!done) {
         if (!emergency) presenter.Show();
-        g_watched.store(true);
-        ALOG(L"overlay: live on %zu display(s), %llu ms after the logon screen", targets.size(),
-             GetTickCount64() - g_overlay.seenAt);
+        Watch(watchdog::kLiveMs, L"showing the screen");
+        ALOG(L"overlay: live on %zu display(s), %llu ms after the logon screen; the watchdog allows the frame loop %llu s",
+             targets.size(), GetTickCount64() - g_overlay.seenAt, watchdog::kLiveMs / 1000);
     }
     if (!done && !opt.windowed) g_otherDisplays.Prepare(plan, settings.otherDisplays, WakeSeconds(plan));
 
@@ -934,8 +1011,12 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
         if (listening && !emergency) period = std::min(period, std::max(refresh, 1.0 / 60.0));
         // Wake just after the compositor's next frame, so the picture drawn then is ready for
         // the one after; a fixed period drifts against the display and drops frames.
+        // With the display off nothing is drawn: the loop only looks around a few times a second.
+        // A press, the display coming back on, anything posted, wakes it at once all the same.
+        const bool resting = !g_overlay.displayOn && !g_overlay.woke;
+        if (resting) period = kRestingSeconds;
         double wait = period;
-        if (!emergency && presenter.SecondsToNextComposition(&wait)) wait += kAfterComposeSeconds;
+        if (!emergency && !resting && presenter.SecondsToNextComposition(&wait)) wait += kAfterComposeSeconds;
         LARGE_INTEGER due;
         due.QuadPart = -(LONGLONG)(wait * 1e7);
         SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE);
@@ -1201,6 +1282,8 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
     scenes.End();
     presenter.Hide();
     g_watched.store(false);
+    // Somebody waved the screen away: the launcher is told, for "Switch user" (overlayexit.h).
+    if (g_overlay.woke) PublishDismissed(true);
     if (power) UnregisterPowerSettingNotification(power);
     if (g_overlay.keyhookOn) {
         keyhook::Uninstall();
@@ -1218,8 +1301,7 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
     // without failing may never let that thread go. The process would then sit here, alive, and
     // the launcher would start no other, so no later lock would show anything. Under the watchdog
     // it ends instead, and the launcher starts a parked overlay in its place.
-    Beat();
-    g_watched.store(true);
+    Watch(watchdog::kLiveMs, L"closing the videos");
     players.clear();
     g_watched.store(false);
     presenter.DestroyWindows();
@@ -1228,21 +1310,70 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
     return end;
 }
 
-// Ends the process if a live screen's loop stops turning, or closing its videos never finishes.
-// The launcher then starts a parked overlay, and Windows' own screen is back within a few seconds.
+// The watchdog's last words, from a thread of its own: the main thread may be stuck holding
+// whatever writing a line needs, and the process is ended whether or not this got through.
+DWORD WINAPI SayStuck(void *) {
+    const ULONGLONG now = GetTickCount64(), beat = g_heartbeat.load();
+    animelogon::log::TryWrite(L"watchdog: nothing has moved for %llu ms while %s (%llu s allowed) -- ending the process "
+                              L"with exit code %d, so Windows' sign-in shows and the next overlay starts dismissed",
+                              now > beat ? now - beat : 0ull, g_phase.load(), g_limit.load() / 1000, kExitDismissed);
+    return 0;
+}
+
+// Ends the process if preparing a screen, a live screen's loop, or closing its videos stops
+// moving (watchdog.h). The launcher then starts a parked overlay, dismissed, and Windows' own
+// screen is back within seconds. A long gap between its own rounds is the machine having slept:
+// the count starts again then, rather than ending an overlay that was only asleep.
 void StartWatchdog() {
     std::thread([] {
+        watchdog::Rule rule;
         for (;;) {
-            Sleep(500);
-            if (g_watched.load() && GetTickCount64() - g_heartbeat.load() > kHangMs)
+            Sleep((DWORD)watchdog::kRoundMs);
+            const bool watched = g_watched.load();
+            ULONGLONG gap = 0;
+            const watchdog::Verdict v = rule.Round(GetTickCount64(), g_heartbeat.load(), g_limit.load(), &gap);
+            if (v == watchdog::Verdict::AfterGap && watched) {
+                animelogon::log::TryWrite(L"watchdog: %llu ms passed between two of its rounds (the machine slept) -- "
+                                          L"the count starts again", gap);
+            } else if (v == watchdog::Verdict::Stuck && watched && g_watched.load()) {
+                if (HANDLE said = CreateThread(nullptr, 0, SayStuck, nullptr, 0, nullptr)) {
+                    WaitForSingleObject(said, 500);
+                    CloseHandle(said);
+                }
                 TerminateProcess(GetCurrentProcess(), kExitDismissed);
+            }
         }
     }).detach();
+}
+
+// A crash ends the process at once. Windows Error Reporting would otherwise hold it -- and its
+// topmost windows, over the password box -- while it collected a report. The exception's code is
+// the exit code, so the launcher's log says what happened; the launcher counts any such ending
+// as dismissed (overlayexit.h).
+LONG WINAPI EndAtOnce(EXCEPTION_POINTERS *e) {
+    const DWORD code = e && e->ExceptionRecord ? e->ExceptionRecord->ExceptionCode : overlayexit::kDismissed;
+    TerminateProcess(GetCurrentProcess(), code);
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+
+// The C runtime's own way out for a bad argument goes straight to error reporting.
+void BadArgument(const wchar_t *, const wchar_t *, const wchar_t *, unsigned, uintptr_t) {
+    constexpr DWORD kInvalidCRuntimeParameter = 0xC0000417;
+    TerminateProcess(GetCurrentProcess(), kInvalidCRuntimeParameter);
+}
+
+void EndOnCrash() {
+    SetErrorMode(GetErrorMode() | SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
+    SetUnhandledExceptionFilter(EndAtOnce);
+    _set_invalid_parameter_handler(BadArgument);
+    // abort() -- std::terminate's end too -- exits with code 3 without asking for a report.
+    _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
 }
 
 }  // namespace
 
 int wmain(int argc, wchar_t **argv) {
+    EndOnCrash();
     const Options opt = ParseOptions(argc, argv);
     g_still = opt.windowed && opt.still;
     if (!opt.bakePreview.empty()) {
@@ -1290,7 +1421,7 @@ int wmain(int argc, wchar_t **argv) {
 
     Presenter presenter;
     Scenes scenes;
-    if (!presenter.CreateDevice()) return 2;
+    if (!presenter.CreateDevice()) return (int)overlayexit::kNoDevice;
     if (!opt.windowed) LoadStill(presenter);
     g_overlay.seenAt = GetTickCount64();
     StartWatchdog();

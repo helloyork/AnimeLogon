@@ -20,6 +20,7 @@
 
 #include "events.h"
 #include "livedata.h"
+#include "overlayexit.h"
 #include "sessionrecord.h"
 #include "winlogonwatch.h"
 
@@ -31,6 +32,8 @@ std::atomic<bool> g_stop{false};
 HANDLE g_stopEvent = nullptr;
 // Raised while Windows shuts down or restarts (events.h); overlays stay off the screen.
 HANDLE g_goingDownEvent = nullptr;
+// Raised by an overlay parked dismissed (events.h), read when the console moves to another session.
+HANDLE g_dismissedEvent = nullptr;
 // Set by the service handler after a resume from sleep or hibernation, handled by Supervise.
 std::atomic<bool> g_resumed{false};
 // Set once the settings app or uninstaller has asked for the sign-in background setting back.
@@ -47,8 +50,19 @@ constexpr ULONGLONG kGoingDownMaxMs = 10 * 60 * 1000;
 
 std::wstring OverlayPath() { return animelogon::paths::ModuleDir() + L"overlay.exe"; }
 
-// overlay.exe's exit code when the screen it leaves was already waved away.
-constexpr DWORD kOverlayExitDismissed = 3;
+// The overlay of the session being left was parked dismissed (events::kDismissed).
+bool OverlayDismissed() { return g_dismissedEvent && WaitForSingleObject(g_dismissedEvent, 0) == WAIT_OBJECT_0; }
+
+// Creates the overlays' events afresh: nothing is going down, nothing has been waved away. The
+// first logon screen after the service starts shows the video.
+void CreateEvents() {
+    g_stopEvent = events::Create(events::kStop);
+    ResetEvent(g_stopEvent);
+    g_goingDownEvent = events::Create(events::kGoingDown);
+    ResetEvent(g_goingDownEvent);
+    g_dismissedEvent = events::Create(events::kDismissed);
+    ResetEvent(g_dismissedEvent);
+}
 
 void SetState(DWORD state, DWORD wait = 0) {
     g_status.dwCurrentState = state;
@@ -204,13 +218,26 @@ void Supervise() {
                  kGoingDownMaxMs / 60000);
         }
         const bool ended = sessionWinlogon && WaitForSingleObject(sessionWinlogon, 0) == WAIT_OBJECT_0;
+        // The session the console is leaving, read before the record moves on: "Switch user"
+        // leaves it signed in, a sign-out does not.
+        const DWORD leaving = record.Session();
+        const bool leavingKeepsItsUser = leaving != 0xFFFFFFFF && leaving != session && !ended && SignedIn(leaving);
         switch (record.Update(session, SignedIn(session), ended)) {
-        case sessionrecord::Record::Change::NewSession:
+        case sessionrecord::Record::Change::NewSession: {
             if (sessionWinlogon) CloseHandle(sessionWinlogon);
             sessionWinlogon = nullptr;
             if (const DWORD pid = session != 0xFFFFFFFF ? FindWinlogon(session) : 0)
                 sessionWinlogon = OpenProcess(SYNCHRONIZE, FALSE, pid);
+            // The overlay of the new session starts dismissed only after "Switch user" from a
+            // screen somebody had waved away (overlayexit.h).
+            const bool carried = overlayexit::SwitchStartsDismissed(OverlayDismissed(), leavingKeepsItsUser);
+            if (leaving != 0xFFFFFFFF && session != 0xFFFFFFFF)
+                ALOG(L"launcher: the console moved from session %lu to %lu (%s) -- the overlay there starts %s", leaving,
+                     session, leavingKeepsItsUser ? L"the one before still signed in: switch user" : L"the one before signed out or ended",
+                     carried ? L"dismissed, as the screen before had been waved away" : L"ready to cover the screen");
+            dismissed = carried;
             break;
+        }
         case sessionrecord::Record::Change::EmptiedInPlace:
             ALOG(L"launcher: session %lu's user was signed out and the session has not ended -- a shutdown "
                  L"or restart; no overlay is started in it",
@@ -228,20 +255,26 @@ void Supervise() {
             if (e != ERROR_SUCCESS) ALOG(L"launcher: the sign-in background setting could not be changed (%lu)", e);
         }
 
+        // The console moved: the overlay of the session left behind goes (whether the next starts
+        // dismissed was decided above, as the record saw the new session).
         if (child && session != 0xFFFFFFFF && session != childSession && childSession != 0xFFFFFFFF) {
             TerminateProcess(child, 0);
             WaitForSingleObject(child, 2000);
             CloseHandle(child);
             child = nullptr;
             nextTry = 0;
-            dismissed = false;
         }
         if (child && WaitForSingleObject(child, 0) == WAIT_OBJECT_0) {
             const ULONGLONG lived = now - spawnedAt;
             DWORD code = 0;
             GetExitCodeProcess(child, &code);
-            ALOG(L"launcher: overlay exited (%lu) after %llu ms", code, lived);
-            dismissed = code == kOverlayExitDismissed;
+            // Anything but the endings the overlay chooses -- a crash, the watchdog, a code nobody
+            // planned for -- counts as dismissed, so the next overlay never covers a password box
+            // being typed into; the next lock shows the video again.
+            const overlayexit::Verdict verdict = overlayexit::Judge(code);
+            dismissed = overlayexit::StartsDismissed(code, dismissed);
+            ALOG(L"launcher: overlay exited (%lu, 0x%08lX) after %llu ms -- %s", code, code, lived,
+                 overlayexit::Describe(verdict));
             CloseHandle(child);
             child = nullptr;
             // A child that exits quickly and repeatedly is a broken build: back off.
@@ -326,10 +359,7 @@ void WINAPI ServiceMain(DWORD argc, LPWSTR *argv) {
         return;
     }
     SetState(SERVICE_START_PENDING, 3000);
-    g_stopEvent = events::Create(events::kStop);
-    ResetEvent(g_stopEvent);
-    g_goingDownEvent = events::Create(events::kGoingDown);
-    ResetEvent(g_goingDownEvent);
+    CreateEvents();
     SetState(SERVICE_RUNNING);
     Supervise();
     if (g_stopEvent) {
@@ -339,6 +369,10 @@ void WINAPI ServiceMain(DWORD argc, LPWSTR *argv) {
     if (g_goingDownEvent) {
         CloseHandle(g_goingDownEvent);
         g_goingDownEvent = nullptr;
+    }
+    if (g_dismissedEvent) {
+        CloseHandle(g_dismissedEvent);
+        g_dismissedEvent = nullptr;
     }
     SetState(SERVICE_STOPPED);
 }
@@ -350,10 +384,7 @@ int wmain(int argc, wchar_t **argv) {
     for (int i = 1; i < argc; ++i) {
         if (_wcsicmp(argv[i], L"--console") == 0) {
             ALOG(L"launcher: supervising from the console (Ctrl+C to stop)");
-            g_stopEvent = events::Create(events::kStop);
-            ResetEvent(g_stopEvent);
-            g_goingDownEvent = events::Create(events::kGoingDown);
-            ResetEvent(g_goingDownEvent);
+            CreateEvents();
             Supervise();
             return 0;
         }

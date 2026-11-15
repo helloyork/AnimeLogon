@@ -18,6 +18,13 @@ constexpr const wchar_t *kStop = L"Global\\AnimeLogon.Stop";
 // overlay that sees the shutdown cancelled (somebody back at an unlocked desktop).
 constexpr const wchar_t *kGoingDown = L"Global\\AnimeLogon.GoingDown";
 
+// The overlay's screen has been waved away and it is parked dismissed, holding the video off the
+// screen until the session is used. The overlay raises it once woken and lowers it when the
+// dismissal ends; the launcher reads it when the console moves to another session ("Switch
+// user"), to start the overlay there dismissed too (overlayexit.h), and lowers it when the service
+// starts, so the first logon screen after boot shows the video.
+constexpr const wchar_t *kDismissed = L"Global\\AnimeLogon.Dismissed";
+
 // Manual-reset, SYSTEM and Administrators only.
 inline HANDLE Create(const wchar_t *name) {
     PSECURITY_DESCRIPTOR sd = nullptr;
