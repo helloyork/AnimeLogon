@@ -37,6 +37,7 @@
 #include "clocktext.h"
 #include "componentlayer.h"
 #include "datafeed.h"
+#include "displaylayout.h"
 #include "events.h"
 #include "inputsink.h"
 #include "keyhook.h"
@@ -68,6 +69,11 @@ constexpr ULONGLONG kBakeCheckMs = 5000;
 // How long the windows stay hidden waiting for the first frame. Until they show, Windows'
 // own background -- that same frame -- is what is on the screen.
 constexpr ULONGLONG kFirstFrameWaitMs = 1500;
+// A display change while the screen is up is acted on once the displays have held still this long:
+// one change -- a monitor waking, a dock -- usually comes as several in a row.
+constexpr ULONGLONG kSettleMs = 300;
+// How often the frame loop compares the displays with the layout its windows were made for.
+constexpr ULONGLONG kLayoutCheckMs = 500;
 
 struct Options {
     bool windowed = false;   // run on the ordinary desktop, for development
@@ -85,7 +91,8 @@ enum class LiveEnd {
     Leave,      // the service is stopping, shutting down, paused, or the device was lost: exit
     Dismissed,  // somebody arrived (or there was nothing to show): park until the screen is used
     LogonGone,  // the logon screen went away on its own: park for the next lock
-    Rebuild,    // the displays changed under it: go live again on the new layout
+    Rebuild,    // the displays changed under it and could not be laid out in place: go live again
+    NoDisplays, // no display to cover: park, not dismissed, until one comes back
 };
 
 struct Overlay {
@@ -306,7 +313,10 @@ bool WaitForLogonScreen(Presenter &presenter, Scenes &scenes, bool *dismissed) {
             if (!secure || (s.signedIn && !s.locked && !g_overlay.lockNotified)) {
                 *dismissed = false;
             } else {
-                Sleep(g_otherDisplays.Parked() ? 16 : 200);
+                // Woken by any message too, so that a still whose display goes is dealt with at
+                // once (otherdisplays.h), not after the rest of the wait.
+                MsgWaitForMultipleObjectsEx(0, nullptr, g_otherDisplays.Parked() ? 16 : 200, QS_ALLINPUT,
+                                            MWMO_INPUTAVAILABLE);
                 continue;
             }
         }
@@ -319,6 +329,8 @@ bool WaitForLogonScreen(Presenter &presenter, Scenes &scenes, bool *dismissed) {
         in.shutdown = screen::ShutdownUnderway();
         in.goingDown = goingDown;
         in.lockNotified = g_overlay.lockNotified;
+        // A DisplayPort monitor that powers down leaves no display at all for a while.
+        in.noDisplays = GetSystemMetrics(SM_CMONITORS) == 0;
         const screen::Gate gate = screen::Decide(in);
         if (gate == screen::Gate::GoLive) {
             g_overlay.seenAt = GetTickCount64();
@@ -332,6 +344,8 @@ bool WaitForLogonScreen(Presenter &presenter, Scenes &scenes, bool *dismissed) {
             const wchar_t *why = gate == screen::Gate::GoingDown ? L"Windows is shutting down or restarting"
                                  : gate == screen::Gate::SignedOutInPlace
                                      ? L"this session's user was signed out in place (a shutdown or restart)"
+                                 : gate == screen::Gate::NoDisplays
+                                     ? L"no display is attached -- waiting for one"
                                      : L"the session is not at its logon screen (an update screen)";
             ALOG(L"overlay: the logon desktop is up but %s -- staying parked; session state %d; on it: %s", why,
                  s.state, screen::DescribeDesktop().c_str());
@@ -403,6 +417,8 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
     if (!why.empty()) ALOG(L"settings: %s -- using defaults", why.c_str());
 
     plan::Plan plan = plan::Build(settings, animelogon::EnumerateMonitors(), animelogon::DiskStore());
+    // The displays the windows are made for, to notice a change that posts no WM_DISPLAYCHANGE.
+    std::vector<RECT> madeFor = displaylayout::Current();
     if (opt.windowed) plan = WindowedPlan(std::move(plan));
     scenes.Prepare(presenter,plan);
     for (const std::wstring &p : plan.problems) ALOG(L"theme: %s", p.c_str());
@@ -413,15 +429,20 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
     std::vector<const plan::Display *> shown;
     StaticCover staticCover;
     bool emergency = false;
-    for (const plan::Display &d : plan.displays) {
-        Presenter::Target t;
-        t.rect = d.rect;
-        t.canvas = d.canvas;
-        t.wallpaper = d.wallpaper;
-        t.showComponents = d.showComponents;
-        targets.push_back(t);
-        shown.push_back(&d);
-    }
+    auto targetPlan = [&] {
+        targets.clear();
+        shown.clear();
+        for (const plan::Display &d : plan.displays) {
+            Presenter::Target t;
+            t.rect = d.rect;
+            t.canvas = d.canvas;
+            t.wallpaper = d.wallpaper;
+            t.showComponents = d.showComponents;
+            targets.push_back(t);
+            shown.push_back(&d);
+        }
+    };
+    targetPlan();
 
     // A wallpaper that cannot be shown after all -- a video that does not open or stops
     // decoding, an image that cannot be read -- gives way to the built-in one on every display
@@ -448,6 +469,7 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
             const plan::Wallpaper &w = t.wallpaper;
             if ((w.source != plan::Source::Video && (w.source != plan::Source::Scene || w.videoPath.empty())) || players.count(w.id) || unplayable.count(w.id)) continue;
             if (w.source == plan::Source::Scene && scenes.Static(w.id)) continue;
+            Beat();  // opening reads the first frame, which a stuck decoder may never hand over
             auto player = std::make_shared<VideoPlayer>();
             if (player->Open(w.source == plan::Source::Scene ? w.videoPath : w.path, presenter.device(), presenter.videoManager())) {
                 players[w.id] = player;
@@ -467,13 +489,14 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
 
     // Image wallpapers start reading at once, off this thread. One the device still holds from
     // an earlier appearance, its file unchanged, is ready now.
-    {
+    auto requestImages = [&] {
         std::set<std::wstring> images;
         for (const Presenter::Target &t : targets)
             if ((t.wallpaper.source == plan::Source::Image || t.wallpaper.source == plan::Source::Scene) && images.insert(t.wallpaper.id).second)
                 presenter.RequestImage(t.wallpaper.id, t.wallpaper.path);
         presenter.KeepImages(images);
-    }
+    };
+    requestImages();
 
     // The screen is covered first, so that Windows' credential screen is never seen. A
     // wallpaper that is ready at once -- an image already read, the built-in one, black -- is
@@ -501,8 +524,8 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
         return LiveEnd::Leave;
     }
     if (targets.empty()) {
-        ALOG(L"overlay: no displays to cover -- leaving the screen to Windows");
-        return LiveEnd::Dismissed;  // park until the screen is used
+        ALOG(L"overlay: no displays to cover -- parked until one comes back");
+        return LiveEnd::NoDisplays;
     }
 
     if (!presenter.CreateWindows(targets, kWindowClass, instance)) {
@@ -520,7 +543,9 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
         std::vector<Presenter::Picture> pictures(targets.size());
         for (size_t i = 0; i < targets.size(); ++i) {
             Presenter::Picture &p = pictures[i];
-            p.kind = still ? Kind::Still : Kind::Black;
+            // The baked still is the primary display's picture: Windows shows it there alone, the
+            // others stay black until their own wallpaper is ready.
+            p.kind = still && shown[i]->primary ? Kind::Still : Kind::Black;
             const plan::Wallpaper &w = targets[i].wallpaper;
             switch (w.source) {
             case plan::Source::Scene: {
@@ -591,45 +616,60 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
     DataFeed feed(g_overlay.session, settings.media);
     animelogon::data::Snapshot snapshot;
     bool withComponents = false;
-    {
+    // Every instance set up so far, by key; kept when the displays change, so an instance on the
+    // new layout that was on the old is the same view, already laid out and in.
+    constexpr size_t kNone = (size_t)-1;
+    std::map<std::wstring, size_t> byKey;
+    int layerReady = 0;  // 1 the layer is up, -1 it could not be, 0 not tried
+    const animelogon::RegionalFormat format = clocktext::UserFormat();
+    auto setUpComponents = [&] {
         bool any = false;
         for (const plan::Display *d : shown) any = any || !d->components.empty();
-        if (any && layer.Init(presenter.device())) {
-            const animelogon::RegionalFormat format = clocktext::UserFormat();
-            constexpr size_t kNone = (size_t)-1;
-            std::map<std::wstring, size_t> byKey;
-            std::vector<std::vector<size_t>> perTarget(targets.size());
-            for (size_t i = 0; i < shown.size(); ++i) {
-                for (const plan::Component &c : shown[i]->components) {
-                    auto it = byKey.find(c.key);
-                    if (it == byKey.end()) {
-                        size_t index = kNone;
-                        if (!layer.Add(c.drawing, settings.clock, format, &index)) {
-                            ALOG(L"components: %s could not be set up -- left out", c.key.c_str());
-                            index = kNone;
-                        }
-                        it = byKey.emplace(c.key, index).first;
+        if (!any) return;
+        if (!layerReady) layerReady = layer.Init(presenter.device()) ? 1 : -1;
+        if (layerReady < 0) return;
+        std::vector<std::vector<size_t>> perTarget(targets.size());
+        for (size_t i = 0; i < shown.size(); ++i) {
+            for (const plan::Component &c : shown[i]->components) {
+                auto it = byKey.find(c.key);
+                if (it == byKey.end()) {
+                    size_t index = kNone;
+                    if (!layer.Add(c.drawing, settings.clock, format, &index)) {
+                        ALOG(L"components: %s could not be set up -- left out", c.key.c_str());
+                        index = kNone;
                     }
-                    if (it->second != kNone) perTarget[i].push_back(it->second);
+                    it = byKey.emplace(c.key, index).first;
                 }
-            }
-            withComponents = layer.size() > 0;
-            if (withComponents && feed.Poll(&snapshot)) layer.SetData(snapshot);
-            if (withComponents) {
-                presenter.SetComponents(&layer, perTarget);
-                presenter.SetComponentOpacity(0.0f);
-                ALOG(L"components: %zu instance(s) set up", layer.size());
+                if (it->second != kNone) perTarget[i].push_back(it->second);
             }
         }
+        withComponents = layer.size() > 0;
+        if (withComponents) presenter.SetComponents(&layer, perTarget);
+    };
+    setUpComponents();
+    if (withComponents && feed.Poll(&snapshot)) layer.SetData(snapshot);
+    if (withComponents) {
+        presenter.SetComponentOpacity(0.0f);
+        ALOG(L"components: %zu instance(s) set up", layer.size());
     }
     // By default the components go where Windows puts its password box, which LogonUI may not
     // have drawn yet; it is looked for again below until found.
-    bool componentsPlaced =
-        !withComponents || opt.windowed || plan.componentDisplays != animelogon::ComponentDisplays::Auto;
+    bool componentsPlaced = false;
+    auto componentsStart = [&] {
+        componentsPlaced =
+            !withComponents || opt.windowed || plan.componentDisplays != animelogon::ComponentDisplays::Auto;
+    };
+    componentsStart();
     auto placeComponents = [&] {
         RECT monitor{};
-        if (!componentsPlaced && screen::CredentialMonitor(&monitor) && presenter.MoveComponentsTo(monitor))
-            componentsPlaced = true;
+        const wchar_t *why = L"";
+        if (componentsPlaced || !screen::CredentialMonitor(&monitor, &why) || !presenter.MoveComponentsTo(monitor)) return;
+        componentsPlaced = true;
+        std::wstring key = L"?";
+        for (const plan::Display *d : shown)
+            if (EqualRect(&d->rect, &monitor)) key = d->monitorKey;
+        ALOG(L"components: the password box is on display %s %ldx%ld (%s) -- the components are drawn there", key.c_str(),
+             monitor.right - monitor.left, monitor.bottom - monitor.top, why);
     };
     placeComponents();
 
@@ -652,6 +692,22 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
     }
     HPOWERNOTIFY power =
         RegisterPowerSettingNotification(g_overlay.inputWindow, &kConsoleDisplayState, DEVICE_NOTIFY_WINDOW_HANDLE);
+    // Raw input, the rescue hotkey, the display's power state and the keyboard hook's word all go
+    // to the primary window; when the windows are made again they move to the new one. A press
+    // still queued for the old window is read first, so none is lost in between.
+    auto bindInput = [&](HWND window) {
+        if (!window || window == g_overlay.inputWindow) return;
+        const HWND old = g_overlay.inputWindow;
+        if (inputsink::Drain(old, g_overlay.intent)) Wake(L"a press seen by raw input");
+        UnregisterHotKey(old, kRescueHotkeyId);
+        if (power) UnregisterPowerSettingNotification(power);
+        g_overlay.inputWindow = window;
+        if (!inputsink::Register(window)) ALOG(L"overlay: raw input could not be moved to the new window (%lu)", GetLastError());
+        if (!RegisterHotKey(window, kRescueHotkeyId, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, VK_F11))
+            ALOG(L"overlay: the rescue hotkey could not be moved to the new window (%lu)", GetLastError());
+        keyhook::State().notify.store(window);
+        power = RegisterPowerSettingNotification(window, &kConsoleDisplayState, DEVICE_NOTIFY_WINDOW_HANDLE);
+    };
 
     if (cover) {
         openPlayers();
@@ -782,6 +838,87 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
     bool wasOn = true;
     int awayTicks = 0;
     int notLogonTicks = 0;  // exit checks in a row with the session not at its logon screen
+    // When the displays last changed under the windows, to lay the screen out again once they
+    // hold still (0: no change waiting), and when the layout was last compared.
+    ULONGLONG relayoutAt = 0, lastLayoutCheck = 0;
+
+    // Lays the screen out again for the displays as they are now, without uncovering it even for a
+    // frame: the new windows are made, drawn and shown over the old ones, which go only then. The
+    // keyboard hook stays in, the videos keep playing where they were and the sound track with
+    // them. `t` is the videos' clock. Fallback when only the long way will do: tearing the
+    // appearance down and going live afresh, as a layout with a scene wallpaper needs.
+    enum class Relaid { Done, NoDisplays, Fallback, DeviceLost };
+    auto relayOut = [&](double t) -> Relaid {
+        const ULONGLONG began = GetTickCount64();
+        Beat();
+        std::wstring why;
+        const animelogon::Settings fresh = animelogon::LoadSettings(false, &why);
+        plan::Plan next = plan::Build(fresh, animelogon::EnumerateMonitors(), animelogon::DiskStore());
+        madeFor = displaylayout::Current();
+        if (next.displays.empty()) return Relaid::NoDisplays;
+        auto anyScene = [](const plan::Plan &p) {
+            return std::any_of(p.displays.begin(), p.displays.end(),
+                               [](const plan::Display &d) { return d.wallpaper.source == plan::Source::Scene; });
+        };
+        if (anyScene(plan) || anyScene(next)) return Relaid::Fallback;
+        ALOG(L"overlay: the displays changed -- laying the screen out again in place: %zu display(s), %zu before",
+             next.displays.size(), targets.size());
+        for (const std::wstring &p : next.problems) ALOG(L"theme: %s", p.c_str());
+        for (const plan::Display &d : next.displays) ALOG(L"theme: %s", plan::Describe(d).c_str());
+        plan = std::move(next);
+        targetPlan();
+        requestImages();
+        // The videos still shown play on, new ones open, the rest close (closing waits for their
+        // decoding threads: a beat first).
+        openPlayers();
+        for (auto it = players.begin(); it != players.end();) {
+            const bool used = std::any_of(targets.begin(), targets.end(),
+                                          [&](const Presenter::Target &x) { return x.wallpaper.id == it->first; });
+            if (used) {
+                ++it;
+                continue;
+            }
+            if (it->first == track) {
+                audio.FadeOut(0.2f);
+                track.clear();
+                ALOG(L"overlay: the sound track's wallpaper is on no display now -- its sound fades out");
+            }
+            Beat();
+            it = players.erase(it);
+        }
+        held.assign(targets.size(), VideoPlayer::Frame{});
+        drawn.assign(targets.size(), Kind::Black);
+        Beat();
+        if (!presenter.CreateWindows(targets, kWindowClass, instance, true)) {
+            if (presenter.DeviceLost()) return Relaid::DeviceLost;
+            ALOG(L"overlay: the windows for the new layout could not be made");
+            return Relaid::Fallback;
+        }
+        replaceUnplayable();
+        bindInput(presenter.primary());
+        setUpComponents();
+        // Instances new to this layout come in at once, as those already up did long ago.
+        componentsFading = withComponents;
+        componentsStart();
+        placeComponents();
+        bool ready = true, changed = false;
+        const std::vector<Presenter::Picture> pictures = compose(t, &ready, &changed, nullptr);
+        if (!presenter.Render(pictures, 0.0f, 1.0f) && presenter.DeviceLost()) return Relaid::DeviceLost;
+        rendered(pictures);
+        presenter.Show();
+        // The new windows reach the glass before the old ones go: a couple of the compositor's
+        // frames. Anything posted to the old windows meanwhile -- the keyboard hook's wake -- is
+        // handled before they are destroyed.
+        Sleep((DWORD)std::min(50.0, 2000.0 * refresh) + 1);
+        Beat();
+        if (!PumpMessages()) PostQuitMessage(0);
+        presenter.RetireOld();
+        g_otherDisplays.Prepare(plan, fresh.otherDisplays, WakeSeconds(plan));
+        g_overlay.displaysChanged = false;
+        ALOG(L"overlay: laid out again in place on %zu display(s) in %llu ms -- the screen stayed covered", targets.size(),
+             GetTickCount64() - began);
+        return Relaid::Done;
+    };
     // What reached the glass on the first display, for the log.
     int shownFrames = 0;
     double firstT = -1.0, lastT = 0.0;
@@ -1006,14 +1143,44 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
         }
 
         // The windows were laid out for displays that are no longer there.
-        if (g_overlay.displaysChanged && !g_overlay.woke && !opt.windowed) {
-            if (emergency) {
-                if (!staticAfterReset()) { end = LiveEnd::Leave; break; }
-                continue;
+        if (g_overlay.displaysChanged && emergency && !g_overlay.woke && !opt.windowed) {
+            if (!staticAfterReset()) { end = LiveEnd::Leave; break; }
+            continue;
+        }
+        // A change is seen by WM_DISPLAYCHANGE or, since some post none, by comparing the layout
+        // every half second; it is acted on once the displays have held still for a moment.
+        if (!emergency && !g_overlay.woke && !opt.windowed) {
+            if (now - lastLayoutCheck >= kLayoutCheckMs) {
+                lastLayoutCheck = now;
+                if (!displaylayout::Same(displaylayout::Current(), madeFor)) g_overlay.displaysChanged = true;
             }
-            ALOG(L"overlay: the displays changed -- laying the screen out again");
-            end = LiveEnd::Rebuild;
-            break;
+            if (g_overlay.displaysChanged) {
+                g_overlay.displaysChanged = false;
+                if (!relayoutAt) ALOG(L"overlay: the displays are changing -- the screen stays covered");
+                relayoutAt = now + kSettleMs;
+            }
+        }
+        if (relayoutAt && now >= relayoutAt && !emergency && !g_overlay.woke && !opt.windowed) {
+            relayoutAt = 0;
+            // Covering the new layout passes the same gate as going live: a display change can come
+            // in the middle of a shutdown (drivers unloading). No display at all is waited out.
+            if (GetSystemMetrics(SM_CMONITORS) > 0 && !LogonScreenNow()) {
+                ALOG(L"overlay: the displays changed, and this is no longer a screen to cover -- off the screen");
+                end = LiveEnd::Dismissed;
+                break;
+            }
+            const Relaid relaid = relayOut(t);
+            if (relaid == Relaid::NoDisplays) {
+                ALOG(L"overlay: the displays changed and none is attached now -- the screen stays as it is until one is");
+            } else if (relaid == Relaid::DeviceLost) {
+                ALOG(L"overlay: the graphics device was lost laying the screen out again -- exiting so a fresh one starts");
+                end = LiveEnd::Leave;
+                break;
+            } else if (relaid == Relaid::Fallback) {
+                ALOG(L"overlay: the displays changed -- laying the screen out again from the start");
+                end = LiveEnd::Rebuild;
+                break;
+            }
         }
 
         if (opt.seconds && now - start > (ULONGLONG)opt.seconds * 1000) {
@@ -1157,6 +1324,7 @@ int wmain(int argc, wchar_t **argv) {
             dismissed = true;
             continue;
         }
+        if (end == LiveEnd::NoDisplays) continue;  // parked, not dismissed: covered once a display is back
         if (end == LiveEnd::LogonGone) {
             if (presenter.DeviceLost()) {
                 presenter.ReleaseDevice();

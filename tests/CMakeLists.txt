@@ -24,6 +24,9 @@ target_sources(animelogon_tests PRIVATE overlay_tests.cpp ${PROJECT_SOURCE_DIR}/
 target_sources(animelogon_tests PRIVATE shutdown_tests.cpp ${PROJECT_SOURCE_DIR}/overlay/src/screen.cpp
                                         ${PROJECT_SOURCE_DIR}/overlay/src/winlogonwatch.cpp)
 target_link_libraries(animelogon_tests PRIVATE wtsapi32 advapi32)
+# The lock screen on several displays: layout changes, the password box's display, the span blur,
+# the wake transition across a wall, and no display at all (header-only pieces, screen.cpp, plan.cpp).
+target_sources(animelogon_tests PRIVATE display_tests.cpp)
 # Which of the other displays get a still after a wake, what each is cut from, and the blur.
 target_sources(animelogon_tests PRIVATE stills_tests.cpp ${PROJECT_SOURCE_DIR}/overlay/src/stills.cpp)
 target_include_directories(animelogon_tests PRIVATE ${PROJECT_SOURCE_DIR}/overlay/src)

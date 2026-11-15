@@ -17,6 +17,7 @@
 #include <string>
 #include <vector>
 
+#include "animelogon/blur.h"
 #include "animelogon/monitors.h"
 #include "animelogon/resolve.h"
 #include "animelogon/settings.h"
@@ -45,7 +46,16 @@ struct Wallpaper {
     // How bright it is drawn (settings.h kBrightness): the theme's, whatever stands in for it.
     float brightness = animelogon::kBrightness;
     float blur = 0.0f;  // as a percentage of the display's height (blur.h)
+    // The height `blur` is a percentage of: 0 for the display's own. When spanning, the primary
+    // display's, on every display of the wall, so that the displays match each other -- and the
+    // settings app's pictures of the wall (app/src/wall.h WallSigma), which measure it the same way.
+    int blurHeight = 0;
 };
+
+// The blur's standard deviation in pixels on a display `displayHeight` tall (blur.h).
+inline float BlurSigma(const Wallpaper &w, int displayHeight) {
+    return animelogon::blur::Sigma(w.blur, w.blurHeight > 0 ? w.blurHeight : displayHeight);
+}
 
 struct Component {
     // Instances with the same key are drawn alike wherever they appear: one theme's instance.

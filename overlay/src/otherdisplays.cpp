@@ -14,6 +14,7 @@
 #include "animelogon/resolve.h"
 #include "animelogon/text.h"
 #include "bake.h"
+#include "displaylayout.h"
 #include "events.h"
 #include "screen.h"
 
@@ -31,15 +32,45 @@ std::atomic<bool> g_displaysChanged{false};
 int Width(const RECT &r) { return r.right - r.left; }
 int Height(const RECT &r) { return r.bottom - r.top; }
 
+// Each window keeps the display it was made for in its extra bytes: left and top in the first
+// pointer-sized slot, right and bottom in the second.
+constexpr int kRectSlot = 0;
+void KeepRect(HWND hwnd, const RECT &r) {
+    SetWindowLongPtrW(hwnd, kRectSlot, (LONG_PTR)(((uint64_t)(uint32_t)r.left << 32) | (uint32_t)r.top));
+    SetWindowLongPtrW(hwnd, kRectSlot + sizeof(LONG_PTR), (LONG_PTR)(((uint64_t)(uint32_t)r.right << 32) | (uint32_t)r.bottom));
+}
+bool KeptRect(HWND hwnd, RECT *r) {
+    const uint64_t a = (uint64_t)GetWindowLongPtrW(hwnd, kRectSlot), b = (uint64_t)GetWindowLongPtrW(hwnd, kRectSlot + sizeof(LONG_PTR));
+    *r = {(LONG)(int32_t)(a >> 32), (LONG)(int32_t)a, (LONG)(int32_t)(b >> 32), (LONG)(int32_t)b};
+    return r->right > r->left && r->bottom > r->top;
+}
+
 LRESULT CALLBACK Proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
     case WM_NCHITTEST:
         return HTTRANSPARENT;
     case WM_MOUSEACTIVATE:
         return MA_NOACTIVATE;
-    case WM_DISPLAYCHANGE:
+    case WM_WINDOWPOSCHANGING: {
+        // When its display goes, Windows moves the window onto a display that is still there --
+        // usually the primary, over the password box. It is hidden where it stands instead, at
+        // once, and closed when the displays are next looked at.
+        auto *pos = reinterpret_cast<WINDOWPOS *>(lp);
+        RECT own{};
+        if (pos && !(pos->flags & SWP_NOMOVE) && KeptRect(hwnd, &own) && (pos->x != own.left || pos->y != own.top)) {
+            pos->flags |= SWP_NOMOVE | SWP_NOSIZE | SWP_HIDEWINDOW;
+            pos->flags &= ~SWP_SHOWWINDOW;
+            g_displaysChanged.store(true);
+        }
+        break;
+    }
+    case WM_DISPLAYCHANGE: {
+        // Its display is gone: hidden now, before anything can move it, and closed next.
+        RECT own{};
+        if (KeptRect(hwnd, &own) && !displaylayout::Holds(displaylayout::Current(), own)) ShowWindow(hwnd, SW_HIDE);
         g_displaysChanged.store(true);
         break;
+    }
     case WM_DPICHANGED:
         // Sized in physical pixels for the display it covers; a new scale changes nothing here.
         g_displaysChanged.store(true);
@@ -54,6 +85,7 @@ bool RegisterOnce() {
     WNDCLASSEXW wc{};
     wc.cbSize = sizeof(wc);
     wc.lpfnWndProc = Proc;
+    wc.cbWndExtra = 2 * sizeof(LONG_PTR);  // the display it was made for (KeepRect)
     wc.hInstance = GetModuleHandleW(nullptr);
     wc.lpszClassName = kClass;
     registered = RegisterClassExW(&wc) != 0 || GetLastError() == ERROR_CLASS_ALREADY_EXISTS;
@@ -61,42 +93,10 @@ bool RegisterOnce() {
 }
 
 // Every display, the primary first, then by position: what the stills were made for.
-std::vector<RECT> Layout(const std::vector<std::pair<RECT, bool>> &displays) {
-    std::vector<std::pair<RECT, bool>> sorted = displays;
-    std::stable_sort(sorted.begin(), sorted.end(), [](const auto &a, const auto &b) {
-        if (a.second != b.second) return a.second;
-        return a.first.left != b.first.left ? a.first.left < b.first.left : a.first.top < b.first.top;
-    });
-    std::vector<RECT> out;
-    for (const auto &d : sorted) out.push_back(d.first);
-    return out;
-}
-
 std::vector<RECT> LayoutOf(const plan::Plan &plan) {
-    std::vector<std::pair<RECT, bool>> displays;
+    std::vector<displaylayout::Display> displays;
     for (const plan::Display &d : plan.displays) displays.push_back({d.rect, d.primary});
-    return Layout(displays);
-}
-
-BOOL CALLBACK CollectMonitor(HMONITOR monitor, HDC, LPRECT, LPARAM param) {
-    MONITORINFO mi{sizeof(mi)};
-    if (GetMonitorInfoW(monitor, &mi))
-        reinterpret_cast<std::vector<std::pair<RECT, bool>> *>(param)->push_back(
-            {mi.rcMonitor, (mi.dwFlags & MONITORINFOF_PRIMARY) != 0});
-    return TRUE;
-}
-
-std::vector<RECT> CurrentLayout() {
-    std::vector<std::pair<RECT, bool>> displays;
-    EnumDisplayMonitors(nullptr, nullptr, CollectMonitor, reinterpret_cast<LPARAM>(&displays));
-    return Layout(displays);
-}
-
-bool SameLayout(const std::vector<RECT> &a, const std::vector<RECT> &b) {
-    if (a.size() != b.size()) return false;
-    for (size_t i = 0; i < a.size(); ++i)
-        if (!EqualRect(&a[i], &b[i])) return false;
-    return true;
+    return displaylayout::Ordered(std::move(displays));
 }
 
 std::wstring KindOf(const plan::Wallpaper &w) {
@@ -127,8 +127,9 @@ std::vector<uint8_t> Picture(const stills::Still &still, std::wstring *what) {
         bgr = stills::BuiltIn(still);
     }
     animelogon::ApplyBrightness(bgr.data(), bgr.size() / 3, 3, still.wallpaper.brightness);
+    // As the screen blurs it: by this display's height, or the primary's when spanning (plan.h).
     const int h = Height(still.rect);
-    animelogon::blur::Apply(bgr.data(), Width(still.rect), h, 3, animelogon::blur::Sigma(still.wallpaper.blur, h));
+    animelogon::blur::Apply(bgr.data(), Width(still.rect), h, 3, plan::BlurSigma(still.wallpaper, h));
     return bgr;
 }
 
@@ -284,6 +285,7 @@ bool OtherDisplays::AdoptOne() {
                                      : nullptr;
         bool ok = hwnd != nullptr;
         if (ok) {
+            KeepRect(hwnd, s.rect);
             HDC screenDc = GetDC(nullptr);
             HDC memory = CreateCompatibleDC(screenDc);
             const HGDIOBJ old = SelectObject(memory, m.bitmap);
@@ -333,7 +335,22 @@ void OtherDisplays::Show(Window &w, int alpha) {
     w.shown = true;
 }
 
+void OtherDisplays::CloseVanished() {
+    const std::vector<RECT> now = displaylayout::Current();
+    for (auto it = windows_.begin(); it != windows_.end();) {
+        if (displaylayout::Holds(now, it->still.rect)) {
+            ++it;
+            continue;
+        }
+        ALOG(L"other displays: display %s is gone -- its still is closed", it->still.monitorKey.c_str());
+        DestroyWindow(it->hwnd);
+        it = windows_.erase(it);
+    }
+}
+
 void OtherDisplays::Live(bool woken, float progress) {
+    // A still whose display went is closed before Windows can move it onto another one.
+    if (!windows_.empty() && g_displaysChanged.load()) CloseVanished();
     AdoptOne();
     if (!woken) return;
     if (!woken_) {
@@ -386,7 +403,8 @@ bool OtherDisplays::Parked() {
         if (k < 1.0f) fading = true;
         else w.appearAt = 0;
     }
-    if (now - checkedAt_ >= kCheckMs) {
+    // A display that went is dealt with at once, not at the next regular look.
+    if (now - checkedAt_ >= kCheckMs || g_displaysChanged.load()) {
         checkedAt_ = now;
         Check();
     }
@@ -412,7 +430,8 @@ void OtherDisplays::Check() {
 
     // Made for displays that may not be there any more: made again, as the displays are now.
     // Some changes post no WM_DISPLAYCHANGE, so the layout itself is compared too.
-    if (g_displaysChanged.exchange(false) || !SameLayout(CurrentLayout(), layout_)) {
+    if (g_displaysChanged.exchange(false) || !displaylayout::Same(displaylayout::Current(), layout_)) {
+        CloseVanished();
         ALOG(L"other displays: the displays changed -- making the stills again");
         if (job_) job_->cancelled.store(true);
         job_.reset();
@@ -427,11 +446,12 @@ void OtherDisplays::Check() {
 
     // The password box is never under a still, wherever Windows puts it.
     RECT box{};
-    if (screen::CredentialMonitor(&box)) {
+    const wchar_t *why = L"";
+    if (screen::CredentialMonitor(&box, &why)) {
         for (auto it = windows_.begin(); it != windows_.end();) {
             if (EqualRect(&it->still.rect, &box)) {
-                ALOG(L"other displays: the password box is on display %s -- its still is taken down",
-                     it->still.monitorKey.c_str());
+                ALOG(L"other displays: the password box is on display %s (%s) -- its still is taken down",
+                     it->still.monitorKey.c_str(), why);
                 DestroyWindow(it->hwnd);
                 it = windows_.erase(it);
             } else {

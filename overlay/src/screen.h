@@ -10,6 +10,7 @@
 #include <wtsapi32.h>
 
 #include <string>
+#include <vector>
 
 namespace screen {
 
@@ -32,8 +33,22 @@ struct Session {
 };
 Session ReadSession(DWORD session);
 
-// The display LogonUI's credential window is on, if it has one up.
-bool CredentialMonitor(RECT *monitor);
+// Which display holds Windows' password box, from LogonUI's visible windows (`logonUi`) and the
+// displays (`displays`, with `primary` the index of the main one). LogonUI may have a window
+// spanning every display as well as the one with the password box; the largest of its windows is
+// then the spanning one, which lies mostly on whichever display is biggest -- not necessarily the
+// one with the box. So only windows within a single display count, and the largest of those wins.
+// If every LogonUI window spans displays, the main display is the answer: Windows asks for the
+// password there. -1 when LogonUI has no window yet. `why` says which rule decided, for the log.
+struct CredentialChoice {
+    int display = -1;
+    const wchar_t *why = L"LogonUI has no window up";
+};
+CredentialChoice ChooseCredentialDisplay(const std::vector<RECT> &logonUi, const std::vector<RECT> &displays, int primary);
+
+// The display Windows' password box is on, if LogonUI has a window up; `why` (optional) says
+// how it was told, for the log.
+bool CredentialMonitor(RECT *monitor, const wchar_t **why = nullptr);
 
 // Windows' shutdown screen is on this desktop.
 bool ShutdownUnderway();
@@ -50,6 +65,7 @@ struct GateInput {
     bool shutdown = false;         // ShutdownUnderway()
     bool goingDown = false;        // the launcher's events::kGoingDown is raised
     bool lockNotified = false;     // WTS_SESSION_LOCK arrived and no unlock since
+    bool noDisplays = false;       // no display is attached (a DisplayPort monitor powered down)
 };
 
 enum class Gate {
@@ -58,6 +74,7 @@ enum class Gate {
     SignedOutInPlace,  // a shutdown or restart signed the user out; never cover it
     GoingDown,         // Windows is shutting down or restarting; never cover it
     NotYet,            // the session is not at its logon screen yet (or any more): an update screen
+    NoDisplays,        // a screen to cover, but no display to cover it on: wait for one
 };
 
 // When to lower events::kGoingDown again: a shutdown somebody cancelled leaves them at their own

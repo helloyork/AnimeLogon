@@ -38,15 +38,51 @@ Session ReadSession(DWORD session) {
     return s;
 }
 
-bool CredentialMonitor(RECT *monitor) {
-    HWND best = nullptr;
+CredentialChoice ChooseCredentialDisplay(const std::vector<RECT> &logonUi, const std::vector<RECT> &displays, int primary) {
+    CredentialChoice choice;
+    if (logonUi.empty() || displays.empty()) return choice;
     LONGLONG bestArea = 0;
+    for (const RECT &w : logonUi) {
+        const LONGLONG area = (LONGLONG)(w.right - w.left) * (w.bottom - w.top);
+        if (area <= bestArea) continue;
+        for (size_t i = 0; i < displays.size(); ++i) {
+            const RECT &d = displays[i];
+            if (w.left >= d.left && w.top >= d.top && w.right <= d.right && w.bottom <= d.bottom) {
+                choice.display = (int)i;
+                choice.why = L"LogonUI's largest window within one display";
+                bestArea = area;
+                break;
+            }
+        }
+    }
+    if (choice.display < 0 && primary >= 0 && primary < (int)displays.size()) {
+        choice.display = primary;
+        choice.why = L"LogonUI's windows all span displays -- the main display";
+    }
+    return choice;
+}
+
+namespace {
+
+BOOL CALLBACK CollectDisplay(HMONITOR monitor, HDC, LPRECT, LPARAM param) {
+    MONITORINFO mi{sizeof(mi)};
+    auto *out = reinterpret_cast<std::pair<std::vector<RECT>, int> *>(param);
+    if (GetMonitorInfoW(monitor, &mi)) {
+        if (mi.dwFlags & MONITORINFOF_PRIMARY) out->second = (int)out->first.size();
+        out->first.push_back(mi.rcMonitor);
+    }
+    return TRUE;
+}
+
+}  // namespace
+
+bool CredentialMonitor(RECT *monitor, const wchar_t **why) {
+    std::vector<RECT> logonUi;
     for (HWND w = GetTopWindow(nullptr); w; w = GetWindow(w, GW_HWNDNEXT)) {
         if (!IsWindowVisible(w)) continue;
         RECT r{};
         GetWindowRect(w, &r);
-        const LONGLONG area = (LONGLONG)(r.right - r.left) * (r.bottom - r.top);
-        if (area <= bestArea) continue;
+        if (r.right <= r.left || r.bottom <= r.top) continue;
         DWORD pid = 0;
         GetWindowThreadProcessId(w, &pid);
         HANDLE p = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
@@ -56,14 +92,14 @@ bool CredentialMonitor(RECT *monitor) {
         const bool ok = QueryFullProcessImageNameW(p, 0, image, &n) != FALSE;
         CloseHandle(p);
         const wchar_t *name = wcsrchr(image, L'\\');
-        if (ok && name && _wcsicmp(name + 1, L"LogonUI.exe") == 0) {
-            best = w;
-            bestArea = area;
-        }
+        if (ok && name && _wcsicmp(name + 1, L"LogonUI.exe") == 0) logonUi.push_back(r);
     }
-    MONITORINFO mi{sizeof(mi)};
-    if (!best || !GetMonitorInfoW(MonitorFromWindow(best, MONITOR_DEFAULTTONULL), &mi)) return false;
-    *monitor = mi.rcMonitor;
+    std::pair<std::vector<RECT>, int> displays{{}, -1};
+    EnumDisplayMonitors(nullptr, nullptr, CollectDisplay, reinterpret_cast<LPARAM>(&displays));
+    const CredentialChoice choice = ChooseCredentialDisplay(logonUi, displays.first, displays.second);
+    if (why) *why = choice.why;
+    if (choice.display < 0) return false;
+    *monitor = displays.first[(size_t)choice.display];
     return true;
 }
 
@@ -121,6 +157,7 @@ Gate Decide(const GateInput &in) {
     if (!in.session.signedIn && in.hadUser) return Gate::SignedOutInPlace;
     const bool logonScreen = !in.session.signedIn || in.session.locked || in.lockNotified;
     if (logonScreen && !in.session.AtLogonStage()) return Gate::NotYet;
+    if (logonScreen && in.noDisplays) return Gate::NoDisplays;
     if (logonScreen) return Gate::GoLive;
     return Gate::Hold;
 }

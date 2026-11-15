@@ -352,15 +352,25 @@ bool Presenter::DeviceLost() {
     return lost_;
 }
 
-bool Presenter::CreateWindows(const std::vector<Target> &targets, const wchar_t *windowClass, HINSTANCE instance) {
-    DestroyWindows();
+bool Presenter::CreateWindows(const std::vector<Target> &targets, const wchar_t *windowClass, HINSTANCE instance,
+                              bool keepOld) {
+    if (keepOld) {
+        // Up until RetireOld, under the new ones, which Show puts on top.
+        RetireOld();
+        retired_ = std::move(windows_);
+        windows_.clear();
+    }
+    DestroyWindows(!keepOld);
     if (!device_) return false;
     targets_ = targets;
-    for (const Target &t : targets_) {
+    std::vector<RECT> rects;
+    for (const Target &t : targets_) rects.push_back(t.rect);
+    for (const size_t index : layout::WithArea(rects)) {
+        const Target &t = targets_[index];
         Window w;
+        w.shows = index;
         w.width = (UINT)(t.rect.right - t.rect.left);
         w.height = (UINT)(t.rect.bottom - t.rect.top);
-        if (!w.width || !w.height) continue;
         w.hwnd = CreateWindowExW(WS_EX_NOREDIRECTIONBITMAP | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
                                  windowClass, L"AnimeLogon", WS_POPUP, t.rect.left, t.rect.top, (int)w.width,
                                  (int)w.height, nullptr, nullptr, instance, nullptr);
@@ -403,15 +413,30 @@ bool Presenter::CreateWindows(const std::vector<Target> &targets, const wchar_t 
     return !windows_.empty() && SUCCEEDED(dcomp_->Commit());
 }
 
-void Presenter::DestroyWindows() {
-    for (Window &w : windows_) {
+namespace {
+
+template <class Windows> void Release(Windows &windows) {
+    for (auto &w : windows) {
         w.effect.Reset();
         w.visual.Reset();
         w.target.Reset();
         w.swapChain.Reset();
         if (w.hwnd) DestroyWindow(w.hwnd);
     }
-    windows_.clear();
+    windows.clear();
+}
+
+}  // namespace
+
+void Presenter::RetireOld() {
+    if (retired_.empty()) return;
+    Release(retired_);
+    if (dcomp_) dcomp_->Commit();
+}
+
+void Presenter::DestroyWindows(bool all) {
+    if (all) Release(retired_);
+    Release(windows_);
     targets_.clear();
     visible_ = false;
     components_ = nullptr;
@@ -498,8 +523,10 @@ double Presenter::CompositionRate() const {
 
 bool Presenter::Render(const std::vector<Picture> &pictures, float dim, float opacity) {
     if (!device_ || lost_) return false;
-    for (size_t i = 0; i < windows_.size(); ++i) {
-        Window &w = windows_[i];
+    for (Window &w : windows_) {
+        // Everything a window is drawn with is its own target's, found by the index it keeps.
+        const size_t i = w.shows;
+        if (i >= targets_.size()) continue;
         const Target &t = targets_[i];
         const Picture pic = i < pictures.size() ? pictures[i] : Picture{};
         ComPtr<ID3D11Texture2D> back;
@@ -569,9 +596,7 @@ bool Presenter::Render(const std::vector<Picture> &pictures, float dim, float op
         context_->UpdateSubresource(constants_.Get(), 0, nullptr, &p, 0, 0);
         // A blurred wallpaper is drawn into the blur's own picture first, then blurred into the
         // window. Not the still: it was baked blurred (bake.h).
-        const float sigma = placed && pic.kind != Picture::Kind::Still
-                                ? animelogon::blur::Sigma(t.wallpaper.blur, (int)w.height)
-                                : 0.0f;
+        const float sigma = placed && pic.kind != Picture::Kind::Still ? plan::BlurSigma(t.wallpaper, (int)w.height) : 0.0f;
         ID3D11RenderTargetView *drawTo = nullptr;
         if (sigma > 0.0f && blur_) {
             drawTo = blur_->Begin(w.width, w.height, sigma);
@@ -621,9 +646,11 @@ bool Presenter::Render(const std::vector<Picture> &pictures, float dim, float op
         leaveScaleSaid_ = leaveScale_;
         leaveRiseSaid_ = leaveRise_;
         for (Window &w : windows_) {
-            const float cx = w.width / 2.0f, cy = w.height / 2.0f;
-            w.visual->SetTransform(D2D1::Matrix3x2F::Scale(leaveScale_, leaveScale_, D2D1::Point2F(cx, cy)) *
-                                   D2D1::Matrix3x2F::Translation(0.0f, std::round(leaveRise_ * w.height)));
+            if (w.shows >= targets_.size()) continue;
+            const Target &t = targets_[w.shows];
+            const layout::Leave l = layout::LeaveOf(t.rect, t.canvas, leaveScale_, leaveRise_);
+            w.visual->SetTransform(D2D1::Matrix3x2F::Scale(l.scale, l.scale, D2D1::Point2F(l.centreX, l.centreY)) *
+                                   D2D1::Matrix3x2F::Translation(0.0f, l.dy));
         }
     }
     if (opacity != opacity_ || moved) {

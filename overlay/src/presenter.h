@@ -43,9 +43,16 @@ public:
     IMFDXGIDeviceManager *videoManager() const { return manager_.Get(); }
     bool DeviceLost();
 
-    // Windows are created hidden, on the calling thread's desktop.
-    bool CreateWindows(const std::vector<Target> &targets, const wchar_t *windowClass, HINSTANCE instance);
-    void DestroyWindows();
+    // Windows are created hidden, on the calling thread's desktop, one for each target with an
+    // area. With `keepOld` the windows there were stay up, still showing their last picture,
+    // until RetireOld: laying the screen out again for new displays builds and shows the new
+    // windows first, so the screen is never uncovered in between.
+    bool CreateWindows(const std::vector<Target> &targets, const wchar_t *windowClass, HINSTANCE instance,
+                       bool keepOld = false);
+    // Destroys the windows CreateWindows kept up.
+    void RetireOld();
+    // Destroys the windows, and with `all` those CreateWindows kept up too.
+    void DestroyWindows(bool all = true);
     bool HasWindows() const { return !windows_.empty(); }
     HWND primary() const { return windows_.empty() ? nullptr : windows_.front().hwnd; }
     bool Owns(HWND hwnd) const;
@@ -61,9 +68,10 @@ public:
     // Draws the components on the target covering `monitor` alone. False if none covers it.
     bool MoveComponentsTo(const RECT &monitor);
 
-    // How far the windows' content has gone on its way out when woken: grown by `scale` about each
-    // display's centre, and moved up by `rise` of its height (-1 is a whole display up). Applied
-    // with the next Render.
+    // How far the windows' content has gone on its way out when woken: grown by `scale` about the
+    // middle of each target's canvas, and moved up by `rise` of the canvas's height (-1 is the
+    // whole canvas up) -- so when spanning, the wall moves as one (layout.h LeaveOf). Applied with
+    // the next Render.
     void SetLeave(float scale, float rise) {
         leaveScale_ = scale;
         leaveRise_ = rise;
@@ -118,6 +126,7 @@ public:
 private:
     struct Window {
         HWND hwnd = nullptr;
+        size_t shows = 0;  // the index of the target it shows, in targets_
         UINT width = 0, height = 0;
         Microsoft::WRL::ComPtr<IDXGISwapChain1> swapChain;
         Microsoft::WRL::ComPtr<IDCompositionTarget> target;
@@ -164,6 +173,7 @@ private:
 
     std::vector<Target> targets_;
     std::vector<Window> windows_;
+    std::vector<Window> retired_;  // the windows of the layout before, until RetireOld
     bool visible_ = false;
     float opacity_ = -1.0f;
     bool lost_ = false;

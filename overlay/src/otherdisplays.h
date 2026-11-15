@@ -76,6 +76,9 @@ private:
     void Show(Window &w, int alpha);
     void SetAlpha(Window &w, int alpha);
     void Check();
+    // Closes the stills whose display is no longer there, so Windows cannot move one over the
+    // password box.
+    void CloseVanished();
     void Report();
 
     std::shared_ptr<Job> job_;

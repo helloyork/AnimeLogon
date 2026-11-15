@@ -77,6 +77,14 @@ Plan Build(const animelogon::Settings &settings, const std::vector<animelogon::M
     plan.wakeSeconds = first.theme.wakeSeconds;
     const bool span = settings.monitorMode == animelogon::MonitorMode::Span;
     const RECT bounds = animelogon::VirtualBounds(monitors);
+    // Spanning, every display's part of the wall is blurred by the primary display's height.
+    const animelogon::MonitorInfo *main = &monitors.front();
+    for (const animelogon::MonitorInfo &m : monitors)
+        if (m.primary) {
+            main = &m;
+            break;
+        }
+    const int mainHeight = main->rect.bottom - main->rect.top;
     for (const animelogon::MonitorInfo &m : monitors) {
         const Resolution &r = resolve(m);
         Display d;
@@ -87,6 +95,7 @@ Plan Build(const animelogon::Settings &settings, const std::vector<animelogon::M
         // Spanning shows one wallpaper across the wall: the primary display's.
         d.canvas = span ? bounds : m.rect;
         d.wallpaper = WallpaperOf(span ? first.theme : r.theme);
+        if (span && monitors.size() > 1) d.wallpaper.blurHeight = mainHeight;
         d.components = r.components;
         switch (plan.componentDisplays) {
         case animelogon::ComponentDisplays::Auto:
@@ -129,6 +138,7 @@ std::vector<size_t> ShowBuiltInInstead(std::vector<Wallpaper> *shown, const std:
         builtIn.fit = w.fit;
         builtIn.brightness = w.brightness;
         builtIn.blur = w.blur;
+        builtIn.blurHeight = w.blurHeight;
         w = builtIn;
         changed.push_back(i);
     }
