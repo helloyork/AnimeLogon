@@ -693,7 +693,7 @@ TEST(AppLibraryOffersASettingInPlaceOfTheOneValueItFeeds) {
     CHECK(!(*ById(settings, L"id", L"hide"))[L"strength"].IsNull() && (*ById(settings, L"id", L"hide"))[L"adjusts"].IsNull());
     // The wider of the two ranges, so that nothing the part offered goes out of reach.
     const json::Value &width = *ById(settings, L"id", L"width");
-    CHECK(width[L"min"].Num() == 1 && width[L"max"].Num() == 40 && width[L"value"].Str() == L"13" && !width[L"modified"].Bool());
+    CHECK(width[L"min"].Num() == 1 && width[L"max"].Num() == 80 && width[L"value"].Str() == L"13" && !width[L"modified"].Bool());
     // The theme's own value is the one in effect, and writing goes to it, which wins over the setting.
     const json::Value &bands = *ById(settings, L"id", L"bands");
     CHECK(bands[L"min"].Num() == 4 && bands[L"value"].Str() == L"32" && !bands[L"modified"].Bool());

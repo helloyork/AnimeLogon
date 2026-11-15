@@ -466,7 +466,7 @@ std::wstring SkinView::Fit(const skin::Text &t, const std::wstring &words, float
 }
 
 bool SkinView::Lay(Line &line, const skin::Panel &, const skin::Line &source,
-                   const std::vector<std::wstring> &given, float px) {
+                   const std::vector<std::wstring> &given, float px, float spectra) {
     struct Run {
         const skin::Text *text;
         UINT32 start, length;
@@ -515,10 +515,11 @@ bool SkinView::Lay(Line &line, const skin::Panel &, const skin::Line &source,
         if (t.spectrum) {
             const float overhang = t.audio.mode == skin::Mode::Bars ? 0.0f : std::ceil(t.audio.stroke * px / 2.0f) + 1.0f;
             auto at = std::make_shared<D2D1_POINT_2F>(D2D1::Point2F(-kUnbounded, -kUnbounded));
+            const float width = std::max(1.0f, t.length * px * spectra);
             ComPtr<IDWriteInlineObject> room;
-            room.Attach(new Room(r.lead, std::max(1.0f, t.length * px), std::max(1.0f, t.audio.height * px), overhang, at));
+            room.Attach(new Room(r.lead, width, std::max(1.0f, t.audio.height * px), overhang, at));
             line.layout->SetInlineObject(room.Get(), range);
-            line.rooms.push_back({(size_t)(r.text - source.texts.data()), std::move(at)});
+            line.rooms.push_back({(size_t)(r.text - source.texts.data()), std::move(at), width});
             continue;
         }
         if (t.bar) {
@@ -604,20 +605,39 @@ bool SkinView::Build(Built &built, size_t index, UINT width, UINT height) {
 
     float px = h * panel.size / 100.0f;
     std::vector<Line> lines(panel.lines.size());
+    // Narrow or portrait displays: a panel whose text is wider than the space between its margins
+    // is drawn smaller to fit. A line with a spectrum may run the display's whole width instead:
+    // set wider than that, its spectra are shortened, keeping their height and the panel's size,
+    // until the line is a hair wider than the display. A box that wide is centred on the display
+    // (PanelShift), so the spectrum lies flush with both edges whatever the panel is placed by.
+    const float between = w - 2.0f * margin;
+    constexpr float kPastDisplay = 0.25f;
     bool any = false;
     for (int pass = 0; pass < 3; ++pass) {
-        float widest = 0.0f;
+        float shrink = 1.0f;
         any = false;
         for (size_t i = 0; i < lines.size(); ++i) {
-            if (!Lay(lines[i], panel, panel.lines[i], words[i], px)) return false;
-            if (!lines[i].layout) continue;
+            Line &line = lines[i];
+            if (!Lay(line, panel, panel.lines[i], words[i], px)) return false;
+            if (!line.layout) continue;
             any = true;
-            widest = std::max(widest, lines[i].inkRight - lines[i].inkLeft);
+            float wide = line.inkRight - line.inkLeft;
+            if (line.rooms.empty()) {
+                if (wide > between && between > 0.0f) shrink = std::min(shrink, between / wide);
+                continue;
+            }
+            const float over = wide - (w + kPastDisplay);
+            if (over <= 0.0f) continue;
+            float lengths = 0.0f;
+            for (const Line::Room &r : line.rooms) lengths += r.width;
+            if (over < lengths) {  // the spectra can give up that much
+                if (!Lay(line, panel, panel.lines[i], words[i], px, (lengths - over) / lengths)) return false;
+                wide = line.inkRight - line.inkLeft;
+            }
+            if (wide > w + 1.0f) shrink = std::min(shrink, w / wide);  // its text alone is wider
         }
-        // Narrow or portrait displays: shrink until the panel fits between the margins.
-        const float room = w - 2.0f * margin;
-        if (widest <= room || room <= 0.0f) break;
-        px *= room / widest;
+        if (shrink >= 1.0f || pass == 2) break;
+        px *= shrink;
     }
     if (!any) return true;  // nothing to draw
 
@@ -685,7 +705,7 @@ bool SkinView::Build(Built &built, size_t index, UINT width, UINT height) {
                 if (spectra_[k].panel == index && spectra_[k].line == i && spectra_[k].text == room.text) place.audio = k;
             place.line = i;
             place.text = room.text;
-            place.box = D2D1::RectF(room.at->x, room.at->y, room.at->x + std::max(1.0f, t.length * px),
+            place.box = D2D1::RectF(room.at->x, room.at->y, room.at->x + room.width,
                                     room.at->y + std::max(1.0f, t.audio.height * px));
             if (Brushes(place, t)) built.spectra.push_back(std::move(place));
         }

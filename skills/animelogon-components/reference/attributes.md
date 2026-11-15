@@ -85,7 +85,7 @@ Every attribute each element of a component takes, with the values AnimeLogon ac
 | `mode` | `bars` `line` `area` | `bars` | yes | Bars, a line through the bands' tops, or the area under that line. |
 | `direction` | `up` `down` `both` | `up` | yes | Which way the bands reach: up, down, or both ways from the middle. |
 | `bass` | `left` `right` `middle` | `left` | yes | Where the low frequencies are: left, right, or in the middle with the treble at both ends. |
-| `length` | number, 0.5 to 80 | `12` | yes | Width in em. |
+| `length` | number, 0.5 to 80 | `12` | yes | Width in em. A spectrum set wider than its display is drawn as wide as the display, at its own height. |
 | `height` | number, 0.05 to 8 | `1` | yes | How far a band can reach, in em. |
 | `bands` | whole number, 4 to 128 | `64` | yes | Number of frequency bands. |
 | `gap` | number, 0 to 0.95 | `0.35` | yes | Space between bars, as a share of each band's width. |

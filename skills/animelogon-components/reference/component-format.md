@@ -151,7 +151,10 @@ with the places in order.
   display edges the anchor is next to, in percent of the display's shorter side. `offset-x` and
   `offset-y` then move it, in percent of the display's width and height. The user can drag a panel
   in the AnimeLogon app; AnimeLogon keeps at least a quarter of it on the display.
-- **Narrow displays.** A panel wider than the space between its margins is drawn smaller to fit.
+- **Narrow displays.** A panel whose text is wider than the space between its margins is drawn
+  smaller to fit. A line with a spectrum may span the display's whole width instead: a spectrum
+  set wider than that is shortened to the display's width, keeping its height, and lies flush with
+  both edges. Its line's other items keep their size.
 - **Lines** stack downwards. A line's `gap` is the distance from the line above's baseline to the
   top of this line's ink. `align` lines them up on the left, centre or right; `auto` follows the
   anchor's column.
