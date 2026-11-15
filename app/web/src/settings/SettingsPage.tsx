@@ -173,12 +173,15 @@ export function SettingsPage() {
               )}
             </Row>
           ))}
-          {/* Only a choice where there is more than one display to choose from. */}
+          {/* What the displays other than the one with the sign-in screen show on the lock screen: the
+              wallpaper alone, or a clone that draws the components there too, laid out for each
+              display's own size. Only a choice where there is more than one display. settings.ini
+              may still say `primary` (an older choice); it shows here as the wallpaper-only one. */}
           {several && (
             <Row title={t('settings.component_displays')} description={t('settings.component_displays.detail')}>
               {() => (
-                <Select label={t('settings.component_displays')} value={set.componentDisplays} onChange={v => global('componentDisplays', v)}
-                  options={choices([['auto', 'settings.component_displays.auto'], ['primary', 'settings.component_displays.primary'], ['all', 'settings.component_displays.all']])} />
+                <Select label={t('settings.component_displays')} value={set.componentDisplays === 'all' ? 'all' : 'auto'} onChange={v => global('componentDisplays', v)}
+                  options={choices([['auto', 'settings.component_displays.auto'], ['all', 'settings.component_displays.all']])} />
               )}
             </Row>
           )}
