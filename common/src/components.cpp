@@ -14,6 +14,9 @@ namespace {
 
 constexpr size_t kMaxComponentBytes = 64 * 1024;
 
+// The built-in components below, like the clock in skin.cpp, are templates for components of
+// one's own: their XML may also be used under the MIT License, as in
+// skills/animelogon-components/LICENSE, so what is made from them need not use the MPL.
 const wchar_t *const kPositions = LR"(
       <option value="top-left" label="左上"/>
       <option value="top" label="上方居中"/>

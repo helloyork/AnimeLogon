@@ -1,6 +1,7 @@
 ---
 name: animelogon-components
 description: Write, fix and package AnimeLogon lock-screen components, the XML files (root element <component>) that place clocks, dates, battery, now playing, countdowns and audio spectra over a theme's wallpaper, and the theme packages (.altheme) that carry them. Use when asked to create or change an AnimeLogon component or widget, turn a design or screenshot into one, find out why AnimeLogon refuses a component file, or build an .altheme to share.
+license: MIT. See LICENSE in this folder.
 ---
 
 # AnimeLogon components
