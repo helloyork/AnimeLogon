@@ -80,6 +80,9 @@ struct AudioSettings {
     std::wstring device;  // empty: follow the signed-in user's default device
     int volume = 80;      // 0..100
     AudioSource videoTrack;
+    // `video_audio_yield`: the video's sound track is silent while another program makes sound on
+    // the same device, and comes back once it has been quiet for a while.
+    bool videoYields = true;
 };
 
 // What settings.ini changes about one component instance of a theme:

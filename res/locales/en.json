@@ -763,6 +763,8 @@
   "settings.sound.video": "Video sound",
   "settings.sound.video.detail": "Plays the video wallpaper's own audio.",
   "settings.sound.video_volume": "Video volume",
+  "settings.sound.video_yield": "Mute while other audio plays",
+  "settings.sound.video_yield.detail": "Keeps the video sound muted while other apps play audio, and brings it back after they stop.",
   "settings.sound.volume": "Volume",
   "settings.system": "System",
   "settings.title": "Settings",

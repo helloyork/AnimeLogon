@@ -50,7 +50,7 @@ export interface Settings {
   tray: boolean;       // the icon in the system tray (app/src/tray.h)
   trayRecent: number;  // how many recently used themes its menu offers
   clock: { hours: 'auto' | '12' | '24'; ampm: boolean; date: 'weekday' | 'long' | 'none'; language: string };
-  audio: { enabled: boolean; device: string; volume: number; video: boolean; videoVolume: number };
+  audio: { enabled: boolean; device: string; volume: number; video: boolean; videoVolume: number; videoYield: boolean };
 }
 
 export type WallpaperKind = 'scene' | 'video' | 'image' | 'builtin' | 'none' | 'missing';

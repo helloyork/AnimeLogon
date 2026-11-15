@@ -291,6 +291,8 @@ void Read(const std::wstring &text, Settings *out, bool *namesTheme, std::vector
             ok = ParseBool(value, &s.audio.videoTrack.enabled);
         } else if (key == L"video_audio_volume") {
             ok = ParseVolume(value, &s.audio.videoTrack.volume);
+        } else if (key == L"video_audio_yield") {
+            ok = ParseBool(value, &s.audio.videoYields);
         } else if (key == L"tray") {
             ok = ParseBool(value, &s.tray);
         } else if (key == L"tray_recent") {
@@ -386,6 +388,7 @@ std::wstring SerializeSettings(const Settings &s) {
     out += L"audio_volume = " + std::to_wstring(s.audio.volume) + L"\r\n";
     out += L"video_audio = " + std::wstring(s.audio.videoTrack.enabled ? L"true" : L"false") + L"\r\n";
     out += L"video_audio_volume = " + std::to_wstring(s.audio.videoTrack.volume) + L"\r\n";
+    out += L"video_audio_yield = " + std::wstring(s.audio.videoYields ? L"true" : L"false") + L"\r\n";
     out += L"tray = " + std::wstring(s.tray ? L"true" : L"false") + L"\r\n";
     out += L"tray_recent = " + std::to_wstring(s.trayRecent) + L"\r\n";
     std::wstring recent;
