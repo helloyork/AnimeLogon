@@ -31,7 +31,7 @@ Windows N and KN editions are not supported.
 
 > The programs are not code-signed.
 
-1. Download the setup program, `AnimeLogon-<version>-setup.exe`, from [Releases](https://github.com/helloyork/AnimeLogon/releases). The same setup program is used on x64 and ARM64 PCs; it installs the version for your PC's processor.
+1. Download the setup program, `AnimeLogon-<version>-setup.exe`, from [Releases](https://github.com/helloyork/AnimeLogon/releases). The same setup program is used on x64 and ARM64 PCs; it installs the version for your PC's processor. If GitHub is slow to reach, the same file is on the [GitCode mirror](https://gitcode.com/nominaawa/AnimeLogon/releases).
 2. Run it and follow the wizard. Its first page lets you choose the language. If Windows says "Windows protected your PC", select **More info > Run anyway**.
 3. Open AnimeLogon from the Start menu and select **Import…** to add a video or picture.
 
@@ -64,6 +64,8 @@ and the number of themes in its menu changed.
 - **Imported videos, pictures and themes are stored on drive C:.** The location cannot be changed.
 - **The system tray icon runs at sign-in.** The installer adds a startup entry for every account
   and uninstalling removes it. It can also be disabled under **Startup apps** in Task Manager.
+- **.altheme files open with AnimeLogon.** The installer registers the file type for every account
+  and uninstalling removes it.
 - **A Windows service named AnimeLogon is installed.** It runs as the local system account, starts
   with Windows and shows the lock screen. Turning off **Enable AnimeLogon** stops it and sets it to
   start manually; uninstalling removes it.

@@ -29,7 +29,7 @@ AnimeLogon 使用自己绘制的叠层替换了 Windows 10/11 的锁屏界面，
 
 > 程序没有代码签名。
 
-1. 从 [Releases](https://github.com/helloyork/AnimeLogon/releases) 下载安装程序 `AnimeLogon-<版本>-setup.exe`。x64 和 ARM64 电脑使用同一个安装程序，它会安装与电脑处理器对应的版本。
+1. 从 [Releases](https://github.com/helloyork/AnimeLogon/releases) 下载安装程序 `AnimeLogon-<版本>-setup.exe`。x64 和 ARM64 电脑使用同一个安装程序，它会安装与电脑处理器对应的版本。访问 GitHub 慢的话，也可以从 [GitCode 镜像](https://gitcode.com/nominaawa/AnimeLogon/releases)下载同一个文件。
 2. 运行安装程序，按向导完成安装。向导第一页可以选择语言。如果 Windows 提示「Windows 已保护你的电脑」，选择 **更多信息 > 仍要运行**。
 3. 从开始菜单打开 AnimeLogon，选择「导入…」导入视频或图片。
 
@@ -51,6 +51,7 @@ AnimeLogon 在系统托盘中显示一个图标。单击图标打开设置；右
 - **登录界面背景由 AnimeLogon 设置。** 安装期间无法在 Windows 设置中更改锁屏图片。
 - **导入的视频、图片和主题保存在 C 盘，** 位置不可更改。
 - **登录时运行系统托盘图标。** 安装程序添加一个对所有账户生效的启动项，卸载时删除。也可以在任务管理器的「启动应用」中禁用。
+- **用 AnimeLogon 打开 .altheme 文件。** 安装程序为所有账户注册这种文件类型，卸载时删除。
 - **安装名为 AnimeLogon 的 Windows 服务。** 该服务以本地系统账户运行，随 Windows 启动，负责显示锁屏。关闭「启用 AnimeLogon」后服务停止并改为手动启动，卸载时删除。
 
 安装程序会先说明前两项更改，确认后才开始安装。在设置中关闭「启用 AnimeLogon」或卸载 AnimeLogon 后，以上设置将恢复。
