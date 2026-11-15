@@ -1522,6 +1522,9 @@ void Host::StartImport(std::vector<ImportJob> jobs, bool wallpaper) {
                          : package   ? staging::Package(j.source, j.dir, cancel_, progressed, j.name)
                          : wallpaper ? staging::Wallpaper(j.source, j.dir, cancel_, progressed, j.name)
                                      : staging::Media(j.source, j.dir, cancel_, progressed, j.name);
+            // The page shows the message; the log keeps it, with the transcoder's lines before it.
+            if (!results[i].ok && !cancel_)
+                ALOG(L"import: %s was not staged: %s", j.source.c_str(), results[i].error.c_str());
         }
         if (SUCCEEDED(co)) CoUninitialize();
         importResults_ = std::move(results);
