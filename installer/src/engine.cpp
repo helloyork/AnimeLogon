@@ -26,6 +26,7 @@
 #include "animelogon/paths.h"
 #include "animelogon/secure.h"
 #include "animelogon/settings.h"
+#include "animelogon/sha256.h"
 #include "animelogon/text.h"
 #include "animelogon/theme.h"
 #include "animelogon/version.h"
@@ -275,6 +276,35 @@ DWORD PrepareDataDir() {
         if (e != ERROR_SUCCESS) return e;
     }
     return ERROR_SUCCESS;
+}
+
+// The video install.exe carries for the bundled wallpaper (installer/CMakeLists.txt).
+constexpr const wchar_t *kBundledVideo = L"soft-hills.mp4";
+
+// The bundled wallpaper, the default theme's, written into the wallpaper store from install.exe
+// itself and the way the settings app's elevated helper writes an imported one: administrators-
+// only, wallpaper.ini written afresh, the sha256 computed from the video. An entry already there
+// with the same video is kept -- the overlay may be showing it -- and anything else under the id
+// is replaced.
+DWORD PlaceBundledWallpaper() {
+    const void *data = nullptr;
+    DWORD size = 0;
+    if (!payload::Bytes(kBundledVideo, 0, &data, &size)) return ERROR_FILE_NOT_FOUND;
+    const std::wstring sha256 = Sha256Of(data, size);
+    if (sha256.empty()) return ERROR_INVALID_DATA;
+    WallpaperInfo have;
+    if (LoadWallpaper(kBundledWallpaper, &have) && have.kind == WallpaperKind::Video && have.sha256 == sha256)
+        return ERROR_SUCCESS;
+    const std::wstring dir = WallpaperDir(kBundledWallpaper);
+    DWORD e = secure::RemoveTree(dir);
+    if (e == ERROR_SUCCESS) e = secure::SecureDirectory(dir);
+    if (e == ERROR_SUCCESS) e = secure::WriteBytes(WallpaperVideoPath(kBundledWallpaper), data, size);
+    if (e == ERROR_SUCCESS) {
+        const std::string ini = ToUtf8(SerializeWallpaperInfo(BundledWallpaperInfo(sha256)));
+        e = secure::WriteBytes(WallpaperInfoPath(kBundledWallpaper), ini.data(), ini.size());
+    }
+    if (e != ERROR_SUCCESS) secure::RemoveTree(dir);
+    return e;
 }
 
 // The stores from before themes, videos\ and skins\. Nothing reads them, and nothing in them
@@ -582,6 +612,12 @@ Report Install(const std::wstring &targetDir, const InstallOptions &options) {
         e = secure::WriteBytes(paths::BackgroundPath(), png.data(), png.size());
         if (e != ERROR_SUCCESS) return fail(WithError(Tr("install.error.background"), e));
     }
+
+    // The default theme's wallpaper. Without it the default theme shows the built-in gradient,
+    // so a failure is logged and the install goes on.
+    at(0.66, "install.step.wallpaper");
+    e = PlaceBundledWallpaper();
+    if (e != ERROR_SUCCESS) ALOG(L"install: the bundled wallpaper not written (%lu)", e);
 
     // settings.ini holds only ids and enums, so Users may rewrite it. One an administrator did
     // not create is replaced with the defaults, and so is one from before themes: the default

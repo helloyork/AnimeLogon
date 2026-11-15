@@ -86,8 +86,10 @@ std::string Battery() {
            "</component>";
 }
 
+// The stores of a machine AnimeLogon was installed on: the bundled wallpaper is there.
 FakeStore Store() {
     FakeStore store;
+    store.wallpapers[kBundledWallpaper] = Video(kBundledWallpaper);
     store.wallpapers[kVideoX] = Video(kVideoX);
     store.wallpapers[kVideoY] = Video(kVideoY);
     store.wallpapers[kImage] = Image(kImage);
@@ -129,9 +131,9 @@ bool SameDrawing(const skin::Resolved &a, const skin::Resolved &b) {
     return true;
 }
 
-// The built-in theme as it comes: the built-in wallpaper and the clock.
+// The built-in theme as it comes: the bundled wallpaper and the clock.
 bool IsBuiltInTheme(const ResolvedTheme &r) {
-    return r.themeId == L"default" && r.wallpaper && r.wallpaper->builtIn && r.fit == Scaling::Fill &&
+    return r.themeId == L"default" && r.wallpaper && r.wallpaper->id == kBundledWallpaper && r.fit == Scaling::Fill &&
            r.components.size() == 1 && r.components[0].instance == L"clock" && r.components[0].component == L"clock";
 }
 
@@ -435,7 +437,17 @@ TEST(ResolveDefaultTheme) {
     ResolvedTheme r = ResolveTheme(s, kMonitorA, store, &problems);
     CHECK(problems.empty());
     CHECK(r.themeId == L"default" && r.fit == Scaling::Fill);
-    CHECK(r.wallpaper && r.wallpaper->builtIn && r.wallpaper->kind == WallpaperKind::Image);
+    CHECK(r.wallpaper && r.wallpaper->id == kBundledWallpaper && !r.wallpaper->builtIn &&
+          r.wallpaper->kind == WallpaperKind::Video);
+    // Where install.exe could not write the bundled wallpaper, the built-in one shows instead, and
+    // that is reported once.
+    FakeStore bare = store;
+    bare.wallpapers.erase(kBundledWallpaper);
+    problems.clear();
+    const ResolvedTheme fallback = ResolveTheme(s, kMonitorA, bare, &problems);
+    CHECK(fallback.themeId == L"default" && fallback.wallpaper && fallback.wallpaper->builtIn &&
+          fallback.wallpaper->kind == WallpaperKind::Image);
+    CHECK(problems.size() == 1 && problems[0].find(kBundledWallpaper) != std::wstring::npos);
     CHECK(r.components.size() == 1 && r.components[0].instance == L"clock" && r.components[0].component == L"clock");
     CHECK(r.components.size() == 1 && r.components[0].values.empty());
     CHECK(r.components.size() == 1 &&

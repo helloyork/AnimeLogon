@@ -326,6 +326,7 @@
   "install.step.shortcuts": "Creating shortcuts",
   "install.step.stop": "Stopping the running service",
   "install.step.turn_on": "Turning off the Windows lock screen and starting the service",
+  "install.step.wallpaper": "Writing the default wallpaper",
 
   "kind.builtin": "Built-in background",
   "kind.image": "Picture",
@@ -969,7 +970,8 @@
   "unit.short_side": "% short side",
   "unit.times": "×",
 
-  "wallpaper.default": "Default background",
+  "wallpaper.bundled": "Soft hills",
+  "wallpaper.default": "Dark gradient",
   "wallpaper.meta.audio": " · With sound",
   "wallpaper.meta.default": "Built-in dark background",
   "wallpaper.meta.image": "Picture · {size}",

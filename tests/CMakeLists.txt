@@ -36,6 +36,9 @@ target_sources(animelogon_tests PRIVATE payload_tests.cpp ${PROJECT_SOURCE_DIR}/
 target_include_directories(animelogon_tests PRIVATE ${ANIMELOGON_PAYLOAD_INCLUDE})
 add_dependencies(animelogon_tests installer)
 target_compile_definitions(animelogon_tests PRIVATE "ANIMELOGON_INSTALL_EXE=\"$<TARGET_FILE:installer>\"")
+# The bundled wallpaper's video, which player_tests.cpp checks against what install.exe says of it.
+target_compile_definitions(animelogon_tests PRIVATE
+    "ANIMELOGON_BUNDLED_WALLPAPER=\"${PROJECT_SOURCE_DIR}/res/wallpapers/soft-hills.mp4\"")
 target_link_libraries(animelogon_tests PRIVATE animelogon_common)
 # The strings, read in Simplified Chinese (common_tests.cpp's main), which the tests expect.
 animelogon_locales_rc(test_locales)

@@ -326,6 +326,7 @@
   "install.step.shortcuts": "建立捷徑",
   "install.step.stop": "停止執行中的服務",
   "install.step.turn_on": "關閉 Windows 鎖定畫面並啟動服務",
+  "install.step.wallpaper": "寫入預設桌布",
 
   "kind.builtin": "內建背景",
   "kind.image": "圖片",
@@ -969,7 +970,8 @@
   "unit.short_side": "% 短邊",
   "unit.times": "倍",
 
-  "wallpaper.default": "預設背景",
+  "wallpaper.bundled": "柔和層巒",
+  "wallpaper.default": "深色漸層",
   "wallpaper.meta.audio": " · 含音訊",
   "wallpaper.meta.default": "內建深色背景",
   "wallpaper.meta.image": "圖片 · {size}",

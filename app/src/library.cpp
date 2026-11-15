@@ -822,6 +822,8 @@ std::wstring Library::WallpaperName(const std::wstring &ref) const {
     if (ref == kNoWallpaper) return i18n::Tr("wallpaper.none");
     const WallpaperInfo *w = Wallpaper(ref);
     if (!w) return i18n::Tr("wallpaper.missing");
+    // The bundled wallpaper's name is AnimeLogon's own, so it follows the window's language.
+    if (ref == kBundledWallpaper) return i18n::Tr("wallpaper.bundled");
     return !w->name.empty() ? w->name : !w->sourceName.empty() ? w->sourceName : ref;
 }
 

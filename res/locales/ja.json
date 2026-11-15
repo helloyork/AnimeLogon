@@ -326,6 +326,7 @@
   "install.step.shortcuts": "ショートカットを作成しています",
   "install.step.stop": "実行中のサービスを停止しています",
   "install.step.turn_on": "Windows のロック画面をオフにしてサービスを開始しています",
+  "install.step.wallpaper": "既定の壁紙を書き込んでいます",
 
   "kind.builtin": "組み込みの背景",
   "kind.image": "画像",
@@ -969,7 +970,8 @@
   "unit.short_side": "% (短辺)",
   "unit.times": "倍",
 
-  "wallpaper.default": "既定の背景",
+  "wallpaper.bundled": "なだらかな丘",
+  "wallpaper.default": "暗いグラデーション",
   "wallpaper.meta.audio": " · 音声あり",
   "wallpaper.meta.default": "組み込みの暗い背景",
   "wallpaper.meta.image": "画像 · {size}",

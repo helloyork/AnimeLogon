@@ -265,6 +265,7 @@ TEST(ThemePackageForm) {
 
     // A theme on a built-in wallpaper packs without a wallpaper file.
     theme::Theme plain = theme::Default();
+    plain.wallpaper = L"default";
     CHECK(theme::ToPackage(&plain, L"", {}, &error) && plain.wallpaper == L"default");
     CHECK(theme::PackageFiles(plain).empty());
 }
@@ -310,13 +311,17 @@ TEST(ThemeEditedByOverrides) {
 
 TEST(ThemeDefaultIsBuiltIn) {
     const theme::Theme &d = theme::Default();
-    CHECK(!d.name.empty() && d.wallpaper == L"default" && d.fit == Scaling::Fill);
+    // The bundled wallpaper install.exe writes, and the clock.
+    CHECK(!d.name.empty() && d.wallpaper == kBundledWallpaper && d.fit == Scaling::Fill);
+    CHECK(IsWallpaperId(kBundledWallpaper) && IsWallpaperRef(kBundledWallpaper));
     CHECK(d.components.size() == 1 && d.components[0].id == L"clock" && d.components[0].ref == L"clock");
     CHECK(d.components[0].visible && d.components[0].sets.empty());
     std::wstring error;
     theme::Theme parsed;
     CHECK(theme::Parse(theme::DefaultText(), theme::Form::Installed, &parsed, &error) && error.empty());
-    CHECK(theme::Parse(theme::DefaultText(), theme::Form::Package, &parsed, &error));
+    // Exported, the bundled wallpaper travels as the package's video like any other.
+    theme::Theme packed = d;
+    CHECK(theme::ToPackage(&packed, L"wallpaper.mp4", {}, &error) && packed.wallpaper == L"wallpaper.mp4");
     theme::Theme loaded;
     CHECK(LoadTheme(L"default", &loaded) && theme::Normalize(loaded) == theme::Normalize(d));
     CHECK(!LoadTheme(L"../x", &loaded) && !LoadTheme(L"Default", &loaded));

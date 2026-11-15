@@ -75,7 +75,7 @@ TEST(PayloadTableNamesEachFileOncePerMachine) {
         CHECK(std::find(ids.begin(), ids.end(), f.id) == ids.end());
         ids.push_back(f.id);
         if (f.kind == payload::Kind::Program && !Contains(machines, f.machine)) machines.push_back(f.machine);
-        if (f.kind == payload::Kind::Document) CHECK(f.machine == 0);
+        if (f.kind != payload::Kind::Program) CHECK(f.machine == 0);
         for (const payload::File &g : files)
             if (&g != &f && g.kind == f.kind && g.machine == f.machine) CHECK(_wcsicmp(g.name, f.name) != 0);
     }
@@ -94,6 +94,9 @@ TEST(PayloadTableNamesEachFileOncePerMachine) {
     const std::vector<const wchar_t *> documents = payload::Names(payload::Kind::Document);
     for (const wchar_t *needed : {L"LICENSE.txt", L"licenses\\npm.txt", L"licenses\\WebView2.txt", L"licenses\\WebView2-NOTICE.txt"})
         CHECK(std::any_of(documents.begin(), documents.end(), [&](const wchar_t *n) { return _wcsicmp(n, needed) == 0; }));
+    // The bundled wallpaper's video, which the engine writes into the wallpaper store.
+    const std::vector<const wchar_t *> wallpapers = payload::Names(payload::Kind::Wallpaper);
+    CHECK(wallpapers.size() == 1 && _wcsicmp(wallpapers[0], L"soft-hills.mp4") == 0);
 }
 
 // install.exe as this build made it carries exactly what the table lists, each program for the

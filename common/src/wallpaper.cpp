@@ -110,7 +110,12 @@ bool IsWallpaperRef(std::wstring_view ref) {
     return ref == kDefaultWallpaper || ref == kNoWallpaper || IsWallpaperId(ref);
 }
 
-std::wstring NewWallpaperId() { return RandomHex(8); }
+std::wstring NewWallpaperId() {
+    for (;;) {
+        std::wstring id = RandomHex(8);
+        if (id != kBundledWallpaper) return id;
+    }
+}
 
 std::wstring WallpapersDir() { return paths::DataDir() + L"\\wallpapers"; }
 std::wstring WallpaperDir(const std::wstring &id) { return WallpapersDir() + L"\\" + id; }
@@ -264,6 +269,25 @@ std::vector<WallpaperInfo> ListWallpapers() {
     }
     std::sort(out.begin() + 1, out.end(), byAge);
     return out;
+}
+
+WallpaperInfo BundledWallpaperInfo(const std::wstring &sha256) {
+    WallpaperInfo w;
+    w.id = kBundledWallpaper;
+    w.kind = WallpaperKind::Video;
+    // The settings app shows its own translation of this name (Library::WallpaperName).
+    w.name = L"柔和层峦";
+    w.sourceName = L"soft-hills.mp4";
+    // Older than anything imported, so it lists first after the built-in wallpaper.
+    w.importedAt = L"2026-11-14T00:00:00";
+    w.width = 2560;
+    w.height = 1440;
+    w.frameRateNum = 60;
+    w.frameRateDen = 1;
+    w.durationMs = 40000;
+    w.hasAudio = false;
+    w.sha256 = sha256;
+    return w;
 }
 
 }  // namespace animelogon

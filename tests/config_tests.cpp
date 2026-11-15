@@ -327,6 +327,28 @@ TEST(CommitWallpaperWritesItAfresh) {
     secure::RemoveTree(scratch);
 }
 
+// The bundled wallpaper's entry is install.exe's: nothing is committed under its id, and naming it
+// for removal leaves it where it is without failing the command.
+TEST(StoreLeavesTheBundledWallpaperAlone) {
+    const std::wstring scratch = ScratchDir();
+    PlainTarget t(scratch + L"\\data");
+    const std::wstring dir = ImportDir(scratch);
+    const std::vector<uint8_t> mp4 = Mp4();
+    WriteAll(dir + L"\\wallpaper.ini", VideoIni(false));
+    WriteAll(dir + L"\\video.mp4", mp4);
+    CHECK(store::CommitWallpaper(t, kBundledWallpaper, dir) == commit::kBadArgs);
+    CHECK(!Exists(store::In(t, WallpaperDir(kBundledWallpaper))));
+    // As install.exe leaves it.
+    const std::wstring bundled = store::In(t, WallpaperDir(kBundledWallpaper));
+    CHECK(t.MakeDirectory(t.Root()) == ERROR_SUCCESS && t.MakeDirectory(store::In(t, WallpapersDir())) == ERROR_SUCCESS);
+    CHECK(t.MakeDirectory(bundled) == ERROR_SUCCESS);
+    CHECK(t.WriteBytes(bundled + L"\\video.mp4", mp4.data(), mp4.size()) == ERROR_SUCCESS);
+    CHECK(store::RemoveWallpaper(t, kBundledWallpaper) == commit::kOk);
+    CHECK(ReadAll(bundled + L"\\video.mp4") == mp4);
+    for (int i = 0; i < 1000; ++i) CHECK(NewWallpaperId() != kBundledWallpaper);
+    secure::RemoveTree(scratch);
+}
+
 TEST(CommitWallpaperRefusesHostileStaging) {
     const std::wstring scratch = ScratchDir();
     PlainTarget t(scratch + L"\\data");
@@ -829,8 +851,12 @@ TEST(ExportBakesOverridesAndIsDeterministic) {
     CHECK(store::CommitPackage(t, dir, &back2) == commit::kOk);
     CHECK(back2.wallpaperReused && back2.wallpaperId == r.wallpaperId && back2.componentsReused.size() == 2);
 
-    // The built-in theme packs no files.
-    CHECK(exporter::Build(L"default", Settings{}, disk, scratch, &items, &error) && items.size() == 1 && items[0].name == "theme.xml");
+    // The built-in theme on the built-in wallpaper packs no files.
+    Settings plain;
+    plain.themeOverrides[L"default"].wallpaper = L"default";
+    CHECK(exporter::Build(L"default", plain, disk, scratch, &items, &error) && items.size() == 1 && items[0].name == "theme.xml");
+    // As it comes it names the bundled wallpaper, which these stores do not have.
+    CHECK(!exporter::Build(L"default", Settings{}, disk, scratch, &items, &error) && !error.empty());
     // A theme whose wallpaper is gone says so.
     s.themeOverrides[r.themeId].wallpaper = L"5555555555555555";
     CHECK(!exporter::Build(r.themeId, s, disk, scratch, &items, &error) && !error.empty());
