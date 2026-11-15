@@ -1,4 +1,4 @@
-<img src="res/animelogon.svg" alt="" width="72">
+<img src="res/readme/banner.png" alt="AnimeLogon">
 
 # AnimeLogon
 
@@ -120,7 +120,7 @@ AnimeLogon 在系统托盘中显示一个图标。单击图标打开设置；右
 |---|---|
 | `C:\Program Files\AnimeLogon\` | 程序、`uninstall.exe` 和第三方许可证（`licenses\`）。 |
 | `%ProgramData%\AnimeLogon\settings.ini` | 全机设置：当前主题、多显示器、时钟、声音，以及对各主题的修改。每行一个 `键 = 值`，只含 id、枚举和带类型的值，不含路径或自由文本。键的说明见 [settings.h](common/include/animelogon/settings.h)。 |
-| `%ProgramData%\AnimeLogon\themes\`、`components\`、`wallpapers\` | 已导入的主题、组件和壁纸。只有管理员可以写入，内容由 AnimeLogon 规范化后写入。 |
+| `%ProgramData%\AnimeLogon\themes\`、`components\`、`wallpapers\` | 已导入的主题、组件和壁纸，以及安装程序写入的默认主题壁纸。只有管理员可以写入，内容由 AnimeLogon 规范化后写入。 |
 | `%ProgramData%\AnimeLogon\logs\` | 日志。 |
 
 ## 从源码构建
