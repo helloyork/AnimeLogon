@@ -505,6 +505,8 @@ bool PlaysAndLoops(const std::wstring &scratch, ID3D11Device *device, IMFDXGIDev
     if (!manager) CHECK(!player->hardware());
     CHECK(player->width() == (int)w && player->height() == (int)h);
     CHECK(std::fabs(player->frameSeconds() - 1.0 / kFps) < 1e-4);
+    // One loop's length, which the sound track is looped to.
+    CHECK(std::fabs(player->durationSeconds() - (double)kFrames / kFps) < 1e-3);
     const ULONGLONG start = GetTickCount64();
     UINT texW = 0, texH = 0;
     const int want = (int)kFrames * 2 + 5;

@@ -106,7 +106,7 @@ const std::map<std::wstring, std::wstring> kAbout = {
     {L"spectrum.mode", L"Bars, a line through the bands' tops, or the area under that line."},
     {L"spectrum.direction", L"Which way the bands reach: up, down, or both ways from the middle."},
     {L"spectrum.bass", L"Where the low frequencies are: left, right, or in the middle with the treble at both ends."},
-    {L"spectrum.length", L"Width in em."},
+    {L"spectrum.length", L"Width in em. A spectrum set wider than its display is drawn as wide as the display, at its own height."},
     {L"spectrum.height", L"How far a band can reach, in em."},
     {L"spectrum.bands", L"Number of frequency bands."},
     {L"spectrum.gap", L"Space between bars, as a share of each band's width."},

@@ -273,6 +273,68 @@ TEST(SpectrumDrawsItsColours) {
     if (SUCCEEDED(co)) CoUninitialize();
 }
 
+// A spectrum set wider than its display is drawn as wide as the display, flush with both edges,
+// at its own height, whatever the panel is placed by. Text is still drawn smaller to keep within
+// the panel's margins.
+TEST(SpectrumMaySpanTheWholeDisplay) {
+    const HRESULT co = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    skin::Skin s;
+    CHECK(BuiltInComponent(L"spectrum", &s));
+    Picture background, out;
+    background.width = 960;
+    background.height = 540;
+    background.bgra.assign((size_t)960 * 540 * 4, 0);
+    SkinPreview preview;
+    std::vector<SkinView::Bound> bounds;
+    const RegionalFormat us{L"en-US", L"h:mm tt", L"dddd, MMMM d, yyyy"};
+    auto draw = [&](const skin::Resolved &r) {
+        bounds.clear();
+        return preview.Render(background, r, ClockStyle{}, us, SYSTEMTIME{}, &out, &bounds);
+    };
+    auto box = [&](const wchar_t *key) {
+        for (const SkinView::Bound &b : bounds)
+            if (b.key == key) return b.rect;
+        return D2D1_RECT_F{};
+    };
+    // Whether anything is drawn in columns x0 to x1 of the row just above `bottom`.
+    auto lit = [&](int x0, int x1, float bottom) {
+        const int y = (int)bottom - 2;
+        for (int x = x0; x <= x1; ++x)
+            if (out.bgra[((size_t)y * out.width + x) * 4 + 3] > 100) return true;
+        return false;
+    };
+    const float tall = 0.06f * 540;  // the built-in component's size, 6% of the height
+    // Between the margins (5% of the height each side) and the display's edges: as wide as it was
+    // set, not drawn smaller.
+    CHECK(draw(skin::Resolve(s, {{L"width", L"28.5"}, {L"p1.s1.opacity", L"0"}})));
+    D2D1_RECT_F r = box(L"p1.l1.a1");
+    CHECK(std::fabs((r.right - r.left) - 28.5f * tall) < 2.0f);
+    CHECK(std::fabs((r.bottom - r.top) - tall) < 1.5f);
+    // Wider than the display: the display's width, at its own height and place above the bottom,
+    // with bars to the very edges.
+    for (const wchar_t *anchor : {L"bottom", L"bottom-left", L"bottom-right"}) {
+        CHECK(draw(skin::Resolve(s, {{L"width", L"80"}, {L"p1.anchor", anchor}, {L"p1.s1.opacity", L"0"}})));
+        r = box(L"p1.l1.a1");
+        CHECK(std::fabs(r.left) <= 1.0f && std::fabs(r.right - 960) <= 1.0f);
+        CHECK(std::fabs((r.bottom - r.top) - tall) < 1.5f && std::fabs(r.bottom - 0.95f * 540) < 1.5f);
+        CHECK(lit(0, 8, r.bottom) && lit(951, 959, r.bottom));
+    }
+    // A line of text too wide for the margins makes the whole panel smaller, the spectrum under it
+    // too, but the spectrum still spans the display while the text keeps within the margins.
+    const std::string wide = R"(<component format="1" name="t"><panel anchor="bottom" size="6" margin="5">)"
+                             R"(<line><text value="WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW"/></line>)"
+                             R"(<line><spectrum length="80"/></line></panel></component>)";
+    skin::Skin both;
+    CHECK(skin::Parse(wide, &both, nullptr));
+    CHECK(draw(skin::Resolve(both, {})));
+    const D2D1_RECT_F text = box(L"p1.l1.t1");
+    r = box(L"p1.l2.a1");
+    CHECK(text.left >= 27.0f - 3.0f && text.right <= 960.0f - 27.0f + 3.0f && text.right - text.left > 850.0f);
+    CHECK(std::fabs(r.left) <= 1.0f && std::fabs(r.right - 960) <= 1.0f);
+    CHECK(r.bottom - r.top < tall - 2.0f);
+    if (SUCCEEDED(co)) CoUninitialize();
+}
+
 // The settings app's moving previews: one view drawn frame after frame keeps its bands, so they rise
 // with sound and fall back after it, and each frame is only the part the panel can touch.
 TEST(SpectrumPreviewMovesFromFrameToFrame) {

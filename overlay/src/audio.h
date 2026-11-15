@@ -28,8 +28,13 @@ public:
     void Close();
     bool ready() const { return engine_ != nullptr; }
 
-    // Loops a 48 kHz, 16-bit stereo WAV file from `position` seconds, fading in.
-    bool PlayVideoTrack(const std::wstring &wavPath, double position, float fadeInSeconds);
+    // Loops a 48 kHz, 16-bit stereo WAV file from `position` seconds, fading in, every
+    // `loopSeconds` -- the video's own length, so the two stay together (soundloop.h); 0 for the
+    // file's own length. Before the
+    // output is open it is only remembered, and starts once it is from where the picture is then
+    // (Tick). While other programs make sound and the settings say video_audio_yield, it plays
+    // muted, and comes back once they have been quiet for a few seconds.
+    bool PlayVideoTrack(const std::wstring &wavPath, double position, float fadeInSeconds, double loopSeconds);
     void FadeOut(float seconds);
     void Pause();
     void Resume();
@@ -42,8 +47,9 @@ public:
     // silence, so the spectrum reads it from here (overlay.cpp).
     bool Recent(std::vector<float> *mono, size_t count, float *rate);
 
-    // Called every frame: finishes opening, feeds buffers, applies fades.
-    void Tick();
+    // Called every frame: finishes opening, feeds buffers, applies fades. `pictureClock` is the
+    // video's own clock, in seconds: where a remembered track starts once the output is open.
+    void Tick(double pictureClock);
 
     // Remembers the signed-in user's default output for the boot screen.
     static void RememberConsoleDefault();
@@ -54,7 +60,8 @@ public:
 
 private:
     struct Track;
-    void Opened();
+    struct Watch;
+    void Opened(double pictureClock);
 
     animelogon::AudioSettings settings_;
     struct Pending;
@@ -64,9 +71,12 @@ private:
     IXAudio2MasteringVoice *master_ = nullptr;
     std::unique_ptr<Track> track_;
     std::wstring wantTrack_;
-    double wantPosition_ = 0.0;
+    double wantLoop_ = 0.0;
     float wantFade_ = 0.0f;
     bool wantPlay_ = false;
-    ULONGLONG wantAt_ = 0;
     bool paused_ = false;  // a track that starts now starts paused
+    // Other programs' sound on the device (video_audio_yield), watched by the opening thread.
+    std::shared_ptr<Watch> watch_;
+    bool yielding_ = false;        // the track is muted for them
+    ULONGLONG othersHeardAt_ = 0;  // when they were last heard
 };
