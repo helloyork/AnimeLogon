@@ -1,12 +1,7 @@
 // animelogon.exe: the settings app. Runs as the user; whatever needs administrator rights runs in
 // a short elevated child of itself, with the command line commit.h describes. With --agent it is
 // instead the service's agent in the signed-in person's session (agent.h); with --tray, the icon
-// in the notification area (tray.h).
-//
-// The settings app's own arguments, in any order:
-//   --sandbox <dir>  a window apart from what is installed, on a copy of the data under <dir> (paths.h)
-//   --show <what>    comes up at what the icon asked for (tray.h IsShowTarget)
-//   --tray           the icon instead of the window, in the sandbox if one is given
+// in the notification area (tray.h). The settings app's own arguments are in arguments.h.
 
 #include <windows.h>
 #include <shellapi.h>
@@ -15,7 +10,6 @@
 #include <vector>
 
 #include "animelogon/i18n.h"
-#include "animelogon/i18n.h"
 #include "animelogon/instance.h"
 #include "animelogon/log.h"
 #include "animelogon/paths.h"
@@ -23,6 +17,7 @@
 #include "animelogon/text.h"
 
 #include "agent.h"
+#include "arguments.h"
 #include "commit.h"
 #include "host.h"
 #include "tray.h"
@@ -31,31 +26,17 @@ using namespace animelogon;
 
 namespace {
 
-struct Arguments {
-    bool tray = false;
-    bool sandbox = false;
-    std::wstring dir, show;
-};
-
-// False when the arguments are not the settings app's.
-bool Parse(const std::vector<std::wstring> &args, Arguments *out) {
-    for (size_t i = 0; i < args.size(); ++i) {
-        const std::wstring &a = args[i];
-        if (a == L"--tray" && !out->tray) {
-            out->tray = true;
-        } else if (a == L"--sandbox" && !out->sandbox && i + 1 < args.size()) {
-            out->sandbox = true;
-            out->dir = args[++i];
-        } else if (a == L"--show" && out->show.empty() && i + 1 < args.size() && !args[i + 1].empty() && app::IsShowTarget(args[i + 1])) {
-            out->show = args[++i];
-        } else {
-            return false;
-        }
-    }
-    return true;
+// A file given on the command line, by its full path: the window that imports it may have been
+// started from another folder.
+std::wstring FullPath(const std::wstring &path) {
+    const DWORD n = GetFullPathNameW(path.c_str(), 0, nullptr, nullptr);
+    if (!n) return path;
+    std::wstring full(n, L'\0');
+    const DWORD wrote = GetFullPathNameW(path.c_str(), n, full.data(), nullptr);
+    if (!wrote || wrote >= n) return path;
+    full.resize(wrote);
+    return full;
 }
-
-bool IsAppArgument(const std::wstring &a) { return a == L"--sandbox" || a == L"--show" || a == L"--tray"; }
 
 // An empty sandbox starts as a fresh installation would: its stores and default settings.
 bool PrepareSandbox(const std::wstring &dir) {
@@ -86,29 +67,39 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, wchar_t *, int show) {
     const std::vector<std::wstring> args = argv ? std::vector<std::wstring>(argv + 1, argv + argc) : std::vector<std::wstring>();
     if (argv) LocalFree(argv);
 
-    if (args.size() == 1 && args[0] == L"--agent") return app::RunAgent();
-    Arguments a;
-    if (!args.empty() && IsAppArgument(args[0])) {
-        if (!Parse(args, &a)) {
-            i18n::Use(i18n::Preferred());
-            MessageBoxW(nullptr, i18n::Tr("app.error.args").c_str(), L"AnimeLogon", MB_OK | MB_ICONWARNING);
-            return 2;
-        }
-    } else if (!args.empty() && !args[0].empty() && args[0][0] == L'-') {
-        // The elevated child.
+    app::Arguments a;
+    switch (app::ReadArguments(args, &a)) {
+    case app::Role::Agent:
+        return app::RunAgent();
+    case app::Role::Helper:
         return commit::Run(args);
+    case app::Role::Unrecognized:
+        i18n::Use(i18n::Preferred());
+        MessageBoxW(nullptr, i18n::Tr("app.error.args").c_str(), L"AnimeLogon", MB_OK | MB_ICONWARNING);
+        return 2;
+    case app::Role::App:
+        break;
     }
     if (a.sandbox && !PrepareSandbox(a.dir)) return 2;
     // The language of the window or the icon and of everything they say: the person's choice, the
     // machine's, or Windows'. After the sandbox is known, which keeps a choice of its own.
     i18n::Use(i18n::Preferred());
     if (a.tray) return app::RunTray();
+    if (!a.open.empty()) a.open = FullPath(a.open);
 
     if (FAILED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED))) return 1;
     instance::Guard only;
     if (only.Acquire(a.sandbox ? paths::SandboxMutex() : L"Local\\AnimeLogon.App") == instance::Result::AlreadyRunning) {
-        if (HWND existing = app::FindAppWindow()) {
-            if (!app::AskApp(existing, a.show)) {
+        // The window already open shows what was asked, or imports the file, instead of a second one.
+        // Started a moment before (several files opened at once), it may not have its window yet.
+        HWND existing = app::FindAppWindow();
+        for (int tries = 0; !existing && !a.open.empty() && tries < 50; ++tries) {
+            Sleep(100);
+            existing = app::FindAppWindow();
+        }
+        if (existing) {
+            const bool asked = a.open.empty() ? app::AskApp(existing, a.show) : app::AskAppToOpen(existing, a.open);
+            if (!asked) {
                 if (IsIconic(existing)) ShowWindow(existing, SW_RESTORE);
                 SetForegroundWindow(existing);
             }
@@ -122,7 +113,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, wchar_t *, int show) {
     int code = 1;
     {
         app::Host host;
-        if (host.Create(show, a.show)) code = host.Run();
+        if (host.Create(show, a.show, a.open)) code = host.Run();
     }
     CoUninitialize();
     return code;

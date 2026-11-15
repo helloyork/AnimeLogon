@@ -14,6 +14,7 @@
 #include <cwchar>
 #include <set>
 #include <cmath>
+#include <utility>
 
 #include "animelogon/bitmap.h"
 #include "animelogon/blur.h"
@@ -60,6 +61,10 @@ constexpr UINT kWorkshopFound = WM_APP + 13;
 constexpr UINT kReveal = WM_APP + 14;  // the icon asked: the window comes forward
 constexpr UINT kReread = WM_APP + 15;  // the icon changed settings.ini
 constexpr UINT kExportDone = WM_APP + 17;
+constexpr UINT kOpen = WM_APP + 18;  // a later start of the program asked to import a theme package
+// How many theme packages may wait for the page at once; later starts of the program asking for more
+// are not answered, and bring the window forward without them.
+constexpr size_t kMaxOpening = 64;
 // The window's timers: the one that lets go of idle scene previews, and the one that reads the
 // displays again once a change of them has settled (Windows says so several times in a row).
 constexpr UINT_PTR kIdleTimer = 1, kDisplaysTimer = 2;
@@ -380,9 +385,10 @@ Host::~Host() {
     if (scanner_.joinable()) scanner_.join();
 }
 
-bool Host::Create(int show, const std::wstring &reveal) {
+bool Host::Create(int show, const std::wstring &reveal, const std::wstring &open) {
     show_ = show;
     reveal_ = reveal;
+    if (!open.empty()) opening_.push_back(open);
     dark_ = AppsDark();
     WNDCLASSEXW wc{sizeof(wc)};
     wc.lpfnWndProc = Proc;
@@ -534,6 +540,11 @@ LRESULT Host::Handle(UINT msg, WPARAM wp, LPARAM lp) {
         return OnAsked(*reinterpret_cast<const COPYDATASTRUCT *>(lp));
     case kReveal:
         Reveal();
+        return 0;
+    case kOpen:
+        // Comes forward; the import starts now, or once the page is there.
+        Reveal();
+        if (ready_) OpenPackages();
         return 0;
     case kReread:
         Reread();
@@ -740,6 +751,18 @@ void Host::SendState() {
 bool Host::OnAsked(const COPYDATASTRUCT &cd) {
     if (cd.dwData == kAskReread && cd.cbData == 0) {
         PostMessageW(hwnd_, kReread, 0, 0);
+        return true;
+    }
+    if (cd.dwData == kAskOpen) {
+        // A path, as main.cpp sends it: whole characters, no longer than Windows allows, no NUL.
+        if (!cd.cbData || !cd.lpData || cd.cbData % sizeof(wchar_t) || cd.cbData > 32767 * sizeof(wchar_t) ||
+            opening_.size() >= kMaxOpening)
+            return false;
+        std::wstring path(static_cast<const wchar_t *>(cd.lpData), cd.cbData / sizeof(wchar_t));
+        if (path.find(L'\0') != std::wstring::npos) return false;
+        opening_.push_back(std::move(path));
+        openAsked_ = true;
+        PostMessageW(hwnd_, kOpen, 0, 0);
         return true;
     }
     if (cd.dwData != kAskShow || cd.cbData % sizeof(wchar_t) || cd.cbData > 32 * sizeof(wchar_t) || (cd.cbData && !cd.lpData))
@@ -1276,6 +1299,7 @@ void Host::OnMessage(const json::Value &m) {
         SendState();
         ready_ = true;
         if (!reveal_.empty()) Reveal();
+        if (!opening_.empty()) OpenPackages();
     } else if (op == L"refresh") {
         SendState();
     } else if (op == L"open") {
@@ -1478,6 +1502,68 @@ void Host::Import(bool wallpaper, importable::Kind kind) {
     const std::wstring source = PickFile(hwnd_, FiltersOf(filters).c_str(), nullptr, false, L"");
     if (source.empty()) return;
     StartImport({{source, L"", L""}}, wallpaper);
+}
+
+void Host::OpenPackages() {
+    std::vector<std::wstring> given = std::move(opening_);
+    opening_.clear();
+    const bool asked = std::exchange(openAsked_, false);
+    if (given.empty()) return;
+    for (const std::wstring &p : given) ALOG(L"import: %s, from the command line", p.c_str());
+    if (RefuseWhileBusy()) return;
+    // The library, where an imported theme shows up, put in use, as after the library's own import.
+    json::Writer w;
+    w.BeginObject().Member(L"type", L"show").Member(L"what", L"library").EndObject();
+    Send(w);
+    // A file not named as a theme package is refused unread, with the message the import gives a
+    // file that is not one.
+    std::vector<ImportJob> jobs;
+    std::wstring problems;
+    const std::wstring invalid = i18n::Tr("package.error.invalid");
+    for (const std::wstring &p : given) {
+        if (IsPackagePath(p)) jobs.push_back({p, L"", L""});
+        else if (given.size() == 1) problems = invalid;
+        else problems += L"\n" + i18n::Tr("msg.not_imported.item", {{L"name", p.substr(p.find_last_of(L"\\/") + 1)}, {L"why", invalid}});
+    }
+    if (!problems.empty())
+        Problem(given.size() == 1 ? problems : i18n::Tr("msg.not_imported", {{L"n", std::to_wstring(given.size() - jobs.size())}}) + problems);
+    if (jobs.empty()) return;
+    // Running as an administrator, the elevated helper asks nothing: what another program asked for
+    // is confirmed here instead, in this window, which programs running with less cannot click.
+    if (asked && paths::Sandbox().empty() && machine::IsElevated()) {
+        std::vector<std::wstring> files;
+        for (const ImportJob &j : jobs) files.push_back(j.source);
+        if (!ConfirmOpen(files)) {
+            ALOG(L"import: declined");
+            return;
+        }
+    }
+    StartImport(std::move(jobs), false);
+}
+
+bool Host::ConfirmOpen(const std::vector<std::wstring> &files) {
+    std::wstring list;
+    for (const std::wstring &f : files) list += (list.empty() ? L"" : L"\n") + f;
+    const std::wstring instruction = i18n::Tr("app.open_asked"), detail = i18n::Tr("app.open_asked.detail", {{L"files", list}});
+    const std::wstring import = i18n::Tr("dialog.import.title"), cancel = i18n::Tr("button.cancel");
+    constexpr int kImport = 100, kCancel = 101;
+    const TASKDIALOG_BUTTON buttons[] = {{kImport, import.c_str()}, {kCancel, cancel.c_str()}};
+    TASKDIALOGCONFIG config{};
+    config.cbSize = sizeof config;
+    config.hwndParent = hwnd_;
+    // Esc and the title bar's close button cancel, as Cancel does, which is also the default.
+    config.dwFlags = TDF_ALLOW_DIALOG_CANCELLATION | TDF_POSITION_RELATIVE_TO_WINDOW;
+    config.pszWindowTitle = L"AnimeLogon";
+    config.pszMainIcon = TD_SHIELD_ICON;
+    config.pszMainInstruction = instruction.c_str();
+    config.pszContent = detail.c_str();
+    config.cButtons = ARRAYSIZE(buttons);
+    config.pButtons = buttons;
+    config.nDefaultButton = kCancel;
+    int pressed = kCancel;
+    const HRESULT hr = TaskDialogIndirect(&config, &pressed, nullptr, nullptr);
+    if (FAILED(hr)) ALOG(L"import: the question could not be asked (0x%08lX)", (unsigned long)hr);
+    return SUCCEEDED(hr) && pressed == kImport;
 }
 
 void Host::StartImport(std::vector<ImportJob> jobs, bool wallpaper) {

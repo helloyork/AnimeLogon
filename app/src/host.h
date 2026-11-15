@@ -40,7 +40,8 @@ public:
     Host();
     ~Host();
     // `reveal`: what the icon in the notification area asked the app to come up at (tray.h).
-    bool Create(int show, const std::wstring &reveal = L"");
+    // `open`: a theme package to import once the page is there, given on the command line.
+    bool Create(int show, const std::wstring &reveal = L"", const std::wstring &open = L"");
     int Run();
 
 private:
@@ -62,8 +63,15 @@ private:
     void Busy(const std::wstring &label, int percent);
     void OnMessage(const json::Value &m);
     // What the icon asks by WM_COPYDATA (tray.h): come forward at a setting; read settings.ini again.
+    // And what a second start of the program asks: import a theme package (kAskOpen).
     bool OnAsked(const COPYDATASTRUCT &cd);
     void Reveal();
+    // Imports the theme packages given on the command line (opening_), as the library's import of a
+    // theme package does, with the page at the library.
+    void OpenPackages();
+    // Asked before importing packages another program asked for while this window runs as an
+    // administrator, where the elevated helper starts without a prompt: true to import.
+    bool ConfirmOpen(const std::vector<std::wstring> &files);
     void Reread();
     void OnResource(ICoreWebView2WebResourceRequestedEventArgs *args);
 
@@ -193,6 +201,10 @@ private:
     bool ready_ = false;  // the page has asked for its state
     // What the page is to show once it can, when the icon asked: "switch", "lock" or nothing.
     std::wstring reveal_;
+    // Theme packages to import once the page is there: this window's own command line's, and those
+    // of later starts of the program that came here instead (kAskOpen), which set openAsked_.
+    std::vector<std::wstring> opening_;
+    bool openAsked_ = false;
 
     // The window's frame without Windows' caption: the page's bar is the title bar (frame.h).
     Frame frame_{[this](const json::Writer &message) { Send(message); }};

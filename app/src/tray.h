@@ -14,6 +14,8 @@
 #include <string>
 #include <string_view>
 
+#include "arguments.h"
+
 namespace app {
 
 int RunTray();
@@ -23,12 +25,11 @@ constexpr const wchar_t *kAppClass = L"AnimeLogonApp";
 // The title both windows carry: AnimeLogon, or the sandbox's.
 std::wstring WindowTitle();
 
-// WM_COPYDATA's dwData for what the icon asks of the settings app's window.
+// WM_COPYDATA's dwData for what the icon, or a second start of the program, asks of the settings
+// app's window.
 constexpr ULONG_PTR kAskShow = 0x414C5301;    // come forward at what the data names (IsShowTarget)
 constexpr ULONG_PTR kAskReread = 0x414C5302;  // settings.ini has changed: read it again
-// What the settings app can be asked to show: itself as it is (empty), the switch that turns
-// AnimeLogon on and off ("switch"), the lock-screen preview of the theme in use ("lock").
-bool IsShowTarget(std::wstring_view what);
+constexpr ULONG_PTR kAskOpen = 0x414C5303;    // import the theme package whose full path the data is
 
 HWND FindAppWindow();
 HWND FindTrayWindow();
@@ -36,6 +37,9 @@ HWND FindTrayWindow();
 bool ShowApp(const std::wstring &what);
 // Asks a running settings app to come forward at `what`; false if it did not answer.
 bool AskApp(HWND app, const std::wstring &what);
+// Asks a running settings app to import the theme package at `path`, a full path; false if it did
+// not answer.
+bool AskAppToOpen(HWND app, const std::wstring &path);
 // Starts the icon unless it is already there, as this process's own user; closes it.
 void StartTray();
 void CloseTray();

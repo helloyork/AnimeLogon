@@ -43,9 +43,9 @@ Lock the computer (<kbd>Win</kbd>+<kbd>L</kbd>) or restart it. The lock screen s
 until you press a key or click, and the Windows sign-in screen appears.
 
 To change it, click a theme in the theme library. Videos, pictures and theme packages
-(.altheme) are added with **Import…**, and an imported theme is put in use at once. Select
-**Customize** on a theme to change its wallpaper and widgets. Themes can be exported as .altheme
-files to share.
+(.altheme) are added with **Import…**, and an imported theme is put in use at once.
+Double-clicking a .altheme file imports it the same way. Select **Customize** on a theme to change
+its wallpaper and widgets. Themes can be exported as .altheme files to share.
 
 Choose the display language in **Settings > General > Display language**: 简体中文, 繁體中文, English or
 日本語. It follows Windows unless you choose one.
@@ -135,6 +135,7 @@ Exit codes: `0` removed, `1` a change could not be undone, `1223` cancelled.
 | `--tray` | Shows the system tray icon instead of the window. The startup entry runs it this way at sign-in. |
 | `--show switch`, `--show lock` | Opens the window, or brings it forward, at the **Enable AnimeLogon** switch or at the lock screen preview of the theme in use. |
 | `--sandbox <folder>` | Opens a window that works on separate data (themes, components, settings) in `<folder>`, for testing. Imports there need no administrator approval, and the lock screen does not use them. |
+| `<file>.altheme` | Imports the theme package, as **Import…** does, in the window already open if there is one. Double-clicking a .altheme file runs AnimeLogon this way. Can be combined with `--sandbox`. |
 | `--switch-on`, `--switch-off` | Turns AnimeLogon on or off, as the switch in the settings does. Requires administrator rights. Exit codes: `0` done, `1` failed, `4` not run as administrator. |
 
 With arguments it does not recognize, `animelogon.exe` says so and exits with code `2`. The

@@ -237,7 +237,7 @@ export type FromNative =
   | { type: 'busy'; label: string | null; percent?: number }  // percent < 0: under way, how far not known
   | { type: 'added'; instance: string }
   | { type: 'navigate'; theme: string }
-  | { type: 'show'; what: 'switch' | 'lock' }
+  | { type: 'show'; what: 'switch' | 'lock' | 'library' }
   | ({ type: 'workshop' } & Workshop)
   | ({ type: 'frame' } & WindowFrame);
 
