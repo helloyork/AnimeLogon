@@ -363,9 +363,9 @@ bool Parse(std::string_view utf8, Form form, Theme *theme, std::wstring *error, 
 
 std::string DefaultText() {
     return R"(<?xml version="1.0" encoding="utf-8"?>
-<!-- The theme that comes with AnimeLogon: the built-in wallpaper and the clock. -->
+<!-- The theme that comes with AnimeLogon: the bundled wallpaper (kBundledWallpaper) and the clock. -->
 <theme format="1" name="默认" author="AnimeLogon">
-  <wallpaper ref="default" fit="fill"/>
+  <wallpaper ref="0000000000000001" fit="fill"/>
   <component id="clock" ref="clock"/>
 </theme>
 )";

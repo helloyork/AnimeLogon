@@ -66,7 +66,8 @@ bool IsImportDir(const std::wstring &dir);
 
 // Each returns a commit::Code: kOk, kFailed, or kBadArgs for an id or directory of the wrong
 // shape. Imported ids are 16 lowercase hex digits; built-ins ("default", "none", "clock")
-// cannot be written or removed.
+// cannot be written or removed. Neither can the bundled wallpaper (kBundledWallpaper), which
+// install.exe writes: committing under its id is kBadArgs, and removing it is kOk and does nothing.
 int CommitWallpaper(const Target &t, const std::wstring &id, const std::wstring &dir);
 int RemoveWallpaper(const Target &t, const std::wstring &id);
 int CommitComponent(const Target &t, const std::wstring &id, const std::wstring &dir);

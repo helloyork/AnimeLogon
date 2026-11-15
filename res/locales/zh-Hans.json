@@ -326,6 +326,7 @@
   "install.step.shortcuts": "创建快捷方式",
   "install.step.stop": "停止正在运行的服务",
   "install.step.turn_on": "关闭 Windows 锁屏并启动服务",
+  "install.step.wallpaper": "写入默认壁纸",
 
   "kind.builtin": "内置背景",
   "kind.image": "图片",
@@ -969,7 +970,8 @@
   "unit.short_side": "% 短边",
   "unit.times": "倍",
 
-  "wallpaper.default": "默认背景",
+  "wallpaper.bundled": "柔和层峦",
+  "wallpaper.default": "深色渐变",
   "wallpaper.meta.audio": " · 含音频",
   "wallpaper.meta.default": "内置深色背景",
   "wallpaper.meta.image": "图片 · {size}",

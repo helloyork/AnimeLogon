@@ -27,7 +27,9 @@
 #include <vector>
 
 #include "animelogon/secure.h"
+#include "animelogon/sha256.h"
 #include "animelogon/text.h"
+#include "animelogon/wallpaper.h"
 #include "nv12.h"
 #include "player.h"
 
@@ -694,4 +696,45 @@ TEST(FirstSoftwareFrameIsReadWhereTheDecoderPutsIt) {
         CHECK(std::abs(lock.chroma()[0] - top.u) <= kTolerance && std::abs(lock.chroma()[1] - top.v) <= kTolerance);
     }
     animelogon::secure::RemoveTree(scratch);
+}
+
+// The bundled wallpaper's video, which install.exe writes for the default theme. It is what
+// BundledWallpaperInfo says it is -- and wallpaper.ini as install.exe writes it reads back the same --
+// and the overlay's player decodes it on the software path, the slowest a machine can take.
+TEST(BundledWallpaperIsWhatInstallExeDescribes) {
+    std::wstring path = L"" ANIMELOGON_BUNDLED_WALLPAPER;
+    std::replace(path.begin(), path.end(), L'/', L'\\');
+    std::vector<uint8_t> bytes;
+    CHECK(animelogon::secure::ReadFileBytes(path, &bytes, 100u << 20));
+    if (bytes.empty()) return;
+    CHECK(animelogon::LooksLikeMp4(bytes.data(), bytes.size()));
+    const animelogon::WallpaperInfo w =
+        animelogon::BundledWallpaperInfo(animelogon::Sha256Of(bytes.data(), bytes.size()));
+    CHECK(w.id == animelogon::kBundledWallpaper && w.sha256.size() == 64);
+    animelogon::WallpaperInfo back;
+    CHECK(animelogon::ParseWallpaperInfo(animelogon::SerializeWallpaperInfo(w), &back));
+    CHECK(back.kind == animelogon::WallpaperKind::Video && back.width == w.width && back.height == w.height);
+    CHECK(back.frameRateNum == w.frameRateNum && back.frameRateDen == w.frameRateDen);
+    CHECK(back.durationMs == w.durationMs && !back.hasAudio && back.sha256 == w.sha256);
+
+    if (!MediaFoundationHere()) return Skipped("no Media Foundation here");
+    Media media;
+    ComPtr<ID3D11Device> device;
+    if (!media.mf || !MakeDevice(false, &device)) return Skipped("no Media Foundation or no WARP device");
+    auto player = std::make_unique<VideoPlayer>();
+    const bool opened = player->Open(path, device.Get(), nullptr);
+    CHECK(opened);
+    if (!opened) return;
+    CHECK(!player->hardware());
+    CHECK(player->width() == w.width && player->height() == w.height);
+    CHECK(std::fabs(player->frameSeconds() * w.frameRateNum / w.frameRateDen - 1.0) < 1e-3);
+    CHECK(std::fabs(player->durationSeconds() - w.durationMs / 1000.0) < 0.05);
+    const int want = 30;
+    const int shown = Play(*player, want, 20.0, [](int, const VideoPlayer::Frame &) {});
+    if (!player->failed() && shown < want) {
+        Abandon(std::move(player), "the bundled wallpaper", shown, want);
+        return Stalled(media, device.Get(), false);
+    }
+    if (player->failed()) std::printf("  the player failed: %ls\n", player->failure().c_str());
+    CHECK(!player->failed() && shown == want);
 }

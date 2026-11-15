@@ -21,6 +21,11 @@ set(payload_documents
     "licenses/RapidJSON.txt"         "${PROJECT_SOURCE_DIR}/vendor/thorvg/src/loaders/lottie/rapidjson/LICENSE"
     # The npm packages bundled into the settings app's page (app/web/build.mjs writes it).
     "licenses/npm.txt"               "${ANIMELOGON_NPM_NOTICES}")
+# The wallpapers, the same for every architecture: a name, then the source. Not placed in the
+# install directory: install.exe writes the bundled wallpaper's video (kBundledWallpaper in
+# common/include/animelogon/wallpaper.h) into the wallpaper store.
+set(payload_wallpapers
+    "soft-hills.mp4"                 "${PROJECT_SOURCE_DIR}/res/wallpapers/soft-hills.mp4")
 
 # IMAGE_FILE_MACHINE_* of this build's programs and of the other build's.
 if(CMAKE_CXX_COMPILER_ARCHITECTURE_ID STREQUAL "x64")
@@ -57,19 +62,27 @@ if(payload_arm64_dir)
         string(APPEND payload_table "{${payload_id}, L\"$<TARGET_FILE_NAME:${target}>\", Kind::Program, 0xAA64},\n")
     endforeach()
 endif()
-list(LENGTH payload_documents payload_document_values)
-math(EXPR payload_last "${payload_document_values} - 1")
-foreach(at RANGE 0 ${payload_last} 2)
-    math(EXPR source_at "${at} + 1")
-    list(GET payload_documents ${at} name)
-    list(GET payload_documents ${source_at} source)
-    if(NOT source)
-        message(FATAL_ERROR "No source for ${name}.")
+# The documents, then the wallpapers: pairs of a name and its source, one resource each.
+foreach(payload_kind IN ITEMS Document Wallpaper)
+    if(payload_kind STREQUAL "Document")
+        set(payload_pairs "${payload_documents}")
+    else()
+        set(payload_pairs "${payload_wallpapers}")
     endif()
-    math(EXPR payload_id "${payload_id} + 1")
-    string(REPLACE "/" "\\\\" cxx_name "${name}")
-    string(APPEND payload_rc_text "${payload_id} PAYLOAD \"${source}\"\n")
-    string(APPEND payload_table "{${payload_id}, L\"${cxx_name}\", Kind::Document, 0},\n")
+    list(LENGTH payload_pairs payload_pair_values)
+    math(EXPR payload_last "${payload_pair_values} - 1")
+    foreach(at RANGE 0 ${payload_last} 2)
+        math(EXPR source_at "${at} + 1")
+        list(GET payload_pairs ${at} name)
+        list(GET payload_pairs ${source_at} source)
+        if(NOT source)
+            message(FATAL_ERROR "No source for ${name}.")
+        endif()
+        math(EXPR payload_id "${payload_id} + 1")
+        string(REPLACE "/" "\\\\" cxx_name "${name}")
+        string(APPEND payload_rc_text "${payload_id} PAYLOAD \"${source}\"\n")
+        string(APPEND payload_table "{${payload_id}, L\"${cxx_name}\", Kind::${payload_kind}, 0},\n")
+    endforeach()
 endforeach()
 
 # The resource script per configuration, since the programs' paths are; the table is the same in all.

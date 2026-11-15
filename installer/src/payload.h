@@ -16,17 +16,20 @@
 
 namespace payload {
 
-enum class Kind { Program, Document };
+// A program or a document goes into the install directory. A wallpaper does not: it is the
+// bundled wallpaper's video, which install.exe writes into the wallpaper store (engine.cpp), and
+// the uninstaller leaves it to the data directory's own removal.
+enum class Kind { Program, Document, Wallpaper };
 
 struct File {
     int id;                // the PAYLOAD resource
-    const wchar_t *name;   // relative to the install directory
+    const wchar_t *name;   // relative to the install directory; a wallpaper's is only its name
     Kind kind;
-    USHORT machine;        // a program's IMAGE_FILE_MACHINE_*; 0 for a document, which every machine takes
+    USHORT machine;        // a program's IMAGE_FILE_MACHINE_*; 0 for the rest, which every machine takes
 };
 
-// Every file the build names, programs first, then the licences that go with them; carried or not
-// (uninstall.exe carries none, and deletes what is listed).
+// Every file the build names, programs first, then the licences that go with them, then the
+// wallpapers; carried or not (uninstall.exe carries none, and deletes the programs and documents).
 const std::vector<File> &Files();
 // Each name of that kind once, whatever the machine.
 std::vector<const wchar_t *> Names(Kind kind);

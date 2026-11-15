@@ -1,4 +1,4 @@
-<img src="res/animelogon.svg" alt="" width="72">
+<img src="res/readme/banner.png" alt="AnimeLogon">
 
 # AnimeLogon
 
@@ -149,7 +149,7 @@ the Steam edition (planned), `animelogon-steam.exe`, speaks the protocol in
 |---|---|
 | `C:\Program Files\AnimeLogon\` | The programs, `uninstall.exe` and the third-party licences (`licenses\`). |
 | `%ProgramData%\AnimeLogon\settings.ini` | Machine-wide settings: the theme in use, multiple displays, the clock, sound, and the changes made to each theme. One `key = value` per line, holding only ids, choices and typed values, never a path or free text. The keys are described in [settings.h](common/include/animelogon/settings.h). |
-| `%ProgramData%\AnimeLogon\themes\`, `components\`, `wallpapers\` | Imported themes, components and wallpapers. Only administrators can write there, and AnimeLogon writes them in normalized form. |
+| `%ProgramData%\AnimeLogon\themes\`, `components\`, `wallpapers\` | Imported themes, components and wallpapers, and the default theme's wallpaper, which the installer writes. Only administrators can write there, and AnimeLogon writes them in normalized form. |
 | `%ProgramData%\AnimeLogon\logs\` | Logs. |
 
 ## Building from source

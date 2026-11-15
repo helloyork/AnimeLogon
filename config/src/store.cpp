@@ -497,7 +497,8 @@ bool IsImportDir(const std::wstring &dir) {
 }
 
 int CommitWallpaper(const Target &t, const std::wstring &id, const std::wstring &dir) {
-    if (!IsWallpaperId(id) || !IsImportDir(dir)) return commit::kBadArgs;
+    // The bundled wallpaper's id is install.exe's; nothing imported goes in under it.
+    if (!IsWallpaperId(id) || id == kBundledWallpaper || !IsImportDir(dir)) return commit::kBadArgs;
     std::wstring why;
     if (!t.Ready(&why)) return Refused(L"wallpaper: data directory", why);
     StagedWallpaper w;
@@ -508,6 +509,10 @@ int CommitWallpaper(const Target &t, const std::wstring &id, const std::wstring 
 
 int RemoveWallpaper(const Target &t, const std::wstring &id) {
     if (!IsWallpaperId(id)) return commit::kBadArgs;
+    // The default theme's wallpaper stays: it is only ever named for removal along with something
+    // that happened to share its payload (a theme package or Workshop item made from the default
+    // theme), and the rest of the same command line still goes ahead.
+    if (id == kBundledWallpaper) return commit::kOk;
     return t.RemoveTree(In(t, WallpaperDir(id))) == ERROR_SUCCESS ? commit::kOk : commit::kFailed;
 }
 

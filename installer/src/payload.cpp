@@ -64,7 +64,7 @@ namespace {
 
 const File *Find(const wchar_t *name, USHORT machine) {
     for (const File &f : Files())
-        if (_wcsicmp(f.name, name) == 0 && (f.kind == Kind::Document || f.machine == machine)) return &f;
+        if (_wcsicmp(f.name, name) == 0 && (f.kind != Kind::Program || f.machine == machine)) return &f;
     return nullptr;
 }
 

@@ -74,8 +74,10 @@ WallpaperInfo Video(const std::wstring &id, bool sound) {
     return w;
 }
 
+// The stores of a machine AnimeLogon was installed on: the bundled wallpaper is there.
 FakeStore Store() {
     FakeStore store;
+    store.wallpapers[kBundledWallpaper] = Video(kBundledWallpaper, false);
     store.wallpapers[kVideoX] = Video(kVideoX, true);
     store.wallpapers[kVideoY] = Video(kVideoY, false);
     WallpaperInfo image;
@@ -161,14 +163,15 @@ std::vector<uint8_t> RenderRows() {
 
 TEST(PlanCoversEveryDisplayWithoutATheme) {
     const FakeStore store = Store();
-    // No usable theme: every display shows the built-in theme, the gradient and the clock.
+    // No usable theme: every display shows the built-in theme, the bundled wallpaper and the clock.
     for (const std::wstring &text : {std::wstring(L""), std::wstring(L"theme = zzzz\r\n"),
                                      std::wstring(L"theme = dddddddddddddddd\r\n"),
                                      std::wstring(L"video = 1111111111111111\r\nclock = false\r\n")}) {
         const plan::Plan p = plan::Build(ParseSettings(text), Monitors(), store);
         CHECK(p.displays.size() == 2 && p.componentDisplays == ComponentDisplays::Auto);
         for (const plan::Display &d : p.displays) {
-            CHECK(d.themeId == L"default" && d.wallpaper.source == plan::Source::Gradient && Same(d.canvas, d.rect));
+            CHECK(d.themeId == L"default" && d.wallpaper.source == plan::Source::Video &&
+                  d.wallpaper.id == kBundledWallpaper && Same(d.canvas, d.rect));
             CHECK(d.components.size() == 1 && d.components[0].key == L"theme default/clock");
         }
         CHECK(p.displays[0].primary && p.displays[0].showComponents && !p.displays[1].showComponents);
@@ -185,7 +188,7 @@ TEST(PlanCoversEveryDisplayWithoutATheme) {
     s.screens[L"00000000000000bb"] = L"dddddddddddddddd";
     p = plan::Build(s, Monitors(), store);
     CHECK(p.displays[0].themeId == kThemeV && p.displays[0].wallpaper.source == plan::Source::Video);
-    CHECK(p.displays[1].themeId == L"default" && p.displays[1].wallpaper.source == plan::Source::Gradient);
+    CHECK(p.displays[1].themeId == L"default" && p.displays[1].wallpaper.id == kBundledWallpaper);
     CHECK(p.problems.size() == 1);
     s.monitorMode = MonitorMode::Span;
     p = plan::Build(s, Monitors(), store);
@@ -214,11 +217,17 @@ TEST(PlanThemeWallpapers) {
     p = plan::Build(s, Monitors(), store);
     CHECK(p.displays.size() == 2 && p.displays[0].wallpaper.source == plan::Source::None);
     CHECK(p.displays[0].components.empty() && p.displays[0].wallpaper.fit == Scaling::Stretch);
-    // The built-in theme: the gradient.
+    // The built-in theme: the bundled wallpaper, a video.
     s.theme = L"default";
+    p = plan::Build(s, Monitors(), store);
+    CHECK(p.displays[0].wallpaper.source == plan::Source::Video && p.displays[0].wallpaper.id == kBundledWallpaper);
+    CHECK(!p.displays[0].wallpaper.path.empty() && p.displays[0].components.size() == 1);
+    // The built-in wallpaper: the gradient, drawn without a file.
+    s.themeOverrides[L"default"].wallpaper = L"default";
     p = plan::Build(s, Monitors(), store);
     CHECK(p.displays[0].wallpaper.source == plan::Source::Gradient && p.displays[0].wallpaper.id == L"default");
     CHECK(p.displays[0].wallpaper.path.empty() && p.displays[0].components.size() == 1);
+    s.themeOverrides.erase(L"default");
     // A video, two instances of one component.
     s.theme = kThemeV;
     p = plan::Build(s, Monitors(), store);
