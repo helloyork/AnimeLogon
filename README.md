@@ -3,7 +3,7 @@
 # AnimeLogon
 
 [![Build](https://github.com/helloyork/AnimeLogon/actions/workflows/build.yml/badge.svg?branch=develop)](https://github.com/helloyork/AnimeLogon/actions/workflows/build.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: MPL 2.0](https://img.shields.io/badge/License-MPL_2.0-brightgreen.svg)](LICENSE)
 
 AnimeLogon replaces the Windows 10/11 lock screen with an overlay it draws itself, so you
 can place videos, widgets and other content on it.
@@ -213,11 +213,19 @@ Planned:
 - Open pull requests against `develop`. `master` is updated only through pull requests
   from `develop`.
 - CI builds x64 and ARM64 for every pull request.
-- Do not commit video or image files, or code under a licence incompatible with MIT.
+- Do not commit video or image files, or code under a licence incompatible with the MPL 2.0.
+- Contributions are licensed under the MPL 2.0, as the rest of the code is.
 
 ## License
 
-MIT © 2026 Nomen (helloyork). See [LICENSE](LICENSE).
+Mozilla Public License 2.0 © 2026 Nomen (helloyork). See [LICENSE](LICENSE). Releases up to
+0.1.0-alpha were published under the MIT License.
+
+The following notice applies to every file in this repository outside `vendor/`:
+
+> This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0. If a
+> copy of the MPL was not distributed with this file, You can obtain one at
+> https://mozilla.org/MPL/2.0/.
 
 Includes the headers and loader of the Microsoft Edge WebView2 SDK (BSD 3-Clause) in
 `vendor/webview2`. The loader, `WebView2Loader.dll`, is installed with AnimeLogon.
