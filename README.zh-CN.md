@@ -3,7 +3,7 @@
 # AnimeLogon
 
 [![Build](https://github.com/helloyork/AnimeLogon/actions/workflows/build.yml/badge.svg?branch=develop)](https://github.com/helloyork/AnimeLogon/actions/workflows/build.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: MPL 2.0](https://img.shields.io/badge/License-MPL_2.0-brightgreen.svg)](LICENSE)
 
 AnimeLogon 使用自己绘制的叠层替换了 Windows 10/11 的锁屏界面，这使得你可以在上面放置视频和组件等内容。
 
@@ -180,11 +180,18 @@ cmake --build --preset x64-release
 
 - 拉取请求请提交到 `develop` 分支。`master` 只通过来自 `develop` 的拉取请求更新。
 - CI 会为每个拉取请求构建 x64 和 ARM64 版本。
-- 请勿提交视频或图片文件，也不要引入许可证与 MIT 不兼容的代码。
+- 请勿提交视频或图片文件，也不要引入许可证与 MPL 2.0 不兼容的代码。
+- 提交的贡献与其余代码一样，以 MPL 2.0 授权。
 
 ## 许可证
 
-MIT © 2026 Nomen (helloyork)。详见 [LICENSE](LICENSE)。
+Mozilla Public License 2.0 © 2026 Nomen (helloyork)。详见 [LICENSE](LICENSE)。0.1.0-alpha 及更早的版本以 MIT 许可证发布。
+
+仓库中 `vendor/` 以外的每个文件都适用以下声明：
+
+> This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0. If a
+> copy of the MPL was not distributed with this file, You can obtain one at
+> https://mozilla.org/MPL/2.0/.
 
 `vendor/webview2` 中包含 Microsoft Edge WebView2 SDK 的头文件和加载器（BSD 3-Clause），加载器 `WebView2Loader.dll` 随 AnimeLogon 一起安装。
 
