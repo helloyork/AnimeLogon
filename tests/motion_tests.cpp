@@ -71,6 +71,8 @@ TEST(ThemesSayHowTheyGiveWay) {
     CHECK(ParsesTheme(theme::Normalize(t), &again) && again.wake == WakeStyle::Slide && again.wakeSeconds == 0.8f);
     CHECK(ParsesTheme(Theme("<wake style=\"cut\"/>"), &t) && t.wake == WakeStyle::Cut && t.wakeSeconds == kWakeSeconds);
     CHECK(ParsesTheme(Theme("<wake duration=\"2\"/>"), &t) && t.wake == WakeStyle::Fade && t.wakeSeconds == 2.0f);
+    // The shortest the settings app offers. As a double it is a hair below the float bound.
+    CHECK(ParsesTheme(Theme("<wake duration=\"0.1\"/>"), &t) && t.wakeSeconds == kWakeSecondsMin);
     for (const char *bad : {"<wake style=\"spin\"/>", "<wake duration=\"0.05\"/>", "<wake duration=\"3\"/>",
                             "<wake duration=\"fast\"/>", "<wake speed=\"1\"/>", "<wake/><wake/>",
                             "<wake><set key=\"a\" value=\"b\"/></wake>"})
@@ -86,4 +88,12 @@ TEST(ThemesSayHowTheyGiveWay) {
     CHECK(back.OverridesFor(L"default").wake == WakeStyle::Zoom && back.OverridesFor(L"default").wakeSeconds == 1.25f);
     const theme::Theme e = theme::Edited(theme::Default(), o);
     CHECK(e.wake == WakeStyle::Zoom && e.wakeSeconds == 1.25f);
+
+    // 0.1 s, as the settings app writes it, is kept rather than turned away for the theme's own.
+    std::vector<std::wstring> problems;
+    const Settings shortest = ParseSettings(L"theme = default\r\ntheme.default.wake-duration = 0.1\r\ntheme.default.brightness = 0.1\r\n", &problems);
+    CHECK(problems.empty());
+    CHECK(shortest.OverridesFor(L"default").wakeSeconds == kWakeSecondsMin);
+    CHECK(shortest.OverridesFor(L"default").brightness == kBrightnessMin);
+    CHECK(!ParseSettings(L"theme.default.wake-duration = 0.09\r\n").OverridesFor(L"default").wakeSeconds);
 }

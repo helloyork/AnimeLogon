@@ -1,6 +1,7 @@
 #include "animelogon/settings.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cwchar>
 
@@ -162,36 +163,29 @@ bool Parse(std::wstring_view text, WakeStyle *out) {
     return true;
 }
 
+// A number of at most eight characters from `low` to `high`, both included. It is judged as the
+// float it is kept as: read as a double, "0.1" is a hair below the float 0.1f a bound is written
+// in, and the lowest value the settings app offers would be turned away -- the theme's own value
+// then standing in for it.
+static bool ParseBoundedFloat(std::wstring_view text, float low, float high, float *out) {
+    if (text.empty() || text.size() > 8) return false;
+    const std::wstring copy(text);
+    wchar_t *end = nullptr;
+    const double v = std::wcstod(copy.c_str(), &end);
+    if (end != copy.c_str() + copy.size() || !std::isfinite(v)) return false;
+    const float f = (float)v;
+    if (!(f >= low && f <= high)) return false;
+    *out = f;
+    return true;
+}
+
 bool ParseWakeSeconds(std::wstring_view text, float *out) {
-    if (text.empty() || text.size() > 8) return false;
-    const std::wstring copy(text);
-    wchar_t *end = nullptr;
-    const double v = std::wcstod(copy.c_str(), &end);
-    if (end != copy.c_str() + copy.size() || !(v >= kWakeSecondsMin && v <= kWakeSecondsMax)) return false;
-    *out = (float)v;
-    return true;
+    return ParseBoundedFloat(text, kWakeSecondsMin, kWakeSecondsMax, out);
 }
 
-bool ParseBrightness(std::wstring_view text, float *out) {
-    if (text.empty() || text.size() > 8) return false;
-    const std::wstring copy(text);
-    wchar_t *end = nullptr;
-    const double v = std::wcstod(copy.c_str(), &end);
-    // The float of the lower bound is a hair below 0.1, so 0.1 itself passes.
-    if (end != copy.c_str() + copy.size() || !(v >= kBrightnessMin - 1e-6 && v <= kBrightness)) return false;
-    *out = (float)v;
-    return true;
-}
+bool ParseBrightness(std::wstring_view text, float *out) { return ParseBoundedFloat(text, kBrightnessMin, kBrightness, out); }
 
-bool ParseBlur(std::wstring_view text, float *out) {
-    if (text.empty() || text.size() > 8) return false;
-    const std::wstring copy(text);
-    wchar_t *end = nullptr;
-    const double v = std::wcstod(copy.c_str(), &end);
-    if (end != copy.c_str() + copy.size() || !(v >= 0.0 && v <= kBlurMax)) return false;
-    *out = (float)v;
-    return true;
-}
+bool ParseBlur(std::wstring_view text, float *out) { return ParseBoundedFloat(text, 0.0f, kBlurMax, out); }
 
 void ApplyBrightness(uint8_t *pixels, size_t count, int stride, float brightness) {
     if (brightness >= 1.0f) return;
