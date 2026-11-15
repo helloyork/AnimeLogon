@@ -75,6 +75,7 @@ struct Options {
     bool now = false;        // skip the parked wait for a logon screen
     bool dismissed = false;  // the previous overlay was waved away: wait for the screen to be used
     bool still = false;      // with --windowed: input does not wake it, for screenshots
+    bool hadUser = false;    // the launcher has seen somebody signed in to this session
     int seconds = 0;         // exit after this many seconds, for testing; 0 is forever
     std::wstring bakePreview;  // write the sign-in background this would bake there, and exit
     std::wstring stillsPreview;  // write the other displays' stills into this directory, and exit
@@ -97,7 +98,8 @@ struct Overlay {
     bool displayOn = true;
     ULONGLONG displayOffAt = 0;
     DWORD displayOffInput = 0;
-    bool leaving = false;        // WM_ENDSESSION / shutdown / rescue asked us to go
+    bool leaving = false;        // the service stopping or the rescue key asked us to go
+    bool endingSession = false;  // WM_ENDSESSION for a shutdown arrived (see GoingDown)
     bool displaysChanged = false; // a resolution, scale or monitor change while live
     DWORD session = 0xFFFFFFFF;
     bool lockNotified = false;   // WTS_SESSION_LOCK seen, and no unlock or logon since
@@ -133,6 +135,9 @@ double PreciseSeconds() {
 }
 
 bool g_still = false;
+
+// Windows is shutting down or restarting (events::kGoingDown, or this process's WM_ENDSESSION).
+bool GoingDown() { return g_overlay.endingSession || events::IsSet(events::kGoingDown); }
 
 // `how` says what woke it, for the log; which key is never recorded.
 void Wake(const wchar_t *how) {
@@ -208,10 +213,14 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         g_overlay.displaysChanged = true;
         return msg == WM_DPICHANGED ? 0 : DefWindowProcW(hwnd, msg, wp, lp);
     case WM_ENDSESSION:
+        // Off the screen, and alive: an overlay that exited here would be replaced by the
+        // launcher, and the replacement, finding nobody signed in on the logon desktop, would
+        // cover Windows' shutdown or update screen. The flag tells every overlay, this one's
+        // successors included, until the shutdown is over or visibly cancelled.
         if (wp && !(lp & ENDSESSION_LOGOFF)) {
-            ALOG(L"shutdown: WM_ENDSESSION -- off the screen");
-            g_overlay.leaving = true;
-            PostQuitMessage(0);
+            ALOG(L"shutdown: WM_ENDSESSION -- off the screen until Windows is back");
+            g_overlay.endingSession = true;
+            events::Signal(events::kGoingDown, true);
         }
         return 0;
     default:
@@ -227,6 +236,7 @@ Options ParseOptions(int argc, wchar_t **argv) {
         else if (a == L"--now") o.now = true;
         else if (a == kDismissedFlag) o.dismissed = true;
         else if (a == L"--still") o.still = true;
+        else if (a == L"--had-user") o.hadUser = true;
         else if (a == L"--bake-preview" && i + 1 < argc) o.bakePreview = argv[++i];
         else if (a == L"--stills-preview" && i + 1 < argc) o.stillsPreview = argv[++i];
         else if (a == L"--seconds" && i + 1 < argc) o.seconds = _wtoi(argv[++i]);
@@ -271,6 +281,8 @@ bool LoadStill(Presenter &presenter) {
 bool WaitForLogonScreen(Presenter &presenter, Scenes &scenes, bool *dismissed) {
     ULONGLONG bakedAt = 0;
     ULONGLONG sceneCheck = 0;
+    screen::CancelWatch cancel;
+    screen::Gate said = screen::Gate::Hold;  // the last reason to stay parked that was logged
     for (;;) {
         Beat();
         if (events::IsSet(events::kStop) || animelogon::machine::Paused()) return false;
@@ -284,6 +296,17 @@ bool WaitForLogonScreen(Presenter &presenter, Scenes &scenes, bool *dismissed) {
         const screen::Session s = screen::ReadSession(g_overlay.session);
         if (!secure && s.console && s.signedIn && !s.locked && !g_overlay.lockNotified) scenes.Unlocked();
         if (s.signedIn) g_overlay.hadUser = true;
+
+        // A shutdown that was cancelled leaves somebody at their unlocked desktop.
+        const bool atDesktop = !secure && s.console && s.signedIn && !s.locked && !g_overlay.lockNotified;
+        bool goingDown = GoingDown();
+        if (cancel.Update(goingDown, atDesktop, GetTickCount64())) {
+            ALOG(L"shutdown: somebody has been at an unlocked desktop for %llu s -- the shutdown was cancelled",
+                 screen::CancelWatch::kCancelledMs / 1000);
+            g_overlay.endingSession = false;
+            events::Signal(events::kGoingDown, false);
+            goingDown = false;
+        }
 
         // The background is only ever rewritten while somebody is using the session.
         if (!secure && s.console && s.signedIn && !s.locked && !g_overlay.lockNotified &&
@@ -309,11 +332,26 @@ bool WaitForLogonScreen(Presenter &presenter, Scenes &scenes, bool *dismissed) {
         in.session = s;
         in.hadUser = g_overlay.hadUser;
         in.shutdown = screen::ShutdownUnderway();
+        in.goingDown = goingDown;
         in.lockNotified = g_overlay.lockNotified;
-        if (screen::Decide(in) == screen::Gate::GoLive) {
+        const screen::Gate gate = screen::Decide(in);
+        if (gate == screen::Gate::GoLive) {
             g_overlay.seenAt = GetTickCount64();
+            ALOG(L"overlay: logon screen (signed in %d, locked %d, lock notified %d, had a user %d, session state %d) "
+                 L"over %s",
+                 s.signedIn, s.locked, g_overlay.lockNotified, g_overlay.hadUser, s.state,
+                 screen::DescribeDesktop().c_str());
             return true;
         }
+        if (gate != said && gate != screen::Gate::Hold) {
+            const wchar_t *why = gate == screen::Gate::GoingDown ? L"Windows is shutting down or restarting"
+                                 : gate == screen::Gate::SignedOutInPlace
+                                     ? L"this session's user was signed out in place (a shutdown or restart)"
+                                     : L"the session is not at its logon screen (an update screen)";
+            ALOG(L"overlay: the logon desktop is up but %s -- staying parked; session state %d; on it: %s", why,
+                 s.state, screen::DescribeDesktop().c_str());
+        }
+        said = gate;
         Sleep(32);
     }
 }
@@ -324,6 +362,18 @@ double RefreshSeconds() {
     if (EnumDisplaySettingsW(nullptr, ENUM_CURRENT_SETTINGS, &dm) && dm.dmDisplayFrequency > 1)
         return 1.0 / dm.dmDisplayFrequency;
     return 1.0 / 60.0;
+}
+
+// The parked wait's gate, asked once: is the logon desktop up with a screen the video may cover?
+bool LogonScreenNow() {
+    screen::GateInput in;
+    in.secure = screen::InputDesktopIsSecure();
+    in.session = screen::ReadSession(g_overlay.session);
+    in.hadUser = g_overlay.hadUser || in.session.signedIn;
+    in.shutdown = screen::ShutdownUnderway();
+    in.goingDown = GoingDown();
+    in.lockNotified = g_overlay.lockNotified;
+    return screen::Decide(in) == screen::Gate::GoLive;
 }
 
 // Development: the primary display's theme, in a window on the ordinary desktop.
@@ -750,6 +800,7 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
     ULONGLONG darkMs = 0, darkSince = 0;
     bool wasOn = true;
     int awayTicks = 0;
+    int notLogonTicks = 0;  // exit checks in a row with the session not at its logon screen
     // What reached the glass on the first display, for the log.
     int shownFrames = 0;
     double firstT = -1.0, lastT = 0.0;
@@ -970,6 +1021,27 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
                 end = LiveEnd::Leave;
                 break;
             }
+            // A restart from a live lock or logon screen -- Windows Update's overnight restart, or
+            // "Update and restart" from the power button -- keeps this desktop and this session,
+            // so nothing above sees the screen go. Dismissed rather than left: the process stays,
+            // so the launcher has nothing to replace.
+            if (GoingDown()) {
+                ALOG(L"overlay: Windows is shutting down or restarting -- off the screen");
+                end = LiveEnd::Dismissed;
+                break;
+            }
+            if (g_overlay.hadUser && s.console && !s.signedIn) {
+                ALOG(L"overlay: this session's user was signed out in place (a shutdown or restart) -- off the screen");
+                end = LiveEnd::Dismissed;
+                break;
+            }
+            // Two readings a second apart, so a passing state never takes the video away.
+            notLogonTicks = s.AtLogonStage() ? 0 : notLogonTicks + 1;
+            if (notLogonTicks >= 2) {
+                ALOG(L"overlay: the session left its logon screen (state %d) -- off the screen", s.state);
+                end = LiveEnd::Dismissed;
+                break;
+            }
         }
 
         // The windows were laid out for displays that are no longer there.
@@ -1070,6 +1142,7 @@ int wmain(int argc, wchar_t **argv) {
     const HRESULT mfStart = MFStartup(MF_VERSION, MFSTARTUP_LITE);
     if (FAILED(mfStart)) ALOG(L"overlay: MFStartup failed (0x%08X)", mfStart);
     ProcessIdToSessionId(GetCurrentProcessId(), &g_overlay.session);
+    g_overlay.hadUser = opt.hadUser;
 
     animelogon::instance::Guard guard;
     if (!opt.windowed && guard.Acquire(animelogon::instance::OverlayName(), true) != animelogon::instance::Result::Acquired) {
@@ -1106,6 +1179,13 @@ int wmain(int argc, wchar_t **argv) {
         LiveEnd end = GoLiveOnce(presenter, scenes, opt, wc.hInstance);
         while (end == LiveEnd::Rebuild) {
             Sleep(300);  // let the mode change settle
+            // A display change can come in the middle of a shutdown (drivers unloading), so the
+            // screen is covered again only if the gate would cover it now.
+            if (!opt.windowed && !opt.now && !LogonScreenNow()) {
+                ALOG(L"overlay: the displays changed, and this is no longer a screen to cover -- staying off");
+                end = LiveEnd::Dismissed;
+                break;
+            }
             end = GoLiveOnce(presenter, scenes, opt, wc.hInstance);
         }
 

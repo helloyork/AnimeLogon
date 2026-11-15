@@ -153,7 +153,7 @@ std::string SpectrumText() {
   <settings>
     <choice id="position" label="位置" detail="边距随分辨率自动调整。" default="bottom">)") + kPositions + LR"(</choice>
     <number id="size" label="大小" detail="频谱的高度，以屏幕高度的百分比计。" default="6" min="2" max="30" step="0.1"/>
-    <number id="width" label="宽度" detail="以频谱高度的倍数计。" default="13" min="2" max="40" step="0.1"/>
+    <number id="width" label="宽度" detail="以频谱高度的倍数计；超出屏幕宽度时，与屏幕同宽。" default="13" min="2" max="80" step="0.1"/>
     <choice id="mode" label="样式" default="bars">
       <option value="bars" label="柱形"/>
       <option value="line" label="曲线"/>

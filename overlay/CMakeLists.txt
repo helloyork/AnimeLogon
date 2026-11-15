@@ -35,6 +35,6 @@ animelogon_compile_shader(overlay ${CMAKE_CURRENT_SOURCE_DIR}/shaders/blur.hlsl 
 animelogon_compile_shader(overlay ${CMAKE_CURRENT_SOURCE_DIR}/shaders/blur.hlsl Up ps_5_0 g_blur_up blur_up.h)
 
 animelogon_add_executable(launcher
-    SOURCES src/launcher.cpp src/livedata.cpp
+    SOURCES src/launcher.cpp src/livedata.cpp src/winlogonwatch.cpp
     DESCRIPTION "AnimeLogon Service"
-    LIBS wtsapi32 userenv)
+    LIBS wtsapi32 userenv advapi32)

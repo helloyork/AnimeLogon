@@ -545,7 +545,7 @@ const Offer kOffers[] = {
     {L"spectrum", L"mode", L"样式", L"柱形分别显示各频段；曲线连接各频段的顶端，填充曲线同时填充其下方的区域。", Control::Choice, 0, 0, 0, L"bars"},
     {L"spectrum", L"direction", L"方向", L"频段自基线伸展的方向；双向时自中线向两侧伸展。", Control::Choice, 0, 0, 0, L"up"},
     {L"spectrum", L"bass", L"低频位置", L"低频位于中间时，频谱左右对称。", Control::Choice, 0, 0, 0, L"left"},
-    {L"spectrum", L"length", L"宽度", L"相对于组件大小。", Control::Slider, 1, 40, 0.1, L"12"},
+    {L"spectrum", L"length", L"宽度", L"相对于组件大小；超出屏幕宽度时，与屏幕同宽。", Control::Slider, 1, 80, 0.1, L"12"},
     {L"spectrum", L"height", L"高度", L"频段可达到的最大高度，相对于组件大小。", Control::Slider, 0.1, 4, 0.01, L"1"},
     {L"spectrum", L"bands", L"频段数量", L"", Control::Slider, 4, 128, 1, L"64"},
     {L"spectrum", L"gap", L"间隔", L"相邻柱形之间的间隔，以每个频段所占宽度的比例计。", Control::Slider, 0, 0.9, 0.01, L"0.35"},

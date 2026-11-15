@@ -131,10 +131,11 @@ private:
         };
         std::vector<Run> runs;
         // Where each spectrum's room was drawn, once the line has been: its top left, in the
-        // target's pixels.
+        // target's pixels, and how wide it was laid out.
         struct Room {
             size_t text;
             std::shared_ptr<D2D1_POINT_2F> at;
+            float width = 0.0f;
         };
         std::vector<Room> rooms;
     };
@@ -147,8 +148,10 @@ private:
     bool Build(Built &built, size_t panel, UINT width, UINT height);
     // What a built panel can touch: its text, its shadows and its backdrop.
     D2D1_RECT_F AreaOf(const Built &built, const skin::Panel &panel) const;
+    // Lays out a line at `px` to the em. Its spectra are laid out at `spectra` times their own
+    // length: less than 1 where the line would otherwise be wider than its display.
     bool Lay(Line &line, const skin::Panel &panel, const skin::Line &source, const std::vector<std::wstring> &words,
-             float px);
+             float px, float spectra = 1.0f);
     std::wstring Family(const std::wstring &wanted) const;
     // `words` laid out alone as `text` says, on one line, for measuring or for drawing apart from
     // its line.
