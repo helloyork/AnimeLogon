@@ -188,11 +188,13 @@ cmake --build --preset x64-release
 
 Mozilla Public License 2.0 © 2026 Nomen (helloyork)。详见 [LICENSE](LICENSE)。0.1.0-alpha 及更早的版本以 MIT 许可证发布。
 
-仓库中 `vendor/` 以外的每个文件都适用以下声明：
+仓库中 `vendor/` 和 `skills/animelogon-components/` 以外的每个文件都适用以下声明：
 
 > This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0. If a
 > copy of the MPL was not distributed with this file, You can obtain one at
 > https://mozilla.org/MPL/2.0/.
+
+组件 skill（`skills/animelogon-components/`，包括其中的示例）以 MIT 许可证授权，见其 [LICENSE](skills/animelogon-components/LICENSE)。内置组件的 XML（`common/src/components.cpp`，以及 `common/src/skin.cpp` 中的时钟）也可以按该许可证使用。由它们改出的组件不必采用 MPL。
 
 `vendor/webview2` 中包含 Microsoft Edge WebView2 SDK 的头文件和加载器（BSD 3-Clause），加载器 `WebView2Loader.dll` 随 AnimeLogon 一起安装。
 

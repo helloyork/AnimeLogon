@@ -1083,6 +1083,8 @@ bool Listens(const Resolved &skin) {
     return false;
 }
 
+// The clock's XML may also be used under the MIT License, as in skills/animelogon-components/LICENSE,
+// like the other built-in components (components.cpp), so what is made from it need not use the MPL.
 std::string DefaultText() {
     return R"(<?xml version="1.0" encoding="utf-8"?>
 <!-- The clock that comes with AnimeLogon. Export it from the settings app to start a component of your own. -->

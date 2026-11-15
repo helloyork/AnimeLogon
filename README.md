@@ -221,11 +221,17 @@ Planned:
 Mozilla Public License 2.0 © 2026 Nomen (helloyork). See [LICENSE](LICENSE). Releases up to
 0.1.0-alpha were published under the MIT License.
 
-The following notice applies to every file in this repository outside `vendor/`:
+The following notice applies to every file in this repository outside `vendor/` and
+`skills/animelogon-components/`:
 
 > This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0. If a
 > copy of the MPL was not distributed with this file, You can obtain one at
 > https://mozilla.org/MPL/2.0/.
+
+The component skill in `skills/animelogon-components/`, its examples included, is licensed under
+the MIT License (see its [LICENSE](skills/animelogon-components/LICENSE)). The XML of the
+built-in components, in `common/src/components.cpp` and the clock in `common/src/skin.cpp`, may
+also be used under that licence. Components made from either need not use the MPL.
 
 Includes the headers and loader of the Microsoft Edge WebView2 SDK (BSD 3-Clause) in
 `vendor/webview2`. The loader, `WebView2Loader.dll`, is installed with AnimeLogon.
