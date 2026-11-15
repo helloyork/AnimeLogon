@@ -1,0 +1,99 @@
+# Copies a published release's setup program and SHA256SUMS.txt to the same-named release at
+# https://gitcode.com/nominaawa/AnimeLogon, for people in mainland China, where GitHub is
+# unreachable or slow and GitCode serves release files from a CDN inside the country. The GitCode
+# repository holds a README that points here and nothing else; installers only, never code. What
+# GitCode expects and how the copy is checked is in .github/scripts/mirror-release-to-gitcode.mjs.
+#
+# It runs when a release is published (release.yml makes drafts, which are published by hand), by
+# hand for any tag (Actions > GitCode mirror > Run workflow), and every night for the latest release:
+# uploads into GitCode crawl in the daytime in China and are fast in the small hours, so a copy cut
+# off in the day is finished overnight with nobody re-running anything. For a release already
+# copied, that run finds both files there and stops.
+#
+# The token is a GitCode personal access token with read/write on Projects and Repository, stored as
+# the GITCODE_TOKEN repository secret. Without it every run says so and does nothing. It expires; a
+# run that fails with 401 needs a new one.
+name: GitCode mirror
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag of the release to copy, such as v1.0.0
+        required: true
+        type: string
+  # 19:37 UTC is 03:37 in Beijing. Scheduled runs use this file as it is on the default branch.
+  schedule:
+    - cron: "37 19 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gitcode-mirror-${{ github.event.release.tag_name || inputs.tag || 'latest' }}
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    # Room for a daytime copy at tens of kilobytes a second; the nightly run finishes what is left.
+    timeout-minutes: 240
+    env:
+      GH_TOKEN: ${{ github.token }}
+      HAS_TOKEN: ${{ secrets.GITCODE_TOKEN != '' }}
+    steps:
+      # A scheduled run copies the latest release, the one people are offered; a prerelease never is.
+      - name: Pick the release
+        id: release
+        env:
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          set -euo pipefail
+          if [ "$HAS_TOKEN" != "true" ]; then
+            echo "::warning::The repository secret GITCODE_TOKEN is not set, so nothing was copied to GitCode."
+            echo "go=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -z "$TAG" ]; then
+            TAG=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)
+          fi
+          echo "Copying $TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "go=true" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        if: steps.release.outputs.go == 'true'
+        with:
+          sparse-checkout: .github/scripts
+
+      - uses: actions/setup-node@v4
+        if: steps.release.outputs.go == 'true'
+        with:
+          node-version: "22"
+
+      # Read back from the published release, so a re-run copies exactly what GitHub serves.
+      - name: Download the release's files
+        if: steps.release.outputs.go == 'true'
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir release-files -p '*-setup.exe' -p 'SHA256SUMS.txt'
+          ls -la release-files
+
+      # BBR in place of the kernel's default, CUBIC, for the upload's connections. A congested route
+      # drops packets, and CUBIC slows down for every loss; BBR paces by the bandwidth it measures.
+      # A runner without the module keeps the default.
+      - name: Use BBR for the upload
+        if: steps.release.outputs.go == 'true'
+        run: |
+          sudo modprobe tcp_bbr && sudo sysctl -w net.ipv4.tcp_congestion_control=bbr \
+            || echo "::warning::BBR is not available; the upload uses $(sysctl -n net.ipv4.tcp_congestion_control)"
+
+      - name: Copy them to GitCode
+        if: steps.release.outputs.go == 'true'
+        env:
+          GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
+          TAG: ${{ steps.release.outputs.tag }}
+        run: node .github/scripts/mirror-release-to-gitcode.mjs --tag "$TAG" --from release-files
