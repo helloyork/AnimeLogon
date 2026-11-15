@@ -20,6 +20,7 @@
 #include "layout.h"
 #include "picture.h"
 #include "plan.h"
+#include "soundloop.h"
 
 using namespace animelogon;
 
@@ -73,8 +74,10 @@ WallpaperInfo Video(const std::wstring &id, bool sound) {
     return w;
 }
 
+// The stores of a machine AnimeLogon was installed on: the bundled wallpaper is there.
 FakeStore Store() {
     FakeStore store;
+    store.wallpapers[kBundledWallpaper] = Video(kBundledWallpaper, false);
     store.wallpapers[kVideoX] = Video(kVideoX, true);
     store.wallpapers[kVideoY] = Video(kVideoY, false);
     WallpaperInfo image;
@@ -160,14 +163,15 @@ std::vector<uint8_t> RenderRows() {
 
 TEST(PlanCoversEveryDisplayWithoutATheme) {
     const FakeStore store = Store();
-    // No usable theme: every display shows the built-in theme, the gradient and the clock.
+    // No usable theme: every display shows the built-in theme, the bundled wallpaper and the clock.
     for (const std::wstring &text : {std::wstring(L""), std::wstring(L"theme = zzzz\r\n"),
                                      std::wstring(L"theme = dddddddddddddddd\r\n"),
                                      std::wstring(L"video = 1111111111111111\r\nclock = false\r\n")}) {
         const plan::Plan p = plan::Build(ParseSettings(text), Monitors(), store);
         CHECK(p.displays.size() == 2 && p.componentDisplays == ComponentDisplays::Auto);
         for (const plan::Display &d : p.displays) {
-            CHECK(d.themeId == L"default" && d.wallpaper.source == plan::Source::Gradient && Same(d.canvas, d.rect));
+            CHECK(d.themeId == L"default" && d.wallpaper.source == plan::Source::Video &&
+                  d.wallpaper.id == kBundledWallpaper && Same(d.canvas, d.rect));
             CHECK(d.components.size() == 1 && d.components[0].key == L"theme default/clock");
         }
         CHECK(p.displays[0].primary && p.displays[0].showComponents && !p.displays[1].showComponents);
@@ -184,7 +188,7 @@ TEST(PlanCoversEveryDisplayWithoutATheme) {
     s.screens[L"00000000000000bb"] = L"dddddddddddddddd";
     p = plan::Build(s, Monitors(), store);
     CHECK(p.displays[0].themeId == kThemeV && p.displays[0].wallpaper.source == plan::Source::Video);
-    CHECK(p.displays[1].themeId == L"default" && p.displays[1].wallpaper.source == plan::Source::Gradient);
+    CHECK(p.displays[1].themeId == L"default" && p.displays[1].wallpaper.id == kBundledWallpaper);
     CHECK(p.problems.size() == 1);
     s.monitorMode = MonitorMode::Span;
     p = plan::Build(s, Monitors(), store);
@@ -213,11 +217,17 @@ TEST(PlanThemeWallpapers) {
     p = plan::Build(s, Monitors(), store);
     CHECK(p.displays.size() == 2 && p.displays[0].wallpaper.source == plan::Source::None);
     CHECK(p.displays[0].components.empty() && p.displays[0].wallpaper.fit == Scaling::Stretch);
-    // The built-in theme: the gradient.
+    // The built-in theme: the bundled wallpaper, a video.
     s.theme = L"default";
+    p = plan::Build(s, Monitors(), store);
+    CHECK(p.displays[0].wallpaper.source == plan::Source::Video && p.displays[0].wallpaper.id == kBundledWallpaper);
+    CHECK(!p.displays[0].wallpaper.path.empty() && p.displays[0].components.size() == 1);
+    // The built-in wallpaper: the gradient, drawn without a file.
+    s.themeOverrides[L"default"].wallpaper = L"default";
     p = plan::Build(s, Monitors(), store);
     CHECK(p.displays[0].wallpaper.source == plan::Source::Gradient && p.displays[0].wallpaper.id == L"default");
     CHECK(p.displays[0].wallpaper.path.empty() && p.displays[0].components.size() == 1);
+    s.themeOverrides.erase(L"default");
     // A video, two instances of one component.
     s.theme = kThemeV;
     p = plan::Build(s, Monitors(), store);
@@ -447,4 +457,48 @@ TEST(ComposePlacesAnImageAsTheShaderDoes) {
     // Drawn smaller than the window, it samples the window at the smaller grid.
     const std::vector<uint8_t> half = picture::Compose(image, layout::Map(2, 1, window, window, Scaling::Stretch), 4, 4, 2, 2);
     CHECK(half.size() == 2 * 2 * 3 && half[2] > half[0] && half[3] > half[5]);
+}
+
+// A theme's brightness reaches the display it is on, from theme.xml or from settings.ini.
+TEST(PlanCarriesTheThemesBrightness) {
+    FakeStore store = Store();
+    store.themes[L"dddddddddddddddd"] =
+        "<theme format=\"1\" name=\"D\"><wallpaper ref=\"default\" fit=\"fill\" brightness=\"0.4\"/></theme>";
+    Settings s;
+    s.theme = L"dddddddddddddddd";
+    plan::Plan p = plan::Build(s, Monitors(1), store);
+    CHECK(p.displays.size() == 1 && p.displays[0].wallpaper.brightness == 0.4f);
+    CHECK(plan::Describe(p.displays[0]).find(L"at 0.4 brightness") != std::wstring::npos);
+    s.themeOverrides[L"dddddddddddddddd"].brightness = 0.8f;
+    p = plan::Build(s, Monitors(1), store);
+    CHECK(p.displays[0].wallpaper.brightness == 0.8f);
+    // At full brightness the log line is as it always was.
+    s.theme = kThemeT;
+    p = plan::Build(s, Monitors(1), store);
+    CHECK(p.displays[0].wallpaper.brightness == kBrightness && plan::Describe(p.displays[0]).find(L"brightness") == std::wstring::npos);
+}
+
+TEST(PlanCarriesTheThemesBlur) {
+    FakeStore store = Store();
+    store.themes[L"dddddddddddddddd"] =
+        "<theme format=\"1\" name=\"D\"><wallpaper ref=\"default\" fit=\"fill\" blur=\"2.5\"/></theme>";
+    Settings s;
+    s.theme = L"dddddddddddddddd";
+    plan::Plan p = plan::Build(s, Monitors(1), store);
+    CHECK(p.displays[0].wallpaper.blur == 2.5f && plan::Describe(p.displays[0]).find(L"blurred by 2.5%") != std::wstring::npos);
+    std::vector<plan::Wallpaper> shown = {p.displays[0].wallpaper};
+    shown[0].source = plan::Source::Video;
+    shown[0].id = L"1111111111111111";
+    CHECK(plan::ShowBuiltInInstead(&shown, L"1111111111111111").size() == 1 && shown[0].blur == 2.5f);
+}
+
+TEST(SoundTrackLoopsAtTheVideosLength) {
+    // A track 32 ms longer than its 12 s video -- the AAC lead-in and padding -- is cut to it.
+    CHECK(soundloop::LoopFrames(577536, 12.0, 48000) == 576000);
+    // One shorter is filled out with silence to it.
+    CHECK(soundloop::LoopFrames(575000, 12.0, 48000) == 576000);
+    // Without the video's length, or with one too far off to be the same recording, the file's
+    // own length stands.
+    CHECK(soundloop::LoopFrames(577536, 0.0, 48000) == 577536);
+    CHECK(soundloop::LoopFrames(577536, 30.0, 48000) == 577536);
 }

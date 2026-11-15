@@ -65,10 +65,37 @@ void ComponentLayer::SetData(const animelogon::data::Snapshot &snapshot) {
     for (auto &view : views_) view->SetData(snapshot);
 }
 
+void ComponentLayer::SetAudio(const animelogon::spectrum::Frame &frame) {
+    for (auto &view : views_)
+        if (view->Listens()) view->SetAudio(frame);
+}
+
+bool ComponentLayer::Listens() const {
+    for (const auto &view : views_)
+        if (view->Listens()) return true;
+    return false;
+}
+
+bool ComponentLayer::Moving() const {
+    for (const auto &view : views_)
+        if (view->Moving()) return true;
+    return false;
+}
+
 bool ComponentLayer::Tick() {
     bool changed = false;
     for (auto &view : views_) changed = view->Tick() || changed;
     return changed;
+}
+
+void ComponentLayer::SetEntrance(float seconds) {
+    for (auto &view : views_) view->SetEntrance(seconds);
+}
+
+bool ComponentLayer::Entering() const {
+    for (const auto &view : views_)
+        if (view->Entering()) return true;
+    return false;
 }
 
 bool ComponentLayer::Draw(IDXGISurface *surface, UINT width, UINT height, size_t slot, const std::vector<size_t> &which,

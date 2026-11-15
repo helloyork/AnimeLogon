@@ -44,6 +44,9 @@ public:
     int height() const { return displayH_; }
     bool hardware() const { return hardware_; }
     double frameSeconds() const { return frameSeconds_; }
+    // How long the file says it is, in seconds: one loop, which its sound track is looped to as
+    // well (audio.h). 0 when it does not say.
+    double durationSeconds() const { return duration_; }
     // True once decoding has stopped for good; failure() then says why, for the log.
     bool failed() const { return failed_.load(); }
     std::wstring failure() const { return failed() ? failure_ : std::wstring(); }
@@ -90,6 +93,7 @@ private:
     int displayW_ = 0, displayH_ = 0;
     LONG stride_ = 0;
     double frameSeconds_ = 1.0 / 30.0;
+    double duration_ = 0.0;
     // The read Open made on the software path, which Decode takes as its first.
     ReadResult first_;
     bool haveFirst_ = false;

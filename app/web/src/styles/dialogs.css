@@ -1,0 +1,136 @@
+/* What dialogs hold (the dialog itself is in fluent.css). */
+.dlg-text { display: flex; flex-direction: column; gap: var(--s3); }
+.dlg-text .quiet { color: var(--text-2); }
+.dlg-lines { white-space: pre-line; }  /* a problem with a line for each thing that went wrong */
+.dlg-stack { display: flex; flex-direction: column; gap: var(--s5); }
+.dlg-field { display: flex; flex-direction: column; gap: var(--s2); }
+.dlg-label { display: flex; align-items: baseline; gap: var(--s2); font-size: 13px; line-height: 20px; color: var(--text-2); }
+
+/* A choice among a few things: a display, a component. */
+.choices { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr)); gap: var(--s2); }
+.choice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+  padding: 10px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  font-size: 14px;
+  line-height: 20px;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color .12s;
+}
+.choice:hover { background: var(--surface-3); }
+.choice:active { background: var(--surface-hover); }
+.choice > span { max-width: 100%; }
+
+/* What to import: a row for each kind with its icon, its name, what it makes and the file types
+   it takes. One that is unavailable is faded but for the line that says why. */
+.kinds { display: flex; flex-direction: column; gap: var(--s2); }
+.kind {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  width: 100%;
+  padding: var(--s3) var(--s4);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color .12s;
+}
+.kind:hover { background: var(--surface-3); }
+.kind:active { background: var(--surface-hover); }
+.kind-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: var(--h-md);
+  height: var(--h-md);
+  border-radius: var(--r-sm);
+  background: var(--surface-3);
+  color: var(--text-2);
+}
+.kind-icon svg { width: 20px; height: 20px; }
+.kind:hover .kind-icon { background: var(--surface-hover); }
+.kind-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.kind-name { display: flex; align-items: center; gap: 6px; font-size: 14px; line-height: 20px; }
+.kind.off { cursor: default; }
+.kind.off:hover,
+.kind.off:active { background: var(--surface-2); }
+.kind.off:hover .kind-icon { background: var(--surface-3); }
+.kind.off .kind-icon,
+.kind.off .kind-name,
+.kind.off .t-cap3 { opacity: .4; }
+
+/* Wallpapers to choose from. */
+.pictures { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 148px), 1fr)); gap: var(--s4) var(--s3); }
+.pick {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  font-size: 13px;
+  line-height: 20px;
+  text-align: left;
+  cursor: pointer;
+}
+.pick:focus-visible { outline: none; }
+.pick .pic {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  margin-bottom: 6px;
+  border-radius: var(--r-sm);
+  object-fit: cover;
+  background: #000;
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.pick:hover .pic { box-shadow: inset 0 0 0 1px var(--border-strong); }
+.pick.on .pic,
+.pick:focus-visible .pic { outline: 2px solid var(--accent); outline-offset: 2px; }
+.pick .browse { display: grid; place-items: center; background: var(--surface-3); color: var(--text-2); }
+.pick .browse svg { width: 20px; height: 20px; }
+.shielded { display: flex; align-items: center; gap: 6px; }
+/* A way to import while another import runs: not offered until that one ends. */
+.choice:disabled,
+.pick:disabled { opacity: .4; cursor: default; pointer-events: none; }
+
+/* Several pictures to choose from: a box in the picture's corner, shown while pointed at and once
+   chosen, as in the Wallpaper Engine dialog. */
+.pick .picbox { position: relative; display: block; margin-bottom: 6px; }
+.pick .picbox .pic { display: block; margin-bottom: 0; }
+.pick .tick {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--r-xs);
+  background: rgba(20, 20, 22, .55);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .7);
+  color: var(--on-accent);
+  opacity: 0;
+  transition: opacity .12s;
+}
+.pick .tick svg { width: 12px; height: 12px; }
+.pick:hover .tick,
+.pick:focus-visible .tick,
+.pick.on .tick { opacity: 1; }
+.pick.on .tick { background: var(--accent); box-shadow: none; }
+
+/* Under a choice of several: how many are chosen, and choosing them all. */
+.dlg-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); }
+
+@media (prefers-reduced-motion: reduce) {
+  .pick .tick { transition: none; }
+}

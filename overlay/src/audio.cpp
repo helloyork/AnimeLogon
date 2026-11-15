@@ -1,5 +1,7 @@
 #include "audio.h"
 
+#include <audiopolicy.h>
+#include <endpointvolume.h>
 #include <mmdeviceapi.h>
 #include <functiondiscoverykeys_devpkey.h>
 #include <wrl/client.h>
@@ -8,11 +10,13 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <map>
 
 #include "animelogon/log.h"
 #include "animelogon/paths.h"
 #include "animelogon/secure.h"
 #include "animelogon/text.h"
+#include "soundloop.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -25,6 +29,13 @@ constexpr DWORD kBufferBytes = kRate * kFrameBytes / 4;  // a quarter of a secon
 constexpr int kBuffers = 3;
 // How long the boot screen waits for the chosen device to appear (USB audio enumerates late).
 constexpr ULONGLONG kDeviceWaitMs = 12000;
+// What counts as another program making sound: one of its sessions on the device peaking above
+// -60 dBFS. A stream that is open but silent -- a paused player -- does not count.
+constexpr float kAudiblePeak = 0.001f;
+// How often the device's other sessions are looked at while the video's sound gives way to them.
+// When the sound comes back, and which sessions never count, is soundyield.h's.
+constexpr DWORD kOthersPollMs = 200;
+constexpr float kYieldSeconds = 0.5f, kReturnSeconds = 1.5f;
 
 std::wstring RememberedPath() { return animelogon::paths::DataDir() + L"\\audio-device"; }
 
@@ -80,6 +91,83 @@ bool NobodySignedIn() {
     return GetLastError() == ERROR_NO_TOKEN;
 }
 
+// The full path of process `pid`'s program; empty when it cannot be asked.
+std::wstring ImageOf(DWORD pid) {
+    HANDLE process = pid ? OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid) : nullptr;
+    if (!process) return {};
+    wchar_t path[MAX_PATH * 2];
+    DWORD size = ARRAYSIZE(path);
+    std::wstring out;
+    if (QueryFullProcessImageNameW(process, 0, path, &size)) out.assign(path, size);
+    CloseHandle(process);
+    return out;
+}
+
+// The file name of process `pid`'s program, for the log.
+std::wstring ProgramOf(DWORD pid) {
+    const std::wstring path = ImageOf(pid);
+    if (path.empty()) return L"another program";
+    const size_t slash = path.find_last_of(L'\\');
+    return slash == std::wstring::npos ? path : path.substr(slash + 1);
+}
+
+// Whether process `pid` runs one of AnimeLogon's own programs: one in the folder this overlay was
+// started from (`ownDir`, with its trailing backslash), which only administrators can write to.
+bool IsOwnProgram(DWORD pid, const std::wstring &ownDir) {
+    const std::wstring path = ImageOf(pid);
+    const size_t slash = path.find_last_of(L'\\');
+    if (ownDir.empty() || slash == std::wstring::npos || slash + 1 != ownDir.size()) return false;
+    return CompareStringOrdinal(path.c_str(), (int)ownDir.size(), ownDir.c_str(), (int)ownDir.size(), TRUE) ==
+           CSTR_EQUAL;
+}
+
+// Every audio session on `device` but this process's own and Windows' system sounds -- a
+// notification -- and whether each is making sound: active, its meter peaking above silence.
+// `own` remembers, by session, which belong to AnimeLogon's own programs, so that each process is
+// asked once; sessions no longer there are dropped from it.
+std::vector<soundyield::Session> LookAtSessions(IMMDevice *device, const std::wstring &ownDir,
+                                                std::map<std::wstring, bool> *own) {
+    std::vector<soundyield::Session> look;
+    // A manager made afresh each time: one kept would not hear of sessions begun after it.
+    ComPtr<IAudioSessionManager2> manager;
+    ComPtr<IAudioSessionEnumerator> sessions;
+    int count = 0;
+    if (FAILED(device->Activate(__uuidof(IAudioSessionManager2), CLSCTX_ALL, nullptr, &manager)) ||
+        FAILED(manager->GetSessionEnumerator(&sessions)) || FAILED(sessions->GetCount(&count)))
+        return look;
+    const DWORD self = GetCurrentProcessId();
+    for (int i = 0; i < count; ++i) {
+        ComPtr<IAudioSessionControl> control;
+        ComPtr<IAudioSessionControl2> control2;
+        if (FAILED(sessions->GetSession(i, &control)) || FAILED(control.As(&control2)) ||
+            control2->IsSystemSoundsSession() == S_OK)
+            continue;
+        soundyield::Session s;
+        // S_OK names the one process; AUDCLNT_S_NO_SINGLE_PROCESS leaves it at 0.
+        if (control2->GetProcessId(&s.pid) != S_OK) s.pid = 0;
+        if (s.pid == self) continue;
+        LPWSTR id = nullptr;
+        if (FAILED(control2->GetSessionInstanceIdentifier(&id)) || !id) continue;
+        s.id = id;
+        CoTaskMemFree(id);
+        auto known = own->find(s.id);
+        if (known == own->end()) known = own->emplace(s.id, s.pid && IsOwnProgram(s.pid, ownDir)).first;
+        s.own = known->second;
+        AudioSessionState state = AudioSessionStateInactive;
+        ComPtr<IAudioMeterInformation> meter;
+        float peak = 0.0f;
+        s.audible = SUCCEEDED(control->GetState(&state)) && state == AudioSessionStateActive &&
+                    SUCCEEDED(control.As(&meter)) && SUCCEEDED(meter->GetPeakValue(&peak)) && peak > kAudiblePeak;
+        look.push_back(std::move(s));
+    }
+    for (auto it = own->begin(); it != own->end();) {
+        bool present = false;
+        for (const soundyield::Session &s : look) present = present || s.id == it->first;
+        it = present ? std::next(it) : own->erase(it);
+    }
+    return look;
+}
+
 // A strict reader for the files the settings app writes: PCM, 48 kHz, 16-bit, stereo.
 bool OpenWav(const std::wstring &path, HANDLE *file, uint64_t *dataOffset, uint64_t *dataBytes) {
     std::wstring why;
@@ -123,10 +211,22 @@ struct AudioSystem::Pending {
     IXAudio2MasteringVoice *master = nullptr;
 };
 
+// What the opening thread, staying on to watch the device, last saw of the other programs' sessions.
+struct AudioSystem::Watch {
+    std::atomic<bool> stop{false};
+    std::mutex lock;
+    std::vector<soundyield::Session> look;  // under lock
+    uint64_t looks = 0;                     // under lock: how many looks there have been
+};
+
 struct AudioSystem::Track {
     HANDLE file = INVALID_HANDLE_VALUE;
     uint64_t dataOffset = 0, dataBytes = 0;
-    uint64_t cursor = 0;  // next byte of the data chunk to queue
+    // One loop, in bytes: the video's length (soundloop.h). Past the end of the data and short
+    // of this it plays silence.
+    uint64_t loopBytes = 0;
+    uint64_t cursor = 0;  // next byte of the loop to queue
+    uint64_t startFrame = 0;  // the frame it started playing from
     IXAudio2SourceVoice *voice = nullptr;
     std::vector<uint8_t> buffers[kBuffers];
     int nextBuffer = 0;
@@ -134,6 +234,10 @@ struct AudioSystem::Track {
     float gain = 0.0f;     // current fade gain
     float from = 0.0f, to = 0.0f;
     ULONGLONG fadeAt = 0, fadeMs = 0;
+    // Silenced while other programs make sound (video_audio_yield), apart from the fades in and out
+    // so that each runs its own course. The voice keeps playing meanwhile: its clock is the video's.
+    float duck = 1.0f, duckFrom = 1.0f, duckTo = 1.0f;
+    ULONGLONG duckAt = 0, duckMs = 0;
     bool paused = false;
     bool stopping = false;
 
@@ -149,6 +253,13 @@ struct AudioSystem::Track {
         fadeMs = (ULONGLONG)(seconds * 1000.0f);
     }
 
+    void Duck(float target, float seconds) {
+        duckFrom = duck;
+        duckTo = target;
+        duckAt = GetTickCount64();
+        duckMs = (ULONGLONG)(seconds * 1000.0f);
+    }
+
     bool Feed() {
         XAUDIO2_VOICE_STATE st{};
         voice->GetState(&st, XAUDIO2_VOICE_NOSAMPLESPLAYED);
@@ -157,10 +268,18 @@ struct AudioSystem::Track {
             buf.resize(kBufferBytes);
             size_t filled = 0;
             while (filled < buf.size()) {
-                if (cursor >= dataBytes) cursor = 0;  // loop
+                if (cursor >= loopBytes) cursor = 0;  // loop
+                const uint64_t end = std::min(dataBytes, loopBytes);
+                if (cursor >= end) {  // the file is shorter than the picture: silence to the loop's end
+                    const size_t gap = (size_t)std::min<uint64_t>(buf.size() - filled, loopBytes - cursor);
+                    memset(buf.data() + filled, 0, gap);
+                    filled += gap;
+                    cursor += gap;
+                    continue;
+                }
                 LARGE_INTEGER at;
                 at.QuadPart = (LONGLONG)(dataOffset + cursor);
-                const DWORD want = (DWORD)std::min<uint64_t>(buf.size() - filled, dataBytes - cursor);
+                const DWORD want = (DWORD)std::min<uint64_t>(buf.size() - filled, end - cursor);
                 DWORD got = 0;
                 if (!SetFilePointerEx(file, at, nullptr, FILE_BEGIN) ||
                     !ReadFile(file, buf.data() + filled, want, &got, nullptr) || !got)
@@ -188,8 +307,10 @@ void AudioSystem::Open(const animelogon::AudioSettings &settings) {
     if (!settings_.enabled) return;
     auto pending = std::make_shared<Pending>();
     pending_ = pending;
+    std::shared_ptr<Watch> watch;
+    if (settings_.videoTrack.enabled && settings_.videoYields) watch_ = watch = std::make_shared<Watch>();
     const std::wstring configured = settings_.device;
-    std::thread([pending, configured] {
+    std::thread([pending, watch, configured] {
         const HRESULT com = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
         ComPtr<IMMDeviceEnumerator> en;
         CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, IID_PPV_ARGS(&en));
@@ -232,6 +353,22 @@ void AudioSystem::Open(const animelogon::AudioSettings &settings) {
                 ALOG(L"audio: output opened (%s)", how);
             }
         }
+        // The device the sound goes to, watched for other programs' sound. Looked at once before
+        // the output is handed over, so that a track that starts while they play starts silent.
+        ComPtr<IMMDevice> watched;
+        if (watch && engine && en) {
+            if (id.empty()) en->GetDefaultAudioEndpoint(eRender, eConsole, &watched);
+            else en->GetDevice(id.c_str(), &watched);
+        }
+        const std::wstring ownDir = animelogon::paths::ModuleDir();
+        std::map<std::wstring, bool> own;
+        auto look = [&] {
+            std::vector<soundyield::Session> seen = LookAtSessions(watched.Get(), ownDir, &own);
+            std::lock_guard<std::mutex> l(watch->lock);
+            watch->look = std::move(seen);
+            ++watch->looks;
+        };
+        if (watched) look();
         {
             std::lock_guard<std::mutex> l(pending->lock);
             if (pending->abandoned) {
@@ -245,6 +382,12 @@ void AudioSystem::Open(const animelogon::AudioSettings &settings) {
             }
             pending->done = true;
         }
+        while (watched && !watch->stop.load()) {
+            Sleep(kOthersPollMs);
+            if (!watch->stop.load()) look();
+        }
+        watched.Reset();
+        en.Reset();
         if (com == S_OK || com == S_FALSE) CoUninitialize();
     }).detach();
 }
@@ -260,6 +403,10 @@ void AudioSystem::Close() {
         }
     }
     pending_.reset();
+    if (watch_) watch_->stop.store(true);
+    watch_.reset();
+    yield_ = soundyield::Rule{};
+    looksTaken_ = 0;
     track_.reset();
     if (master_) master_->DestroyVoice();
     master_ = nullptr;
@@ -271,27 +418,31 @@ void AudioSystem::Close() {
     paused_ = false;
 }
 
-void AudioSystem::Opened() {
+void AudioSystem::Opened(double pictureClock) {
     master_->SetVolume((float)settings_.volume / 100.0f);
     if (wantPlay_) {
-        const double late = (double)(GetTickCount64() - wantAt_) / 1000.0;
+        // Where the picture is now: the sound joins it there, so that from here on the video,
+        // which follows the sound's clock, carries on without a jump.
         wantPlay_ = false;
-        PlayVideoTrack(wantTrack_, wantPosition_ + late, wantFade_);
+        PlayVideoTrack(wantTrack_, pictureClock, wantFade_, wantLoop_);
     }
 }
 
-bool AudioSystem::PlayVideoTrack(const std::wstring &wavPath, double position, float fadeInSeconds) {
+bool AudioSystem::PlayVideoTrack(const std::wstring &wavPath, double position, float fadeInSeconds, double loopSeconds) {
     if (!settings_.enabled || !settings_.videoTrack.enabled || settings_.videoTrack.volume <= 0) return false;
     if (!engine_) {
         wantTrack_ = wavPath;
-        wantPosition_ = position;
+        wantLoop_ = loopSeconds;
         wantFade_ = fadeInSeconds;
-        wantAt_ = GetTickCount64();
         wantPlay_ = pending_ != nullptr;
         return false;
     }
     auto t = std::make_unique<Track>();
     if (!OpenWav(wavPath, &t->file, &t->dataOffset, &t->dataBytes)) return false;
+    auto failed = [](const wchar_t *what, HRESULT hr) {
+        ALOG(L"audio: the sound track could not start: %s (0x%08X)", what, hr);
+        return false;
+    };
     WAVEFORMATEX wfx{};
     wfx.wFormatTag = WAVE_FORMAT_PCM;
     wfx.nChannels = kChannels;
@@ -299,15 +450,23 @@ bool AudioSystem::PlayVideoTrack(const std::wstring &wavPath, double position, f
     wfx.wBitsPerSample = 16;
     wfx.nBlockAlign = kFrameBytes;
     wfx.nAvgBytesPerSec = kRate * kFrameBytes;
-    if (FAILED(engine_->CreateSourceVoice(&t->voice, &wfx))) return false;
-    const uint64_t frames = t->dataBytes / kFrameBytes;
+    if (HRESULT hr = engine_->CreateSourceVoice(&t->voice, &wfx); FAILED(hr)) return failed(L"no voice", hr);
+    const uint64_t fileFrames = t->dataBytes / kFrameBytes;
+    const uint64_t frames = soundloop::LoopFrames(fileFrames, loopSeconds, kRate);
+    t->loopBytes = frames * kFrameBytes;
     const double loop = (double)frames / kRate;
     const double within = loop > 0 ? std::fmod(std::max(0.0, position), loop) : 0.0;
-    t->cursor = std::min<uint64_t>((uint64_t)(within * kRate), frames - 1) * kFrameBytes;
+    t->startFrame = std::min<uint64_t>((uint64_t)(within * kRate), frames - 1);
+    t->cursor = t->startFrame * kFrameBytes;
     t->startPosition = position;
     t->voice->SetVolume(0.0f);
-    if (!t->Feed() || FAILED(t->voice->Start(0))) return false;
+    if (!t->Feed()) return failed(L"the file could not be read", E_FAIL);
+    if (HRESULT hr = t->voice->Start(0); FAILED(hr)) return failed(L"the voice would not start", hr);
+    ALOG(L"audio: the sound track plays from %.3f s of a %.3f s loop (the file is %.3f s)", within, loop,
+         (double)fileFrames / kRate);
     t->Fade(1.0f, fadeInSeconds);
+    t->duck = t->duckFrom = t->duckTo = yield_.yielding() ? 0.0f : 1.0f;
+    if (yield_.yielding()) ALOG(L"audio: other sound is playing -- the sound track starts muted");
     track_ = std::move(t);
     if (paused_) {
         track_->voice->Stop(0);
@@ -339,6 +498,41 @@ void AudioSystem::Resume() {
     }
 }
 
+bool AudioSystem::Recent(std::vector<float> *mono, size_t count, float *rate) {
+    if (!track_ || track_->stopping || track_->paused || !master_ || !count) return false;
+    Track &t = *track_;
+    XAUDIO2_VOICE_STATE st{};
+    t.voice->GetState(&st, 0);
+    const uint64_t frames = t.loopBytes / kFrameBytes, fileFrames = t.dataBytes / kFrameBytes;
+    if (!st.SamplesPlayed || !frames) return false;
+    count = (size_t)std::min<uint64_t>(count, frames);
+    // The count frames up to the one playing now, across the loop's seam if need be.
+    const uint64_t now = (t.startFrame + st.SamplesPlayed) % frames;
+    uint64_t at = (now + frames - count) % frames;
+    std::vector<int16_t> pcm(count * 2);  // zeros: past the file's end, the loop plays silence
+    for (size_t done = 0; done < count;) {
+        size_t run = (size_t)std::min<uint64_t>(count - done, frames - at);
+        if (at < fileFrames) {
+            run = (size_t)std::min<uint64_t>(run, fileFrames - at);
+            LARGE_INTEGER where;
+            where.QuadPart = (LONGLONG)(t.dataOffset + at * kFrameBytes);
+            DWORD got = 0;
+            if (!SetFilePointerEx(t.file, where, nullptr, FILE_BEGIN) ||
+                !ReadFile(t.file, pcm.data() + done * 2, (DWORD)(run * kFrameBytes), &got, nullptr) ||
+                got != run * kFrameBytes)
+                return false;
+        }
+        done += run;
+        at = (at + run) % frames;
+    }
+    // As loud as it reaches the device: its fade, its volume and the output's.
+    const float scale = t.gain * t.duck * (float)settings_.videoTrack.volume / 100.0f * (float)settings_.volume / 100.0f / 65536.0f;
+    mono->resize(count);
+    for (size_t i = 0; i < count; ++i) (*mono)[i] = ((float)pcm[i * 2] + (float)pcm[i * 2 + 1]) * scale;
+    *rate = (float)kRate;
+    return true;
+}
+
 bool AudioSystem::TrackClock(double *seconds) const {
     if (!track_ || track_->stopping) return false;
     XAUDIO2_VOICE_STATE st{};
@@ -348,7 +542,38 @@ bool AudioSystem::TrackClock(double *seconds) const {
     return true;
 }
 
-void AudioSystem::Tick() {
+void AudioSystem::Tick(double pictureClock) {
+    const ULONGLONG now = GetTickCount64();
+    // Before a track can start below, so that one starting while the others play starts muted.
+    if (watch_) {
+        // Gives way at once; comes back only after the others have been quiet for a while.
+        std::vector<soundyield::Session> look;
+        bool fresh = false;
+        {
+            std::lock_guard<std::mutex> l(watch_->lock);
+            if (watch_->looks != looksTaken_) {
+                looksTaken_ = watch_->looks;
+                look = watch_->look;
+                fresh = true;
+            }
+        }
+        const bool sounding = track_ && !track_->paused && !track_->stopping;
+        const soundyield::Rule::Step step = yield_.Advance(now, fresh ? &look : nullptr, sounding);
+        for (const soundyield::Session &s : step.ownHeard)
+            ALOG(L"audio: %s is one of AnimeLogon's own programs -- its sound never mutes the sound track",
+                 ProgramOf(s.pid).c_str());
+        for (const soundyield::Session &s : step.echoes)
+            ALOG(L"audio: %s only repeats the sound track (it listens to the output) -- ignored from now on",
+                 ProgramOf(s.pid).c_str());
+        if (step.changed) {
+            const bool yield = yield_.yielding();
+            if (yield)
+                ALOG(L"audio: %s is making sound -- the sound track is muted while it plays", ProgramOf(step.pid).c_str());
+            else
+                ALOG(L"audio: the other sound has stopped -- the sound track comes back");
+            if (track_) track_->Duck(yield ? 0.0f : 1.0f, yield ? kYieldSeconds : kReturnSeconds);
+        }
+    }
     if (pending_ && pending_->done.load()) {
         // Keep the object alive past the unlock: resetting pending_ under its own lock would
         // drop the last reference and then unlock a destroyed mutex.
@@ -363,14 +588,15 @@ void AudioSystem::Tick() {
             p->master = nullptr;
         }
         pending_.reset();
-        if (master_) Opened();
+        if (master_) Opened(pictureClock);
     }
     if (!track_) return;
     Track &t = *track_;
-    const ULONGLONG now = GetTickCount64();
     const float k = t.fadeMs ? std::min(1.0f, (float)(now - t.fadeAt) / (float)t.fadeMs) : 1.0f;
     t.gain = t.from + (t.to - t.from) * k;
-    t.voice->SetVolume(t.gain * (float)settings_.videoTrack.volume / 100.0f);
+    const float d = t.duckMs ? std::min(1.0f, (float)(now - t.duckAt) / (float)t.duckMs) : 1.0f;
+    t.duck = t.duckFrom + (t.duckTo - t.duckFrom) * d;
+    t.voice->SetVolume(t.gain * t.duck * (float)settings_.videoTrack.volume / 100.0f);
     if (t.stopping && k >= 1.0f) {
         track_.reset();
         return;
@@ -379,6 +605,11 @@ void AudioSystem::Tick() {
         ALOG(L"audio: the sound track could not be read");
         track_.reset();
     }
+}
+
+std::wstring AudioSystem::ListeningDevice() {
+    const std::wstring id = ConsoleUserDefault();
+    return id.empty() ? ReadRemembered() : id;
 }
 
 void AudioSystem::RememberConsoleDefault() {

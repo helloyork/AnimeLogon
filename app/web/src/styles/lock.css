@@ -1,0 +1,57 @@
+/* The lock screen preview: the whole window, black around a display of another shape. Its own
+   words are white over the picture whatever the Windows theme. */
+.lock { position: fixed; inset: 0; z-index: 1000; background: #000; outline: none; }
+.lock-frame { position: absolute; inset: 0; margin: auto; overflow: hidden; container-type: size; }
+.lock-fill { position: absolute; inset: 0; width: 100%; height: 100%; }
+/* A wall of displays once woken: each display's part of it a box of its own, whose cqh are that
+   display's, holding the sign-in screen on the main display and the still of its part of the wall,
+   blurred as Windows blurs behind the password box (2.8 % of the display's height, darker), or as it
+   is, on the others. */
+.lock-screen { position: absolute; overflow: hidden; container-type: size; }
+.lock-still { position: absolute; display: block; max-width: none; object-fit: cover; }
+/* Grown a little about the display's middle (the style sets where), as the sign-in screen's own
+   background is below, so that the blur's fading edges fall outside. */
+.lock-still.blurred { filter: blur(2.8cqh) brightness(.65) saturate(1.15); transform: scale(1.12); }
+/* Windows 11's sign-in screen, measured at 1920 x 1080 (1cqh = 10.8 px there): a 192 px picture
+   whose top is about a quarter of the way down, a 28 px name, a 296 x 36 PIN box, 14 px links, and
+   20 px glyphs 24 px from the corner. */
+.lock-signin { position: absolute; inset: 0; overflow: hidden; color: #fff; font-family: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", sans-serif; }
+.lock-blur { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; filter: blur(3.6cqh) brightness(.6) saturate(1.15); transform: scale(1.12); }
+.lock-box { position: absolute; top: 25.5cqh; left: 0; right: 0; display: flex; flex-direction: column; align-items: center; text-align: center; }
+.lock-avatar { display: block; width: 17.8cqh; height: 17.8cqh; border-radius: 50%; object-fit: cover; }
+.lock-name { margin-top: 1.9cqh; font-family: "Segoe UI Variable Display", "Segoe UI", "Microsoft YaHei UI", sans-serif; font-size: 2.6cqh; line-height: 3.4cqh; font-weight: 600; }
+.lock-pin {
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  width: 27.4cqh;
+  height: 3.35cqh;
+  margin-top: 2.6cqh;
+  padding: 0 1.05cqh;
+  border: 1px solid rgba(255, 255, 255, .12);
+  border-bottom-color: rgba(255, 255, 255, .55);
+  border-radius: .4cqh;
+  background: rgba(0, 0, 0, .28);
+  color: rgba(255, 255, 255, .66);
+  font-size: 1.3cqh;
+}
+.lock-link { margin-top: 1.5cqh; font-size: 1.3cqh; line-height: 1.85cqh; color: rgba(255, 255, 255, .92); }
+.lock-link + .lock-link { margin-top: 1.1cqh; }
+.lock-tray { position: absolute; right: 2.2cqh; bottom: 2.2cqh; display: flex; gap: 2.6cqh; font-family: "Segoe Fluent Icons", "Segoe MDL2 Assets"; font-size: 1.85cqh; line-height: 1; }
+/* The preview's own words sit in the corner opposite its exit, off the lock screen's middle and
+   bottom, where its clock and components usually are. */
+.lock-hint {
+  position: absolute;
+  top: 12px;
+  left: 16px;
+  z-index: 3;
+  padding: 4px 10px;
+  border-radius: var(--r-sm);
+  background: rgba(0, 0, 0, .55);
+  color: rgba(255, 255, 255, .85);
+  font-size: 13px;
+  line-height: 20px;
+}
+/* Left of the window's own buttons, which stay over the preview (shell.css .winctl). */
+.lock-exit.btn { position: absolute; top: 12px; right: calc(3 * 46px + 16px); z-index: 3; background: rgba(20, 20, 22, .78); border-color: rgba(255, 255, 255, .14); color: #fff; backdrop-filter: blur(6px); }
+.lock-exit.btn:hover { background: rgba(40, 40, 44, .9); }

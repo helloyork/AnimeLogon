@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "animelogon/settings.h"
+#include "gpublur.h"
 #include "plan.h"
 #include "player.h"
 
@@ -42,9 +43,16 @@ public:
     IMFDXGIDeviceManager *videoManager() const { return manager_.Get(); }
     bool DeviceLost();
 
-    // Windows are created hidden, on the calling thread's desktop.
-    bool CreateWindows(const std::vector<Target> &targets, const wchar_t *windowClass, HINSTANCE instance);
-    void DestroyWindows();
+    // Windows are created hidden, on the calling thread's desktop, one for each target with an
+    // area. With `keepOld` the windows there were stay up, still showing their last picture,
+    // until RetireOld: laying the screen out again for new displays builds and shows the new
+    // windows first, so the screen is never uncovered in between.
+    bool CreateWindows(const std::vector<Target> &targets, const wchar_t *windowClass, HINSTANCE instance,
+                       bool keepOld = false);
+    // Destroys the windows CreateWindows kept up.
+    void RetireOld();
+    // Destroys the windows, and with `all` those CreateWindows kept up too.
+    void DestroyWindows(bool all = true);
     bool HasWindows() const { return !windows_.empty(); }
     HWND primary() const { return windows_.empty() ? nullptr : windows_.front().hwnd; }
     bool Owns(HWND hwnd) const;
@@ -59,6 +67,15 @@ public:
     void SetComponentOpacity(float opacity) { componentOpacity_ = opacity; }
     // Draws the components on the target covering `monitor` alone. False if none covers it.
     bool MoveComponentsTo(const RECT &monitor);
+
+    // How far the windows' content has gone on its way out when woken: grown by `scale` about the
+    // middle of each target's canvas, and moved up by `rise` of the canvas's height (-1 is the
+    // whole canvas up) -- so when spanning, the wall moves as one (layout.h LeaveOf). Applied with
+    // the next Render.
+    void SetLeave(float scale, float rise) {
+        leaveScale_ = scale;
+        leaveRise_ = rise;
+    }
 
     void Show();
     void Hide();
@@ -101,13 +118,15 @@ public:
         int sceneW = 0, sceneH = 0;
         float sceneMix = 0;
     };
-    // One picture per target. `dim` fades the picture to black; `opacity` fades the window.
+    // One picture per target. `dim` fades the picture to black, over the darkening of the
+    // target's own brightness; `opacity` fades the window.
     bool Render(const std::vector<Picture> &pictures, float dim, float opacity);
     void DrawVideo(const VideoPlayer::Frame &frame, int width, int height, animelogon::Scaling fit, ID3D11Texture2D *output);
 
 private:
     struct Window {
         HWND hwnd = nullptr;
+        size_t shows = 0;  // the index of the target it shows, in targets_
         UINT width = 0, height = 0;
         Microsoft::WRL::ComPtr<IDXGISwapChain1> swapChain;
         Microsoft::WRL::ComPtr<IDCompositionTarget> target;
@@ -154,6 +173,7 @@ private:
 
     std::vector<Target> targets_;
     std::vector<Window> windows_;
+    std::vector<Window> retired_;  // the windows of the layout before, until RetireOld
     bool visible_ = false;
     float opacity_ = -1.0f;
     bool lost_ = false;
@@ -161,4 +181,9 @@ private:
     std::vector<std::vector<size_t>> componentsPerTarget_;
     bool componentsFailed_ = false;
     float componentOpacity_ = 1.0f;
+    // The themes' wallpaper blur; none if its shaders could not be made, and then the wallpaper
+    // is drawn sharp.
+    std::unique_ptr<GpuBlur> blur_;
+    bool blurFailed_ = false;
+    float leaveScale_ = 1.0f, leaveRise_ = 0.0f, leaveScaleSaid_ = 1.0f, leaveRiseSaid_ = 0.0f;
 };

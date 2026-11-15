@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The day of the week in spaced capitals at the top centre, for the theme in this folder. -->
+<component format="1" name="Weekday" author="AnimeLogon">
+  <settings>
+    <color id="color" label="Color" default="#FFFFFF"/>
+  </settings>
+  <panel anchor="top" size="2.4" margin="6" enter="zoom" enter-delay="0.3">
+    <line>
+      <text value="{weekday}" weight="semibold" color="$color" case="upper" tracking="0.35"/>
+    </line>
+    <shadow blur="0.12" opacity="0.4" y="0.04"/>
+  </panel>
+</component>

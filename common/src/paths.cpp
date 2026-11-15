@@ -1,10 +1,14 @@
 #include "animelogon/paths.h"
 
+#include "animelogon/i18n.h"
+
 #include <windows.h>
 #include <shlobj.h>
 #include <knownfolders.h>
 
+#include <cstdint>
 #include <cwchar>
+#include <cwctype>
 #include <string_view>
 
 namespace animelogon::paths {
@@ -20,7 +24,34 @@ static std::wstring KnownFolder(REFKNOWNFOLDERID id, const wchar_t *fallback) {
     return dir;
 }
 
+static std::wstring g_sandbox;
+
+void UseSandbox(const std::wstring &root) {
+    g_sandbox = root;
+    while (g_sandbox.size() > 3 && g_sandbox.back() == L'\\') g_sandbox.pop_back();
+}
+const std::wstring &Sandbox() { return g_sandbox; }
+
+std::wstring SandboxTitle() {
+    const size_t slash = g_sandbox.find_last_of(L'\\');
+    const std::wstring leaf = slash == std::wstring::npos ? g_sandbox : g_sandbox.substr(slash + 1);
+    return i18n::Tr("app.sandbox_title", {{L"folder", leaf}});
+}
+
+std::wstring SandboxMutex() {
+    // FNV-1a over the folder's path in lower case: the same folder however it was spelled.
+    uint64_t h = 1469598103934665603ull;
+    for (wchar_t c : g_sandbox) {
+        h ^= (uint64_t)towlower(c);
+        h *= 1099511628211ull;
+    }
+    wchar_t name[64];
+    swprintf_s(name, L"Local\\AnimeLogon.App.Sandbox.%016llx", (unsigned long long)h);
+    return name;
+}
+
 std::wstring DataDir() {
+    if (!g_sandbox.empty()) return g_sandbox + L"\\ProgramData\\AnimeLogon";
     static const std::wstring dir =
         KnownFolder(FOLDERID_ProgramData, L"C:\\ProgramData") + L"\\AnimeLogon";
     return dir;
@@ -33,6 +64,7 @@ std::wstring BackgroundPath() { return DataDir() + L"\\background.png"; }
 std::wstring PausedMarkerPath() { return DataDir() + L"\\paused"; }
 
 std::wstring UserDataDir() {
+    if (!g_sandbox.empty()) return g_sandbox + L"\\LocalAppData\\AnimeLogon";
     return KnownFolder(FOLDERID_LocalAppData, L"") + L"\\AnimeLogon";
 }
 

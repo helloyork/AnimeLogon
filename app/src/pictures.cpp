@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "animelogon/blur.h"
 #include "animelogon/background.h"
 #include "animelogon/components.h"
 #include "animelogon/wallpaper.h"
@@ -233,11 +234,21 @@ bool Pictures::Wallpaper(const std::wstring &ref, Scaling fit, UINT width, UINT 
 }
 
 bool Pictures::Theme(const theme::Theme &theme, UINT width, UINT height, Draw draw, Picture *out,
-                     std::vector<Bound> *bounds, const std::vector<Screen> *screens) {
+                     std::vector<Bound> *bounds, const std::vector<Screen> *screens, const std::wstring &only,
+                     const data::Snapshot *data) {
+    const size_t dot = only.find(L'.');
+    const std::wstring onlyInstance = only.substr(0, dot);
+    const size_t onlyPanel = dot == std::wstring::npos ? 0 : (size_t)_wtoi(only.c_str() + dot + 2);
     if (!width || !height) return false;
     Picture drawn;
     if (draw == Draw::ComponentsOnly) drawn = Clear(width, height);
     else if (!Wallpaper(theme.wallpaper, theme.fit, width, height, &drawn)) return false;
+    else {
+        // At the theme's brightness and blur, as the logon screen draws it; the components over it
+        // are neither darkened nor blurred.
+        animelogon::ApplyBrightness(drawn.bgra.data(), drawn.bgra.size() / 4, 4, theme.brightness);
+        BlurWallpaper(drawn.bgra.data(), width, height, theme.blur, screens ? *screens : std::vector<Screen>());
+    }
     if (draw != Draw::WallpaperOnly) {
         const RECT all{0, 0, (LONG)width, (LONG)height};
         const std::vector<Screen> one{{all, true}};
@@ -245,11 +256,10 @@ bool Pictures::Theme(const theme::Theme &theme, UINT width, UINT height, Draw dr
         SYSTEMTIME now{};
         GetLocalTime(&now);
         const RegionalFormat format = UserFormat();
-        // Components that show the battery or what is playing show it with made-up values, so
-        // that they can be seen and placed on any machine.
+        // The battery and what is playing as given, or made up (pictures.h).
         FILETIME utc{};
         GetSystemTimeAsFileTime(&utc);
-        const data::Snapshot sample = data::Sample((uint64_t)utc.dwHighDateTime << 32 | utc.dwLowDateTime);
+        const data::Snapshot sample = data ? *data : data::Sample((uint64_t)utc.dwHighDateTime << 32 | utc.dwLowDateTime);
         for (size_t s = 0; s < where.size(); ++s) {
             if (!where[s].components) continue;
             RECT r{};
@@ -259,14 +269,20 @@ bool Pictures::Theme(const theme::Theme &theme, UINT width, UINT height, Draw dr
             Picture part = whole ? std::move(drawn) : Crop(drawn, r);
             for (const theme::Instance &i : theme.components) {
                 skin::Skin skin;
-                if (!i.visible || !library_.LoadSkin(i.ref, &skin)) continue;
+                if (!i.visible || (!only.empty() && i.id != onlyInstance) || !library_.LoadSkin(i.ref, &skin)) continue;
                 // Only the values the component takes, as the logon screen resolves them.
                 skin::Values values;
                 for (const auto &[key, value] : i.sets)
                     if (skin::Accepts(skin, key, value)) values[key] = value;
+                skin::Resolved resolved = skin::Resolve(skin, values);
+                if (!only.empty()) {
+                    if (!onlyPanel || onlyPanel > resolved.panels.size()) continue;
+                    skin::Panel alone = std::move(resolved.panels[onlyPanel - 1]);
+                    resolved.panels.assign(1, std::move(alone));
+                }
                 Picture next;
                 std::vector<SkinView::Bound> placed;
-                if (!preview_.Render(part, skin::Resolve(skin, values), library_.settings().clock, format, now, &next,
+                if (!preview_.Render(part, resolved, library_.settings().clock, format, now, &next,
                                      bounds ? &placed : nullptr, draw == Draw::ComponentsOnly, &sample))
                     continue;
                 part = std::move(next);
@@ -288,6 +304,37 @@ bool Pictures::Theme(const theme::Theme &theme, UINT width, UINT height, Draw dr
     }
     *out = std::move(drawn);
     return true;
+}
+
+void BlurWallpaper(uint8_t *bgra, UINT width, UINT height, float percent, const std::vector<Screen> &screens) {
+    if (percent <= 0 || !width || !height) return;
+    const float sigma = WallSigma(percent, screens, height);
+    if (screens.empty()) {
+        animelogon::blur::Apply(bgra, (int)width, (int)height, 4, sigma);
+        return;
+    }
+    Picture whole;
+    whole.width = width;
+    whole.height = height;
+    whole.bgra.assign(bgra, bgra + (size_t)width * height * 4);
+    // Each display's part, on the picture: displays never overlap.
+    const RECT all{0, 0, (LONG)width, (LONG)height};
+    std::vector<RECT> parts;
+    uint64_t covered = 0;
+    for (const Screen &s : screens) {
+        RECT r{};
+        if (!IntersectRect(&r, &s.rect, &all)) continue;
+        parts.push_back(r);
+        covered += (uint64_t)(r.right - r.left) * (r.bottom - r.top);
+    }
+    // Where the displays leave part of the wall's bounds bare, that part is blurred as one piece.
+    if (covered < (uint64_t)width * height) animelogon::blur::Apply(bgra, (int)width, (int)height, 4, sigma);
+    for (const RECT &r : parts) {
+        Picture part = Crop(whole, r);
+        animelogon::blur::Apply(part.bgra.data(), (int)part.width, (int)part.height, 4, sigma);
+        for (UINT y = 0; y < part.height; ++y)
+            memcpy(bgra + (((size_t)r.top + y) * width + r.left) * 4, &part.bgra[(size_t)y * part.width * 4], (size_t)part.width * 4);
+    }
 }
 
 std::vector<uint8_t> Bmp(const Picture &picture) {

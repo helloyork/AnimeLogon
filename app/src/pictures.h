@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "animelogon/data.h"
 #include "animelogon/settings.h"
 #include "animelogon/skinpreview.h"
 #include "animelogon/theme.h"
@@ -47,9 +48,13 @@ public:
     bool Wallpaper(const std::wstring &ref, animelogon::Scaling fit, UINT width, UINT height, animelogon::Picture *out);
     // The theme as a display of that size shows it. With `screens`, the picture is a wall of
     // displays, as spanning shows it: the wallpaper fitted to all of it, the components drawn on
-    // each screen that shows them as on a display of that screen's size.
+    // each screen that shows them as on a display of that screen's size. `only`, as
+    // "<instance>.<panel>" (clock.p1), draws that one panel and no other component. Components
+    // that show the battery or what is playing show `data`; without it, made-up values (a battery
+    // part used, a song partway through), so that they can be seen and placed on any machine.
     bool Theme(const animelogon::theme::Theme &theme, UINT width, UINT height, Draw draw, animelogon::Picture *out,
-               std::vector<Bound> *bounds = nullptr, const std::vector<Screen> *screens = nullptr);
+               std::vector<Bound> *bounds = nullptr, const std::vector<Screen> *screens = nullptr,
+               const std::wstring &only = L"", const animelogon::data::Snapshot *data = nullptr);
 
     // Drops what was read from the stores, after they changed.
     void Forget() { stills_.clear(); }
@@ -63,6 +68,13 @@ private:
     std::map<std::wstring, animelogon::Picture> stills_;  // by wallpaper id; empty when unreadable
     animelogon::SkinPreview preview_;
 };
+
+// A theme's blur of `percent` (blur.h) on a picture of its wallpaper, `width` x `height` pixels of
+// B G R A with no padding, as the logon screen draws it: the whole picture for one display (no
+// `screens`). When spanning, each display on its own, its edges held, by the sigma of the main
+// display's height (WallSigma) on every one, as the logon screen blurs each display's part of the
+// wall; what lies between displays, which no display shows, is blurred as one piece by that sigma.
+void BlurWallpaper(uint8_t *bgra, UINT width, UINT height, float percent, const std::vector<Screen> &screens);
 
 // The picture as a BMP file: 32-bit, top-down, opaque.
 std::vector<uint8_t> Bmp(const animelogon::Picture &picture);

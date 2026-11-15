@@ -1,4 +1,5 @@
 #include "exporter.h"
+#include "animelogon/i18n.h"
 #include <algorithm>
 
 #include <windows.h>
@@ -53,11 +54,11 @@ bool VideoOf(const WallpaperInfo &w, const std::wstring &workDir, std::wstring *
     switch (remux::WithSound(w.videoPath, w.audioPath, mp4, &why)) {
     case remux::Status::Ok: return *file = mp4, true;
     case remux::Status::NoMediaFoundation:
-        return Fail(error, L"此系统缺少 Media Foundation 或其中的 AAC 编码器，无法导出视频壁纸的声音。",
+        return Fail(error, animelogon::i18n::Tr("export.error.aac"),
                     L"wallpaper " + w.id + L": " + why);
     case remux::Status::TooLarge:
-        return Fail(error, L"这个主题的视频壁纸加上声音太大，无法导出。", L"wallpaper " + w.id + L": " + why);
-    default: return Fail(error, L"无法把视频壁纸的声音写进主题包。", L"wallpaper " + w.id + L": " + why);
+        return Fail(error, animelogon::i18n::Tr("export.error.too_large"), L"wallpaper " + w.id + L": " + why);
+    default: return Fail(error, animelogon::i18n::Tr("export.error.audio"), L"wallpaper " + w.id + L": " + why);
     }
 }
 
@@ -68,7 +69,7 @@ bool Build(const std::wstring &themeId, const Settings &settings, const ThemeSto
     items->clear();
     theme::Theme own;
     std::wstring why;
-    if (!store.LoadTheme(themeId, &own, &why)) return Fail(error, L"无法读取这个主题。", L"theme " + themeId + L": " + why);
+    if (!store.LoadTheme(themeId, &own, &why)) return Fail(error, animelogon::i18n::Tr("export.error.theme"), L"theme " + themeId + L": " + why);
     theme::Theme t = theme::Edited(own, settings.OverridesFor(themeId));
 
     // Components: only the values each takes, and a file for each imported one.
@@ -77,7 +78,7 @@ bool Build(const std::wstring &themeId, const Settings &settings, const ThemeSto
     for (theme::Instance &i : t.components) {
         skin::Skin c;
         if (!store.LoadComponent(i.ref, &c, &why))
-            return Fail(error, L"这个主题用到的组件已不存在或无法读取，无法导出。", L"component " + i.ref + L": " + why);
+            return Fail(error, animelogon::i18n::Tr("export.error.component"), L"component " + i.ref + L": " + why);
         for (auto it = i.sets.begin(); it != i.sets.end();)
             it = skin::Accepts(c, it->first, it->second) ? std::next(it) : i.sets.erase(it);
         if (IsBuiltInComponent(i.ref) || componentFiles.count(i.ref)) continue;
@@ -92,13 +93,13 @@ bool Build(const std::wstring &themeId, const Settings &settings, const ThemeSto
     if (IsWallpaperId(t.wallpaper)) {
         WallpaperInfo w;
         if (!store.LoadWallpaper(t.wallpaper, &w, &why))
-            return Fail(error, L"这个主题的壁纸已不存在或无法读取，无法导出。", L"wallpaper " + t.wallpaper + L": " + why);
+            return Fail(error, animelogon::i18n::Tr("export.error.wallpaper"), L"wallpaper " + t.wallpaper + L": " + why);
         if (w.kind == WallpaperKind::Scene) {
             scene::Document d; std::vector<uint8_t> xml;
             if (!secure::ReadFileBytes(w.scenePath,&xml,64*1024) || !scene::Parse(std::string_view((const char *)xml.data(),xml.size()),&d,&why))
-                return Fail(error,L"无法读取场景。",why);
+                return Fail(error,animelogon::i18n::Tr("export.error.scene"),why);
             d = scene::Bake(d,settings.OverridesFor(themeId).wallpaperValues,&why);
-            if (!why.empty()) return Fail(error,L"场景的调整超出了文件格式上限，无法导出。",why);
+            if (!why.empty()) return Fail(error,animelogon::i18n::Tr("export.error.scene_limit"),why);
             std::vector<package::Item> sceneItems{{"scene.xml",L"",Bytes(scene::Normalize(d))}};
             const std::wstring dir = w.scenePath.substr(0,w.scenePath.find_last_of(L'\\'));
             for (const auto &name : scene::Assets(d,false)) {
@@ -107,25 +108,25 @@ bool Build(const std::wstring &themeId, const Settings &settings, const ThemeSto
                 sceneItems.push_back({ToUtf8(name),path,{}});
             }
             wallpaperFile = L"wallpaper.alscene";
-            if (!package::WriteToMemory(sceneItems,&wallpaper.bytes,&why)) return Fail(error,L"无法打包场景。",why);
+            if (!package::WriteToMemory(sceneItems,&wallpaper.bytes,&why)) return Fail(error,animelogon::i18n::Tr("export.error.scene_pack"),why);
         } else if (w.kind == WallpaperKind::Video) {
             wallpaperFile = L"wallpaper.mp4";
             if (!VideoOf(w, workDir, &wallpaper.file, error)) return false;
         } else {
             wallpaperFile = L"wallpaper.png";
             if (!PngOf(w, &wallpaper.bytes, &why))
-                return Fail(error, L"无法读取这个主题的壁纸图片。", L"wallpaper " + t.wallpaper + L": " + why);
+                return Fail(error, animelogon::i18n::Tr("export.error.picture"), L"wallpaper " + t.wallpaper + L": " + why);
         }
         wallpaper.name = ToUtf8(wallpaperFile);
     }
 
     if (!theme::ToPackage(&t, wallpaperFile, componentFiles, &why))
-        return Fail(error, L"无法导出这个主题。", L"theme " + themeId + L": " + why);
+        return Fail(error, animelogon::i18n::Tr("export.error.failed"), L"theme " + themeId + L": " + why);
     // With the overrides baked in the theme may have grown past what a theme.xml may hold.
     const std::string text = theme::Normalize(t);
     theme::Theme check;
     if (!theme::Parse(text, theme::Form::Package, &check, &why))
-        return Fail(error, L"这个主题的调整项太多，超出了主题文件的上限，无法导出。", L"theme " + themeId + L": " + why);
+        return Fail(error, animelogon::i18n::Tr("export.error.too_many"), L"theme " + themeId + L": " + why);
 
     items->push_back({"theme.xml", L"", Bytes(text)});
     if (!wallpaper.name.empty()) items->push_back(std::move(wallpaper));
@@ -147,11 +148,11 @@ std::wstring NewWorkDir() {
 bool Export(const std::wstring &themeId, const Settings &settings, const std::wstring &path, std::wstring *error) {
     // Where a video with its sound is put together; gone once the archive is written.
     const std::wstring work = NewWorkDir();
-    if (work.empty()) return Fail(error, L"无法创建临时目录。", L"no directory under %TEMP%");
+    if (work.empty()) return Fail(error, animelogon::i18n::Tr("error.temp_dir"), L"no directory under %TEMP%");
     std::vector<package::Item> items;
     std::wstring why;
     bool ok = Build(themeId, settings, DiskStore(), work, &items, error);
-    if (ok && !package::Write(items, path, &why)) ok = Fail(error, L"无法写入 " + path + L"。", why);
+    if (ok && !package::Write(items, path, &why)) ok = Fail(error, animelogon::i18n::Tr("export.error.write", {{L"path", path}}), why);
     secure::RemoveTree(work);
     return ok;
 }

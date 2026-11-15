@@ -1,7 +1,10 @@
 #include "presenter.h"
 
+#include <d2d1_1helper.h>
 #include <d3d10.h>
 #include <wincodec.h>
+
+#include <cmath>
 
 #include <cstring>
 #include <mutex>
@@ -9,7 +12,9 @@
 
 #include "animelogon/log.h"
 #include "animelogon/text.h"
+#include "animelogon/blur.h"
 #include "componentlayer.h"
+#include "gpublur.h"
 #include "layout.h"
 #include "picture.h"
 #include "video_ps.h"
@@ -136,7 +141,14 @@ bool Presenter::CreateShaders() {
     s.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
     s.AddressU = s.AddressV = s.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
     s.MaxLOD = D3D11_FLOAT32_MAX;
-    return SUCCEEDED(device_->CreateSamplerState(&s, &sampler_));
+    if (FAILED(device_->CreateSamplerState(&s, &sampler_))) return false;
+    // Without the blur the logon screen still works: a theme that asks for it is drawn sharp.
+    blur_ = std::make_unique<GpuBlur>();
+    if (!blur_->Create(device_.Get())) {
+        ALOG(L"present: the wallpaper blur is unavailable -- blurred wallpapers are drawn sharp");
+        blur_.reset();
+    }
+    return true;
 }
 
 bool Presenter::LoadStill(const std::wstring &path) {
@@ -316,6 +328,7 @@ void Presenter::DrawVideo(const VideoPlayer::Frame &frame, int width, int height
 }
 
 void Presenter::ReleaseDevice() {
+    blur_.reset();
     images_.clear();
     gradients_.clear();
     stillView_.Reset();
@@ -339,15 +352,25 @@ bool Presenter::DeviceLost() {
     return lost_;
 }
 
-bool Presenter::CreateWindows(const std::vector<Target> &targets, const wchar_t *windowClass, HINSTANCE instance) {
-    DestroyWindows();
+bool Presenter::CreateWindows(const std::vector<Target> &targets, const wchar_t *windowClass, HINSTANCE instance,
+                              bool keepOld) {
+    if (keepOld) {
+        // Up until RetireOld, under the new ones, which Show puts on top.
+        RetireOld();
+        retired_ = std::move(windows_);
+        windows_.clear();
+    }
+    DestroyWindows(!keepOld);
     if (!device_) return false;
     targets_ = targets;
-    for (const Target &t : targets_) {
+    std::vector<RECT> rects;
+    for (const Target &t : targets_) rects.push_back(t.rect);
+    for (const size_t index : layout::WithArea(rects)) {
+        const Target &t = targets_[index];
         Window w;
+        w.shows = index;
         w.width = (UINT)(t.rect.right - t.rect.left);
         w.height = (UINT)(t.rect.bottom - t.rect.top);
-        if (!w.width || !w.height) continue;
         w.hwnd = CreateWindowExW(WS_EX_NOREDIRECTIONBITMAP | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
                                  windowClass, L"AnimeLogon", WS_POPUP, t.rect.left, t.rect.top, (int)w.width,
                                  (int)w.height, nullptr, nullptr, instance, nullptr);
@@ -390,21 +413,38 @@ bool Presenter::CreateWindows(const std::vector<Target> &targets, const wchar_t 
     return !windows_.empty() && SUCCEEDED(dcomp_->Commit());
 }
 
-void Presenter::DestroyWindows() {
-    for (Window &w : windows_) {
+namespace {
+
+template <class Windows> void Release(Windows &windows) {
+    for (auto &w : windows) {
         w.effect.Reset();
         w.visual.Reset();
         w.target.Reset();
         w.swapChain.Reset();
         if (w.hwnd) DestroyWindow(w.hwnd);
     }
-    windows_.clear();
+    windows.clear();
+}
+
+}  // namespace
+
+void Presenter::RetireOld() {
+    if (retired_.empty()) return;
+    Release(retired_);
+    if (dcomp_) dcomp_->Commit();
+}
+
+void Presenter::DestroyWindows(bool all) {
+    if (all) Release(retired_);
+    Release(windows_);
     targets_.clear();
     visible_ = false;
     components_ = nullptr;
     componentsPerTarget_.clear();
     componentsFailed_ = false;
     componentOpacity_ = 1.0f;
+    leaveScale_ = leaveScaleSaid_ = 1.0f;
+    leaveRise_ = leaveRiseSaid_ = 0.0f;
     if (dcomp_) dcomp_->Commit();
     if (context_) {
         context_->ClearState();
@@ -483,8 +523,10 @@ double Presenter::CompositionRate() const {
 
 bool Presenter::Render(const std::vector<Picture> &pictures, float dim, float opacity) {
     if (!device_ || lost_) return false;
-    for (size_t i = 0; i < windows_.size(); ++i) {
-        Window &w = windows_[i];
+    for (Window &w : windows_) {
+        // Everything a window is drawn with is its own target's, found by the index it keeps.
+        const size_t i = w.shows;
+        if (i >= targets_.size()) continue;
         const Target &t = targets_[i];
         const Picture pic = i < pictures.size() ? pictures[i] : Picture{};
         ComPtr<ID3D11Texture2D> back;
@@ -496,7 +538,9 @@ bool Presenter::Render(const std::vector<Picture> &pictures, float dim, float op
             return false;
         }
         Params p{};
-        p.dim = dim;
+        // The theme's brightness darkens its wallpaper further. Not the still: the sign-in
+        // background it is was baked with that brightness already (bake.h).
+        p.dim = pic.kind == Picture::Kind::Still ? dim : 1.0f - (1.0f - dim) * t.wallpaper.brightness;
         // t0 and t1 the video's planes, t2 a picture.
         ID3D11ShaderResourceView *views[4] = {};
         bool placed = false;
@@ -550,9 +594,22 @@ bool Presenter::Render(const std::vector<Picture> &pictures, float dim, float op
             p.offset[1] = m.offsetY;
         }
         context_->UpdateSubresource(constants_.Get(), 0, nullptr, &p, 0, 0);
+        // A blurred wallpaper is drawn into the blur's own picture first, then blurred into the
+        // window. Not the still: it was baked blurred (bake.h).
+        const float sigma = placed && pic.kind != Picture::Kind::Still ? plan::BlurSigma(t.wallpaper, (int)w.height) : 0.0f;
+        ID3D11RenderTargetView *drawTo = nullptr;
+        if (sigma > 0.0f && blur_) {
+            drawTo = blur_->Begin(w.width, w.height, sigma);
+            if (!drawTo && !blurFailed_) {
+                ALOG(L"present: no room for the wallpaper blur at %ux%u -- drawn sharp", w.width, w.height);
+                blurFailed_ = true;
+            }
+        }
+        const bool blurred = drawTo != nullptr;
+        if (!blurred) drawTo = rtv.Get();
         D3D11_VIEWPORT vp{0.0f, 0.0f, (float)w.width, (float)w.height, 0.0f, 1.0f};
         context_->RSSetViewports(1, &vp);
-        ID3D11RenderTargetView *targets[] = {rtv.Get()};
+        ID3D11RenderTargetView *targets[] = {drawTo};
         context_->OMSetRenderTargets(1, targets, nullptr);
         context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         context_->IASetInputLayout(nullptr);
@@ -567,6 +624,7 @@ bool Presenter::Render(const std::vector<Picture> &pictures, float dim, float op
         ID3D11ShaderResourceView *none[4] = {};
         context_->PSSetShaderResources(0, 4, none);
         context_->OMSetRenderTargets(0, nullptr, nullptr);
+        if (blurred) blur_->End(context_.Get(), rtv.Get());
         if (components_ && t.showComponents && !componentsFailed_ && componentOpacity_ > 0.0f &&
             i < componentsPerTarget_.size() && !componentsPerTarget_[i].empty()) {
             ComPtr<IDXGISurface> surface;
@@ -583,7 +641,19 @@ bool Presenter::Render(const std::vector<Picture> &pictures, float dim, float op
             return false;
         }
     }
-    if (opacity != opacity_) {
+    const bool moved = leaveScale_ != leaveScaleSaid_ || leaveRise_ != leaveRiseSaid_;
+    if (moved) {
+        leaveScaleSaid_ = leaveScale_;
+        leaveRiseSaid_ = leaveRise_;
+        for (Window &w : windows_) {
+            if (w.shows >= targets_.size()) continue;
+            const Target &t = targets_[w.shows];
+            const layout::Leave l = layout::LeaveOf(t.rect, t.canvas, leaveScale_, leaveRise_);
+            w.visual->SetTransform(D2D1::Matrix3x2F::Scale(l.scale, l.scale, D2D1::Point2F(l.centreX, l.centreY)) *
+                                   D2D1::Matrix3x2F::Translation(0.0f, l.dy));
+        }
+    }
+    if (opacity != opacity_ || moved) {
         opacity_ = opacity;
         for (Window &w : windows_) w.effect->SetOpacity(opacity);
         if (FAILED(dcomp_->Commit())) return false;

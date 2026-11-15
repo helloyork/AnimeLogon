@@ -1,0 +1,249 @@
+/* A theme's page: the line under the app bar, the stage, and the panel beside it. */
+.themepage { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.subhead {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  height: 52px;
+  padding: 0 var(--s4) 0 var(--s5);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-1);
+}
+.subhead .crumbs { font-size: 15px; line-height: 22px; }
+.subhead .state { flex: none; margin-left: var(--s1); }
+.subhead .tools { flex: none; display: flex; align-items: center; gap: var(--s1); margin-left: auto; }
+.vsep { width: 1px; height: 20px; margin: 0 var(--s2); background: var(--border-strong); }
+.editor { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 360px; }
+
+/* --- the stage: the lock screen, a shade darker than the page, with the marks over it --- */
+/* The marks of a panel that hangs past the display's edge reach into the room around the stage,
+   and no further: not over the toolbar or the panel beside it. */
+.stage-area { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: var(--bg-stage); }
+.well { position: absolute; inset: 0; }
+.stage {
+  position: absolute;
+  border-radius: var(--r-md);
+  background: #000;
+  /* The lock screen is often dark on a dark stage: a hairline shows where it ends. */
+  box-shadow: var(--shadow-frame), 0 0 0 1px var(--border);
+  touch-action: none;
+  cursor: default;
+}
+.stage.over { cursor: grab; }
+.stage.dragging { cursor: grabbing; }
+/* What the display shows is cut at its edges, as the logon screen cuts it; the marks over it are not. */
+.stage .view { position: absolute; inset: 0; overflow: hidden; border-radius: inherit; pointer-events: none; }
+.stage .layer { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.stage .sprite { position: absolute; inset: 0; background-size: 100% 100%; pointer-events: none; will-change: transform; }
+.stage .cut { position: absolute; inset: 0; pointer-events: none; }
+/* Panels with a spectrum, drawn moving over the picture that leaves them out (media.tsx SpectrumFrames). */
+.stage .live-spectra { position: absolute; inset: 0; pointer-events: none; }
+.stage .view > video { pointer-events: none; }
+
+.box { position: absolute; border-radius: 2px; pointer-events: none; }
+.box.sel {
+  z-index: 4;
+  border: 1px solid #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .5), inset 0 0 0 1px rgba(0, 0, 0, .3);
+  transition: left .1s cubic-bezier(0, 0, 0, 1), top .1s cubic-bezier(0, 0, 0, 1), width .1s cubic-bezier(0, 0, 0, 1), height .1s cubic-bezier(0, 0, 0, 1);
+}
+.box.still { transition: none; }
+.box.part { z-index: 4; border: 1px dashed #fff; box-shadow: 0 0 0 1px rgba(0, 0, 0, .45); }
+.box.hov { z-index: 3; border: 1px dashed rgba(255, 255, 255, .85); box-shadow: 0 0 0 1px rgba(0, 0, 0, .35); }
+.handle {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border: 1px solid rgba(0, 0, 0, .55);
+  border-radius: 2px;
+  background: #fff;
+  pointer-events: auto;
+  touch-action: none;
+}
+/* A larger place to grab than the mark itself. */
+.handle::before { content: ""; position: absolute; inset: -5px; }
+.marks { position: absolute; inset: 0; z-index: 3; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.readout {
+  position: absolute;
+  z-index: 5;
+  padding: 3px 8px;
+  border-radius: var(--r-xs);
+  background: rgba(16, 16, 18, .86);
+  color: #fff;
+  font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.stage-foot {
+  position: absolute;
+  left: var(--s5);
+  bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 18px;
+}
+.stage-foot > svg { width: 14px; height: 14px; }
+
+/* --- the panel --- */
+.inspector {
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  border-left: 1px solid var(--border);
+  background: var(--surface-1);
+  font-size: 13px;
+  line-height: 20px;
+}
+.ihead { display: flex; flex-direction: column; gap: var(--s2); padding: var(--s4) var(--s4) var(--s3); }
+.ihead .top { display: flex; align-items: center; gap: var(--s2); min-height: 28px; }
+.ihead .top > .btn { margin-left: auto; }
+.ihead .crumbs { font-size: 14px; line-height: 22px; }
+.ititle { font: 600 14px/22px var(--font); }
+.ihead .sub { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); min-height: 20px; }
+.showsw { flex: none; display: flex; align-items: center; gap: var(--s2); color: var(--text-2); font-size: 12px; cursor: pointer; }
+.ibody { padding: 0 var(--s4) var(--s4); }
+.inote { color: var(--text-3); font-size: 12px; line-height: 18px; }
+.inote .link { font-size: 12px; margin: 0 2px; }
+.ifoot { padding: var(--s3) var(--s4) var(--s5); border-top: 1px solid var(--border); }
+
+/* Sections that fold. */
+.sec { border-top: 1px solid var(--border); }
+.sec-h {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  width: 100%;
+  height: 44px;
+  padding: 0 var(--s4);
+  border: 0;
+  background: transparent;
+  color: var(--text-1);
+  font: 600 13px/20px var(--font);
+  text-align: left;
+  cursor: pointer;
+}
+.sec-h:focus-visible { outline-offset: -2px; }
+.sec-h > svg { margin-left: auto; width: 12px; height: 12px; color: var(--text-2); transition: transform .15s; }
+.sec.closed .sec-h > svg { transform: rotate(-90deg); }
+.sec-b { display: flex; flex-direction: column; gap: var(--s3); padding: 0 var(--s4) var(--s4); }
+
+/* Values: a column of labels, a column of controls, each control with room for its reset button. */
+.props { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: var(--s2) var(--s3); align-items: center; }
+/* Labels in English and Japanese run longer than the four characters the column is cut for. */
+:root:lang(en) .props, :root:lang(ja) .props { grid-template-columns: 92px minmax(0, 1fr); }
+.plabel { min-width: 0; color: var(--text-2); font-size: 13px; line-height: 18px; overflow-wrap: anywhere; cursor: default; }
+.plabel.top { align-self: start; padding-top: 5px; }
+.pctl { display: flex; align-items: center; gap: var(--s1); min-width: 0; min-height: var(--h-sm); }
+.pmain { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--s2); }
+.pmain > .select,
+.pmain > .seg,
+.pmain > .field:not(.num) { flex: 1; min-width: 0; }
+.preset { flex: none; display: flex; justify-content: center; width: 20px; }
+/* A value set under the switch above it, which turns it on: the strength of a backdrop. */
+.plabel.sub { padding-left: var(--s3); }
+.ptoggle { grid-column: 1 / -1; display: flex; align-items: center; gap: var(--s3); min-height: var(--h-sm); }
+.ptoggle .plabel { flex: 1; }
+.ptoggle .preset { margin-left: calc(var(--s3) * -1 + var(--s1)); }
+.pmore { grid-column: 2; display: flex; align-items: center; justify-content: space-between; gap: var(--s3); font-size: 12px; }
+.pmore .link { font-size: 12px; }
+.quietlink { color: var(--text-2); }
+
+/* A colour: the chip opens the picker. */
+.pcolor { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--s2); }
+.chip { flex: none; width: 16px; height: 16px; padding: 0; border: 0; border-radius: var(--r-xs); box-shadow: inset 0 0 0 1px rgba(127, 127, 127, .45); cursor: pointer; }
+.swatches { display: flex; gap: 6px; }
+.swatches button { width: 20px; height: 20px; padding: 0; border: 0; border-radius: 50%; box-shadow: inset 0 0 0 1px rgba(127, 127, 127, .35); cursor: pointer; }
+.swatches button[aria-checked=true] { box-shadow: 0 0 0 2px var(--surface-1), 0 0 0 3.5px var(--accent); }
+/* Fluent's colour area is at least 300 px wide; the layer holds it with its padding. */
+.picker { display: flex; flex-direction: column; gap: var(--s3); width: 332px; }
+/* A gradient: a handle on the bar for each colour, the chosen one's colour and place below, then
+   gradients to start from. The bar is inset by half a handle, so handles at its ends stay inside
+   the panel; a checkerboard shows through colours that are not opaque. */
+.pgrad { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--s2); padding-top: 2px; }
+.gbar {
+  position: relative;
+  height: 22px;
+  margin: 0 8px;
+  border-radius: var(--r-xs);
+  background: repeating-conic-gradient(#c8c8c8 0% 25%, #fff 0% 50%) 0 0 / 8px 8px;
+  cursor: copy;
+  touch-action: none;
+}
+.gbar.full { cursor: default; }
+.gfill { position: absolute; inset: 0; border-radius: inherit; box-shadow: inset 0 0 0 1px rgba(127, 127, 127, .45); pointer-events: none; }
+.gstop {
+  position: absolute;
+  top: 50%;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .4), 0 1px 3px rgba(0, 0, 0, .35);
+  transform: translate(-50%, -50%);
+  cursor: ew-resize;
+  touch-action: none;
+}
+.gstop.on { box-shadow: 0 0 0 1px rgba(0, 0, 0, .4), 0 0 0 3.5px var(--accent); z-index: 1; }
+.gstop:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.gedit { display: flex; align-items: center; gap: var(--s1); }
+.gedit > .field.mono { flex: 1; min-width: 0; }
+/* The presets share the row's width, so all of them fit on one row in every language. */
+.gpresets { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 5px; }
+.gpresets button { width: auto; height: 16px; border-radius: var(--r-xs); }
+.gpresets button[aria-pressed=true] { box-shadow: 0 0 0 2px var(--surface-1), 0 0 0 3.5px var(--accent); }
+
+/* Lists: components, parts, a scene's layers. */
+.list { display: flex; flex-direction: column; margin: 0 calc(var(--s2) * -1); }
+.item { display: flex; align-items: center; gap: var(--s2); padding-right: var(--s2); border-radius: var(--r-sm); }
+.item:hover,
+.item.hover { background: var(--surface-3); }
+.item > .go {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 4px var(--s2);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  font-size: 13px;
+  line-height: 18px;
+  text-align: left;
+  cursor: pointer;
+}
+.item > .go:focus-visible { outline-offset: -2px; }
+.item .ic { flex: none; display: grid; place-items: center; width: 28px; height: 28px; border-radius: var(--r-sm); background: var(--surface-3); color: var(--text-2); }
+.item:hover .ic,
+.item.hover .ic { background: var(--surface-hover); }
+.item .ic svg { width: 16px; height: 16px; }
+.item .tx { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.item .tx small { color: var(--text-3); font-size: 12px; }
+.item .chev { flex: none; width: 12px; height: 12px; color: var(--text-3); }
+/* The chevron after a part's switch, where the row's button ends before the switch: in line with
+   the chevrons inside the buttons of the rows without one. */
+.item > .chev-after { flex: none; display: grid; place-items: center; margin-right: var(--s2); cursor: pointer; }
+/* Under the list: adding a component, and giving these components to other themes. Ghost buttons,
+   their text in line with the list's. */
+.sec-b > .adds { display: flex; flex-wrap: wrap; gap: 0 var(--s1); margin-left: calc(var(--s2) * -1); }
+
+/* The wallpaper: its picture, its name, and a way to change it. */
+.wp { display: flex; align-items: center; gap: var(--s3); }
+.wp .pic { flex: none; width: 104px; aspect-ratio: 16 / 9; border-radius: var(--r-sm); object-fit: cover; background: #000; outline: 1px solid var(--border); outline-offset: -1px; }
+.wp .tx { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 18px; }
+.wp .nm { font-weight: 600; }
+
+@media (max-width: 900px) {
+  .editor { grid-template-columns: minmax(0, 1fr) 320px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .box.sel, .sec-h > svg { transition: none; }
+}

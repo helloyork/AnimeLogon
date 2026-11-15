@@ -1,0 +1,100 @@
+/* The theme library. Its notices (AnimeLogon not installed, or off) stand above the themes. */
+.page > .notice { margin-bottom: var(--s6); }
+
+/* A picture of a lock screen, at the shape of its display (--arw / --arh), its layers stacked. */
+.shot { position: relative; overflow: hidden; aspect-ratio: var(--arw) / var(--arh); background: #000; }
+.shot > img,
+.shot > video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+
+/* The theme in use: its picture, and beside it what it is made of. */
+.hero {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface-2);
+}
+.hero .shot { align-self: start; }
+.hero .info { display: flex; flex-direction: column; min-width: 0; padding: var(--s6); }
+.hero .name { margin: 2px 0 var(--s4); font: 600 20px/28px var(--font); }
+.facts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px var(--s4); font-size: 13px; line-height: 20px; }
+.facts dt { color: var(--text-3); }
+.facts dd { min-width: 0; }
+.hero .acts { display: flex; flex-wrap: wrap; gap: var(--s2); margin-top: auto; padding-top: var(--s6); }
+
+.sechead { display: flex; align-items: baseline; gap: var(--s2); margin: var(--s10) 0 var(--s4); }
+.sechead.first { margin-top: 0; }
+
+/* A theme for each display. */
+.screens {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  gap: var(--s4);
+  padding: var(--s4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface-2);
+}
+.screen { display: flex; flex-direction: column; gap: var(--s2); min-width: 0; }
+.screen .shot { display: block; width: 100%; padding: 0; border: 0; border-radius: var(--r-md); cursor: pointer; }
+.screen figcaption { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s3); font-size: 13px; line-height: 20px; }
+
+/* Every theme. */
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(232px, 1fr)); gap: var(--s6) var(--s4); }
+.tcard { position: relative; min-width: 0; }
+.tcard .hit {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-md);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.tcard .hit:focus-visible { outline: none; }
+.tcard .thumb { position: relative; overflow: hidden; aspect-ratio: var(--arw) / var(--arh); border-radius: var(--r-md); background: #000; }
+.tcard .thumb > img,
+.tcard .thumb > video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.tcard .thumb::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px var(--border);
+  pointer-events: none;
+  transition: box-shadow .12s;
+}
+.tcard:hover .thumb::after { box-shadow: inset 0 0 0 1px var(--border-strong); }
+.tcard.use .thumb,
+.tcard .hit:focus-visible .thumb { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tcard .meta { padding: 10px 2px 0; }
+.tcard .nm { font-size: 14px; line-height: 20px; }
+
+/* 自定义 and the menu, over the picture's lower right corner while the card is pointed at. */
+.tcard .over {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  width: 100%;
+  aspect-ratio: var(--arw) / var(--arh);
+  padding: var(--s2);
+  pointer-events: none;
+}
+.tcard .hov { display: flex; gap: 6px; opacity: 0; pointer-events: auto; transition: opacity .12s; }
+.tcard:hover .hov,
+.tcard:focus-within .hov,
+.tcard .hov.shown { opacity: 1; }
+.hov .btn { background: rgba(20, 20, 22, .78); border-color: rgba(255, 255, 255, .12); color: #fff; backdrop-filter: blur(6px); }
+.hov .btn:hover { background: rgba(40, 40, 44, .9); }
+
+@media (max-width: 900px) {
+  .hero { grid-template-columns: minmax(0, 1fr); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tcard .hov, .tcard .thumb::after { transition: none; }
+}

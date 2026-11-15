@@ -29,6 +29,7 @@
 
 #include "commit.h"
 #include "exporter.h"
+#include "sceneimport.h"
 #include "scratch.h"
 #include "staging.h"
 #include "store.h"
@@ -323,6 +324,28 @@ TEST(CommitWallpaperWritesItAfresh) {
     both.insert(both.end(), wav.begin(), wav.end());
     CHECK(w.kind == WallpaperKind::Video && w.hasAudio && w.sha256 == Sha256Of(both.data(), both.size()));
     CHECK(ReadAll(store::In(t, WallpaperVideoPath(kIdB))) == mp4 && ReadAll(store::In(t, WallpaperAudioPath(kIdB))) == wav);
+    secure::RemoveTree(scratch);
+}
+
+// The bundled wallpaper's entry is install.exe's: nothing is committed under its id, and naming it
+// for removal leaves it where it is without failing the command.
+TEST(StoreLeavesTheBundledWallpaperAlone) {
+    const std::wstring scratch = ScratchDir();
+    PlainTarget t(scratch + L"\\data");
+    const std::wstring dir = ImportDir(scratch);
+    const std::vector<uint8_t> mp4 = Mp4();
+    WriteAll(dir + L"\\wallpaper.ini", VideoIni(false));
+    WriteAll(dir + L"\\video.mp4", mp4);
+    CHECK(store::CommitWallpaper(t, kBundledWallpaper, dir) == commit::kBadArgs);
+    CHECK(!Exists(store::In(t, WallpaperDir(kBundledWallpaper))));
+    // As install.exe leaves it.
+    const std::wstring bundled = store::In(t, WallpaperDir(kBundledWallpaper));
+    CHECK(t.MakeDirectory(t.Root()) == ERROR_SUCCESS && t.MakeDirectory(store::In(t, WallpapersDir())) == ERROR_SUCCESS);
+    CHECK(t.MakeDirectory(bundled) == ERROR_SUCCESS);
+    CHECK(t.WriteBytes(bundled + L"\\video.mp4", mp4.data(), mp4.size()) == ERROR_SUCCESS);
+    CHECK(store::RemoveWallpaper(t, kBundledWallpaper) == commit::kOk);
+    CHECK(ReadAll(bundled + L"\\video.mp4") == mp4);
+    for (int i = 0; i < 1000; ++i) CHECK(NewWallpaperId() != kBundledWallpaper);
     secure::RemoveTree(scratch);
 }
 
@@ -622,6 +645,14 @@ TEST(ImportPictureStagesATheme) {
     WriteAll(longSource, png);
     const std::wstring dir2 = ImportDir(scratch);
     CHECK(staging::Media(longSource, dir2, cancel, nullptr).name == std::wstring(40, L'a'));
+    // A name given with the file (a Wallpaper Engine title) is the theme's, cut and on one line
+    // as a file's would be.
+    const std::wstring dir3 = ImportDir(scratch);
+    const staging::Result named = staging::Media(source, dir3, cancel, nullptr, L"【4K60】阿罗娜\n& 普拉娜");
+    CHECK(named.ok && named.name == L"【4K60】阿罗娜 & 普拉娜");
+    CHECK(theme::Parse(Text(ReadAll(dir3 + L"\\theme.xml")), theme::Form::Package, &th, nullptr) && th.name == named.name);
+    CHECK(staging::Media(source, ImportDir(scratch), cancel, nullptr, std::wstring(50, L'b')).name == std::wstring(40, L'b'));
+    CHECK(staging::Wallpaper(source, ImportDir(scratch), cancel, nullptr, L"Harbour").name == L"Harbour");
     // Not a picture, by its extension and by its bytes.
     WriteAll(scratch + L"\\notes.png", std::string("hello"));
     const staging::Result bad = staging::Media(scratch + L"\\notes.png", ImportDir(scratch), cancel, nullptr);
@@ -740,6 +771,33 @@ TEST(ImportPackageChecksAndStages) {
     secure::RemoveTree(scratch);
 }
 
+// While the importer does not take scenes, an .alscene file and a theme package whose wallpaper
+// is a scene are both turned away with a message naming scenes, and nothing is staged.
+TEST(ImportTurnsAwayScenesWhileTheyAreNotTaken) {
+    if constexpr (!staging::kTakesScenes) {
+        const std::wstring scratch = ScratchDir();
+        std::atomic<bool> cancel{false};
+        std::vector<uint8_t> scene;
+        CHECK(package::WriteToMemory(
+            {{"scene.xml", L"", Bytes("<scene format=\"1\" name=\"Sky\"><base shader=\"sky.hlsl\"/></scene>")},
+             {"sky.hlsl", L"", Bytes("float4 main(float2 uv : TEXCOORD0) : SV_Target { return float4(uv, 1, 1); }")}},
+            &scene, nullptr));
+        const std::wstring alscene = scratch + L"\\sky.alscene";
+        CHECK(WriteAll(alscene, scene));
+        const std::wstring dir = ImportDir(scratch);
+        const staging::Result s = staging::Scene(alscene, dir, cancel, nullptr);
+        CHECK(!s.ok && s.error.find(L"场景") != std::wstring::npos && CountEntries(dir) == 0);
+
+        const std::wstring altheme = scratch + L"\\sky.altheme";
+        CHECK(WriteAll(altheme, Package(PackageTheme(L"wallpaper.alscene", {{L"clock", L"clock"}}),
+                                        {{"wallpaper.alscene", L"", scene}})));
+        const std::wstring dir2 = ImportDir(scratch);
+        const staging::Result p = staging::Package(altheme, dir2, cancel, nullptr);
+        CHECK(!p.ok && p.error.find(L"场景") != std::wstring::npos && CountEntries(dir2) == 0);
+        secure::RemoveTree(scratch);
+    }
+}
+
 // --- the exporter -------------------------------------------------------------------------------
 
 TEST(ExportBakesOverridesAndIsDeterministic) {
@@ -793,8 +851,12 @@ TEST(ExportBakesOverridesAndIsDeterministic) {
     CHECK(store::CommitPackage(t, dir, &back2) == commit::kOk);
     CHECK(back2.wallpaperReused && back2.wallpaperId == r.wallpaperId && back2.componentsReused.size() == 2);
 
-    // The built-in theme packs no files.
-    CHECK(exporter::Build(L"default", Settings{}, disk, scratch, &items, &error) && items.size() == 1 && items[0].name == "theme.xml");
+    // The built-in theme on the built-in wallpaper packs no files.
+    Settings plain;
+    plain.themeOverrides[L"default"].wallpaper = L"default";
+    CHECK(exporter::Build(L"default", plain, disk, scratch, &items, &error) && items.size() == 1 && items[0].name == "theme.xml");
+    // As it comes it names the bundled wallpaper, which these stores do not have.
+    CHECK(!exporter::Build(L"default", Settings{}, disk, scratch, &items, &error) && !error.empty());
     // A theme whose wallpaper is gone says so.
     s.themeOverrides[r.themeId].wallpaper = L"5555555555555555";
     CHECK(!exporter::Build(r.themeId, s, disk, scratch, &items, &error) && !error.empty());
@@ -880,4 +942,56 @@ TEST(CommitSceneRechecksEveryAssetAndWritesXmlAfresh) {
     CHECK(WriteAll(wallpaper+L"\\still.bmp",std::string("BMbad")));
     CHECK(store::CommitPackage(target,dir) == commit::kFailed);
     secure::RemoveTree(root);
+}
+// A settings window started with --sandbox keeps to a copy of the data: its paths are the
+// sandbox's, its files count as trusted, its store commands run there without elevation, and
+// switching AnimeLogon on or off is refused rather than done to the machine.
+TEST(SandboxKeepsTheWindowToItsOwnCopy) {
+    const std::wstring scratch = ScratchDir(), box = scratch + L"\\box";
+    paths::UseSandbox(box + L"\\");
+    CHECK(paths::DataDir() == box + L"\\ProgramData\\AnimeLogon");
+    CHECK(paths::UserDataDir() == box + L"\\LocalAppData\\AnimeLogon");
+    const std::wstring theme = paths::DataDir() + L"\\themes\\0123456789abcdef";
+    CHECK(paths::CreateDirectories(theme));
+    CHECK(WriteAll(theme + L"\\theme.xml", "<theme/>", 8));
+    std::wstring why;
+    CHECK(secure::IsTrustedDirectory(theme, &why));
+    CHECK(secure::IsTrusted(theme + L"\\theme.xml", &why));
+    CHECK(!secure::IsTrusted(theme + L"\\missing.xml", &why));
+    CHECK(commit::RunElevated(nullptr, L"--switch-off") == commit::kFailed);
+    CHECK(commit::RunElevated(nullptr, L"--remove-theme 0123456789abcdef") == commit::kOk);
+    CHECK(GetFileAttributesW(theme.c_str()) == INVALID_FILE_ATTRIBUTES);
+    paths::UseSandbox(L"");
+    CHECK(paths::DataDir() != box + L"\\ProgramData\\AnimeLogon");
+    secure::RemoveTree(scratch);
+}
+
+// Where the profile or AppData was moved with mklink /J, %LOCALAPPDATA% leads through a junction.
+// The elevated side refuses staged files reached through one, so a new import directory is named
+// by the path it really has, and what is staged there is taken.
+TEST(ImportDirIsNamedByItsRealPath) {
+    const std::wstring scratch = ScratchDir(), real = scratch + L"\\real", moved = scratch + L"\\moved";
+    CHECK(CreateDirectoryW(real.c_str(), nullptr) && MakeJunction(moved, real));
+    paths::UseSandbox(moved + L"\\");
+    const std::wstring dir = staging::NewImportDir();
+    const std::wstring through = moved + L"\\LocalAppData\\AnimeLogon\\import\\" + RandomHex(6);
+    paths::UseSandbox(L"");
+    CHECK(!dir.empty() && dir.find(L"\\moved\\") == std::wstring::npos && dir.find(L"\\real\\") != std::wstring::npos);
+    CHECK(store::IsImportDir(dir));
+
+    const image::Picture p = Pixels(16, 12, 3);
+    std::vector<uint8_t> png;
+    CHECK(image::EncodePng(p.width, p.height, p.bgra.data(), p.bgra.size(), &png, nullptr));
+    const std::wstring source = scratch + L"\\Harbour.png";
+    WriteAll(source, png);
+    std::atomic<bool> cancel{false};
+    PlainTarget t(scratch + L"\\data");
+    CHECK(staging::Media(source, dir, cancel, nullptr).ok);
+    CHECK(store::CommitPackage(t, dir) == commit::kOk);
+    // What NewImportDir returned before: the same place, named through the junction.
+    CHECK(paths::CreateDirectories(through));
+    CHECK(staging::Media(source, through, cancel, nullptr).ok);
+    CHECK(store::CommitPackage(t, through) != commit::kOk);
+    RemoveDirectoryW(moved.c_str());
+    secure::RemoveTree(scratch);
 }

@@ -3,11 +3,12 @@
 // here change it.
 import { useSyncExternalStore } from 'react';
 import { onCalmChange } from './motion';
+import { list, setLang, t, type Key } from './i18n';
 import { listen, send } from './native';
 import { onPreview, pv, requestPreviewAgain, resetPreview } from './preview';
-import type { Environment, FromNative, Instance, Library, OpenTheme, SceneControls } from './types';
+import type { Environment, FromNative, ImportKind, Instance, Library, Monitor, OpenTheme, SceneControls, Workshop } from './types';
 
-export type Tab = 'mine' | 'settings';
+export type Tab = 'mine' | 'discover' | 'settings';
 
 export interface Selection {
   inst: string | null;  // an instance id, or 'wallpaper' for a scene's layers
@@ -22,6 +23,9 @@ export type Dialog = { id: number } & (
   | { kind: 'newTheme' }
   | { kind: 'wallpaper' }
   | { kind: 'addComponent' }
+  | { kind: 'copyComponents' }  // the open theme's components, to other themes
+  | { kind: 'workshop'; wallpaper: boolean }  // with `wallpaper`, one, for the open theme
+  | { kind: 'import'; from?: number }  // what to import; `from` is the dialog it was opened from
 );
 
 export interface State {
@@ -39,10 +43,17 @@ export interface State {
   tick: number;                     // the minute, so pictures with a clock are fetched again
   dialogs: Dialog[];
   lock: { theme: string; ratio?: number } | null;
+  workshop: Workshop | null;        // Wallpaper Engine's wallpapers, as last looked for
+  // A setting to point out, because the icon in the system tray opened the app at it. A new object
+  // each time it is asked for; the settings page clears it once it has.
+  reveal: { what: 'switch' } | null;
+  // The setup wizard fills the window: from when the native side says setup is pending until the
+  // person, AnimeLogon switched on, goes on to the library from its last page.
+  setup: boolean;
 }
 
 let state: State = {
-  env: { on: false, installed: false, monitors: [], fonts: [], devices: [] },
+  env: { on: false, installed: false, setupPending: false, others: [], version: '', user: '', accountPicture: false, lang: '', langChoice: '', wallpaperEngine: false, steam: false, importable: { video: [], picture: [], package: [] }, monitors: [], fonts: [], devices: [] },
   lib: null,
   open: null,
   clock: '',
@@ -56,6 +67,9 @@ let state: State = {
   tick: 0,
   dialogs: [],
   lock: null,
+  workshop: null,
+  reveal: null,
+  setup: false,
 };
 const listeners = new Set<() => void>();
 
@@ -93,9 +107,34 @@ export function closeDialog(id: number) {
 export const themeOf = (id: string) => state.lib?.themes.find(t => t.id === id);
 export const perMonitor = () => state.lib?.settings.monitorMode === 'per-monitor';
 export const spanning = () => state.lib?.settings.monitorMode === 'span' && state.env.monitors.length > 1;
-export function mainMonitor() {
+export function mainMonitor(): Monitor {
   const ms = state.env.monitors;
-  return ms.find(m => m.primary) || ms[0] || { key: '', name: '显示器', model: '', left: 0, top: 0, width: 16, height: 9, primary: true };
+  return ms.find(m => m.primary) || ms[0] || { key: '', name: t('monitor.name', { n: 1 }), model: '', place: 'main', left: 0, top: 0, width: 16, height: 9, primary: true };
+}
+// Where a display is beside the main one: the main display, right of the main display…
+export const placeOf = (m: Monitor) => t(`monitor.place.${m.place}` as Key);
+// A display's name, with where it is when another display has the same name.
+export function displayName(m: Monitor) {
+  return state.env.monitors.some(o => o.key !== m.key && o.name === m.name) ? t('monitor.with_place', { name: m.name, place: placeOf(m) }) : m.name;
+}
+// A slice of the wall of displays, in fractions of its width and height.
+export interface Slice {
+  key: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  primary: boolean;
+}
+// Spanning: where each display is on the wall, as the pictures of it place them, in the displays'
+// order (the main one first). Empty when not spanning.
+export function wallSlices(): Slice[] {
+  if (!spanning()) return [];
+  const ms = state.env.monitors;
+  const left = Math.min(...ms.map(m => m.left)), top = Math.min(...ms.map(m => m.top));
+  const width = Math.max(...ms.map(m => m.left + m.width)) - left, height = Math.max(...ms.map(m => m.top + m.height)) - top;
+  const main = mainMonitor();
+  return ms.map(m => ({ key: m.key, x: (m.left - left) / width, y: (m.top - top) / height, w: m.width / width, h: m.height / height, primary: m.key === main.key }));
 }
 export function screenTheme(key: string) {
   const id = state.lib?.settings.screens[key];
@@ -114,12 +153,14 @@ export function shapeOf(id: string) {
 }
 export function usedOn(id: string): string[] {
   if (!state.lib) return [];
-  if (!perMonitor()) return state.lib.current === id ? ['使用中'] : [];
+  if (!perMonitor()) return state.lib.current === id ? [t('theme.in_use')] : [];
   const ms = state.env.monitors.filter(m => screenTheme(m.key) === id);
-  return ms.length && ms.length === state.env.monitors.length ? ['所有屏幕'] : ms.map(m => m.name);
+  return ms.length && ms.length === state.env.monitors.length ? [t('monitor.all')] : ms.map(displayName);
 }
-export const kindName = (k: string) =>
-  ({ scene: '场景', video: '视频', image: '图片', builtin: '内置背景', none: '无壁纸', missing: '壁纸缺失' } as Record<string, string>)[k] || '';
+const KINDS: Record<string, Parameters<typeof t>[0]> = {
+  scene: 'kind.scene', video: 'kind.video', image: 'kind.image', builtin: 'kind.builtin', none: 'kind.none', missing: 'kind.missing',
+};
+export const kindName = (k: string) => (KINDS[k] ? t(KINDS[k]) : '');
 export function ratioLabel(w: number, h: number) {
   const known = [[16, 9], [16, 10], [21, 9], [32, 9], [4, 3], [3, 2]], r = w / h;
   const best = known.reduce((a, b) => (Math.abs(b[0] / b[1] - r) < Math.abs(a[0] / a[1] - r) ? b : a));
@@ -139,21 +180,39 @@ export const multiPanel = (id: string | null) => {
 export const panelKey = (sel: Selection) => (sel.part ? sel.part.split('.')[0] : 'p1');
 
 /* --- navigation --- */
+// A theme's page sits under the library's: the library's tab stays chosen while it is open.
 export function openTheme(id: string) {
   resetPreview();
-  setState({ view: 'theme', sel: { inst: null, part: null } });
+  setState({ view: 'theme', tab: 'mine', sel: { inst: null, part: null } });
   send('open', { theme: id, seq: ++pv.seq });
 }
-export function leaveTheme(tab: Tab = 'mine') {
+// Back to the list of themes, closing the open one.
+export function leaveTheme() {
   send('close');
-  setState({ view: 'library', tab, sel: { inst: null, part: null } });
+  setState({ view: 'library', tab: 'mine', sel: { inst: null, part: null }, hover: null });
 }
+// The pages of the app bar. A theme open under the library stays open while the settings are
+// shown, so coming back finds it as it was, selection and undo included. Choosing the library
+// again while on a theme's page goes back to the list, as Windows' settings do.
 export function setTab(tab: Tab) {
-  if (state.view === 'theme') send('close');
-  setState({ view: 'library', tab, sel: { inst: null, part: null } });
+  if (tab === 'mine' && state.tab === 'mine' && state.view === 'theme') return leaveTheme();
+  setState({ tab, hover: null });
 }
 export function select(inst: string | null, part: string | null = null) {
   setState({ sel: { inst, part } });
+}
+// Back, as a window's back button, Alt+Left or the mouse's back button go: up one level of where one
+// is (a part to its component, a component to the theme's list), out of a theme's page to the
+// library, and from the settings or the discover page back to the page left for them. Nothing while a dialog or the
+// lock-screen preview is over the page: Esc closes those.
+export function goBack() {
+  if (state.dialogs.length || state.lock || state.setup) return;
+  if (state.tab === 'settings' || state.tab === 'discover') return setTab('mine');
+  if (state.view !== 'theme') return;
+  const { inst, part } = state.sel;
+  if (part) return select(inst === 'wallpaper' ? null : inst, null);
+  if (inst) return select(null);
+  leaveTheme();
 }
 
 /* --- library actions --- */
@@ -163,19 +222,19 @@ export function applyFlow(id: string) {
   else openDialog({ kind: 'monitor', theme: id });
 }
 export function copyFlow(id: string) {
-  const t = themeOf(id);
-  if (t) openDialog({ kind: 'name', title: '复制主题', value: `${t.name} 副本`, action: '创建副本', run: name => send('copy', { theme: id, name }) });
+  const th = themeOf(id);
+  if (th) openDialog({ kind: 'name', title: t('dialog.copy.title'), value: t('theme.copy_name', { name: th.name }), action: t('dialog.copy.action'), run: name => send('copy', { theme: id, name }) });
 }
 export function renameFlow(id: string) {
-  const t = themeOf(id);
-  if (t) openDialog({ kind: 'name', title: '重命名主题', value: t.name, action: '重命名', run: name => send('rename', { theme: id, name }) });
+  const th = themeOf(id);
+  if (th) openDialog({ kind: 'name', title: t('dialog.rename.title'), value: th.name, action: t('dialog.rename.action'), run: name => send('rename', { theme: id, name }) });
 }
 export function resetFlow(id: string) {
-  const t = themeOf(id);
-  if (!t) return;
+  const th = themeOf(id);
+  if (!th) return;
   openDialog({
-    kind: 'confirm', title: '恢复默认', action: '恢复默认',
-    body: [`清除对「${t.name}」的 ${t.modifications} 项修改，包括换过的壁纸和添加的组件。`],
+    kind: 'confirm', title: t('dialog.reset.title'), action: t('dialog.reset.action'),
+    body: [t('dialog.reset.body', { name: th.name })],
     run: () => {
       if (state.open?.id === id) send('reset', { seq: ++pv.seq });
       else { send('open', { theme: id }); send('reset'); send('close'); }
@@ -183,11 +242,11 @@ export function resetFlow(id: string) {
   });
 }
 export function deleteFlow(id: string) {
-  const t = themeOf(id);
-  if (!t) return;
+  const th = themeOf(id);
+  if (!th) return;
   openDialog({
-    kind: 'confirm', title: `删除「${t.name}」`, action: '删除', elevated: true,
-    body: ['主题会从这台电脑上删除，只有它在用的壁纸和组件也一起删除。', ...(usedOn(id).length ? ['它正在使用，删除后锁屏改用「默认」主题。'] : [])],
+    kind: 'confirm', title: t('dialog.delete.title', { name: th.name }), action: t('dialog.delete.action'), elevated: true,
+    body: [t('dialog.delete.body'), ...(usedOn(id).length ? [t('dialog.delete.in_use')] : [])],
     run: () => {
       if (state.view === 'theme' && state.open?.id === id) setState({ view: 'library' });
       send('remove', { theme: id });
@@ -195,13 +254,59 @@ export function deleteFlow(id: string) {
   });
 }
 export const global = (key: string, value: string | number | boolean) => send('global', { key, value: String(value) });
+// The language the app is shown in; empty to follow Windows. The native side stores it and says
+// everything again in it.
+export const setLanguage = (tag: string) => send('language', { tag });
+// The project's pages and the licences, by name (app/src/host.cpp opens them).
+export const openLink = (to: 'home' | 'issues' | 'releases' | 'license' | 'notices') => send('link', { to });
+// Wallpaper Engine's video wallpapers, looked for afresh each time they are shown: as new themes,
+// or with `wallpaper` one as the open theme's wallpaper.
+export function workshopFlow(wallpaper: boolean) {
+  send('workshop');
+  openDialog({ kind: 'workshop', wallpaper });
+}
+// Bringing something in as a new theme: first what it is, then the file dialog for that kind
+// (app/src/importable.h) or Wallpaper Engine's wallpapers. Opened from another dialog, that one
+// stays under it until a kind is chosen, so Cancel goes back to it.
+export const importFlow = (from?: number) => openDialog({ kind: 'import', from });
+// The kind chosen: the dialog it was asked from closes, and the file dialog or Wallpaper Engine's
+// wallpapers follow.
+export function importKind(kind: ImportKind | 'workshop', from?: number) {
+  if (from !== undefined) closeDialog(from);
+  if (kind === 'workshop') workshopFlow(false);
+  else send('import', { kind });
+}
+
+/* --- the switch --- */
+// The other programs drawing the logon screen that are on now, by name.
+export const othersOn = () => state.env.others.filter(o => o.on).map(o => o.name);
+// Switching on switches the others off, so that is asked first.
+export function switchOn() {
+  const names = list(othersOn());
+  if (!names) return send('switch', { on: true });
+  openDialog({
+    kind: 'confirm', title: t('settings.enable'), action: t('library.turn_on'), elevated: true,
+    body: [t('dialog.switch_on.body', { names }), t('dialog.switch_on.detail', { names })],
+    run: () => send('switch', { on: true }),
+  });
+}
 
 /* --- what the native side says --- */
 function receive(m: FromNative) {
   switch (m.type) {
     case 'environment': {
       const { type: _type, ...env } = m;
-      setState({ env });
+      // The language first, so that everything drawn for this environment is in it. The pictures
+      // are drawn again too: what a component shows when nothing is there (a sample song) is in it.
+      const relanguaged = !!state.env.lang && env.lang !== state.env.lang;
+      // A display plugged in or taken away, moved or resized while the window is open: every picture
+      // is shaped by the displays, so all of them are fetched again.
+      const redisplayed = !!state.env.lang && JSON.stringify(env.monitors) !== JSON.stringify(state.env.monitors);
+      setLang(env.lang);
+      // Once shown, the wizard stays until it is left from its last page, which needs AnimeLogon on.
+      const setup = state.setup || env.setupPending;
+      setState(relanguaged || redisplayed ? { env, setup, tick: state.tick + 1 } : { env, setup });
+      if ((relanguaged || redisplayed) && state.view === 'theme' && state.open) requestPreviewAgain();
       break;
     }
     case 'state': {
@@ -218,7 +323,32 @@ function receive(m: FromNative) {
     case 'problem': openDialog({ kind: 'problem', text: m.text }); break;
     case 'busy': setState({ busy: m.label ? { label: m.label, percent: m.percent ?? 0 } : null }); break;
     case 'added': setState({ sel: { inst: m.instance, part: null } }); break;
-    case 'navigate': resetPreview(); setState({ view: 'theme', sel: { inst: null, part: null } }); break;
+    case 'navigate': resetPreview(); setState({ view: 'theme', tab: 'mine', sel: { inst: null, part: null } }); break;
+    case 'show': show(m.what); break;
+    case 'workshop': {
+      const { type: _type, ...found } = m;
+      setState({ workshop: found });
+      break;
+    }
+  }
+}
+
+// The icon in the system tray asked for something that needs this window (app/src/tray.h): the
+// switch that turns AnimeLogon on and off, which needs an administrator, pointed out on the
+// settings page; or the lock-screen preview of what the main display shows. Or a theme package was
+// opened (a double click on an .altheme file), which is imported as from the library: the library.
+// While the setup wizard is up, the window coming forward is all: switching on is what it is for.
+function show(what: 'switch' | 'lock' | 'library') {
+  if (state.setup) return;
+  if (what === 'library') {
+    // A theme left open under the settings is closed too, or the library's tab would show its page.
+    if (state.view === 'theme') leaveTheme();
+    setState({ tab: 'mine', lock: null, hover: null });
+  } else if (what === 'switch') {
+    setState({ tab: 'settings', lock: null, hover: null, reveal: { what } });
+  } else if (what === 'lock' && state.lib) {
+    const theme = state.lib.settings.monitorMode === 'per-monitor' ? screenTheme(mainMonitor().key) : state.lib.current;
+    if (theme) setState({ lock: { theme } });
   }
 }
 listen(receive);

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A theme package folder: AnimeLogon's built-in wallpaper, the built-in clock moved to the bottom
+     left, a component of the package's own, and the built-in now playing, hidden until the user
+     shows it. Pack it with: component_check --pack theme Evening.altheme -->
+<theme format="1" name="Evening" author="AnimeLogon">
+  <wallpaper ref="default" fit="fill" brightness="0.8"/>
+  <wake style="slide" duration="0.6"/>
+  <component id="clock" ref="clock">
+    <set key="position" value="bottom-left"/>
+    <set key="size" value="14"/>
+    <set key="p1.l1.t1.weight" value="300"/>
+  </component>
+  <component id="day" ref="components/weekday.xml">
+    <set key="color" value="#FFE7C2"/>
+  </component>
+  <component id="music" ref="media" visible="false"/>
+</theme>

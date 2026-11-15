@@ -157,7 +157,8 @@ TEST(ThemeRefusesBadSets) {
     CHECK(!set("<set key=\"color\" value=\"#FFFFFF\" extra=\"1\"/>"));
     CHECK(!set("<set key=\"color\" value=\"#FFFFFF\"><set key=\"a\" value=\"b\"/></set>"));
     CHECK(!set("<value key=\"color\" value=\"#FFFFFF\"/>"));
-    for (const char *key : {"ref", "visible", "Color", "a b", "p1.l1.t1.value", "p1.l1.t1.hang", "p0.size", "p1.q1.size", ""})
+    CHECK(set("<set key=\"p1.l1.t2.hang\" value=\"false\"/>"));
+    for (const char *key : {"ref", "visible", "Color", "a b", "p1.l1.t1.value", "p1.l1.t1.label", "p0.size", "p1.q1.size", ""})
         CHECK(!set("<set key=\"" + std::string(key) + "\" value=\"1\"/>"));
     CHECK(!set("<set key=\"color\" value=\"a&#9;b\"/>"));
     CHECK(set("<set key=\"color\" value=\"" + std::string(128, 'x') + "\"/>"));
@@ -264,6 +265,7 @@ TEST(ThemePackageForm) {
 
     // A theme on a built-in wallpaper packs without a wallpaper file.
     theme::Theme plain = theme::Default();
+    plain.wallpaper = L"default";
     CHECK(theme::ToPackage(&plain, L"", {}, &error) && plain.wallpaper == L"default");
     CHECK(theme::PackageFiles(plain).empty());
 }
@@ -309,13 +311,21 @@ TEST(ThemeEditedByOverrides) {
 
 TEST(ThemeDefaultIsBuiltIn) {
     const theme::Theme &d = theme::Default();
-    CHECK(!d.name.empty() && d.wallpaper == L"default" && d.fit == Scaling::Fill);
+    // The bundled wallpaper install.exe writes, and the clock.
+    CHECK(!d.name.empty() && d.wallpaper == kBundledWallpaper && d.fit == Scaling::Fill);
+    CHECK(IsWallpaperId(kBundledWallpaper) && IsWallpaperRef(kBundledWallpaper));
     CHECK(d.components.size() == 1 && d.components[0].id == L"clock" && d.components[0].ref == L"clock");
-    CHECK(d.components[0].visible && d.components[0].sets.empty());
+    // On its light wallpaper the clock's shade is off and a soft indigo shadow lifts the strokes.
+    CHECK(d.components[0].visible && d.components[0].sets.size() == 5);
+    CHECK(d.components[0].sets.count(L"shade") && d.components[0].sets.at(L"shade") == L"off");
+    CHECK(d.components[0].sets.count(L"p1.s1.opacity") && d.components[0].sets.at(L"p1.s1.opacity") == L"0.5");
+    CHECK(d.components[0].sets.count(L"p1.s1.color") && d.components[0].sets.at(L"p1.s1.color") == L"#34285F");
     std::wstring error;
     theme::Theme parsed;
     CHECK(theme::Parse(theme::DefaultText(), theme::Form::Installed, &parsed, &error) && error.empty());
-    CHECK(theme::Parse(theme::DefaultText(), theme::Form::Package, &parsed, &error));
+    // Exported, the bundled wallpaper travels as the package's video like any other.
+    theme::Theme packed = d;
+    CHECK(theme::ToPackage(&packed, L"wallpaper.mp4", {}, &error) && packed.wallpaper == L"wallpaper.mp4");
     theme::Theme loaded;
     CHECK(LoadTheme(L"default", &loaded) && theme::Normalize(loaded) == theme::Normalize(d));
     CHECK(!LoadTheme(L"../x", &loaded) && !LoadTheme(L"Default", &loaded));

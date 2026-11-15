@@ -1,0 +1,36 @@
+/* The page itself, and the type every page shares. */
+*, *::before, *::after { box-sizing: border-box; }
+html, body, #app { height: 100%; }
+body {
+  margin: 0;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text-1);
+  font: 400 14px/22px var(--font);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+button, input, select, textarea { font: inherit; color: inherit; }
+input, textarea, .selectable { user-select: text; }
+h1, h2, h3, p, dl, dd, figure { margin: 0; }
+svg { display: block; flex: none; }
+img { display: block; }
+
+/* Scroll bars as thin as Windows 11's, with no track of their own. */
+* { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+
+/* One focus mark for everything the keyboard reaches. */
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+:focus:not(:focus-visible) { outline: none; }
+
+/* type */
+.t-title { font: 600 22px/30px var(--font); }
+.t-h { font: 600 16px/24px var(--font); }
+.t-group { font: 600 13px/20px var(--font); color: var(--text-2); }
+.t-cap { font-size: 12px; line-height: 18px; color: var(--text-2); }
+.t-cap3 { font-size: 12px; line-height: 18px; color: var(--text-3); }
+.num { font-variant-numeric: tabular-nums; }
+.ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+
+/* Something on the page failed to draw. */
+.fallback { padding: var(--s8); display: flex; flex-direction: column; align-items: flex-start; gap: var(--s3); }

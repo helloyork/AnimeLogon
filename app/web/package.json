@@ -2,11 +2,11 @@
   "name": "animelogon-settings-page",
   "private": true,
   "description": "The settings app's page: React with Fluent UI, bundled into app.js and built into animelogon.exe.",
-  "license": "MIT",
+  "license": "MPL-2.0",
   "type": "module",
   "scripts": {
     "build": "node build.mjs",
-    "check": "tsc --noEmit -p ."
+    "check": "tsc --noEmit -p . && node ../../tools/i18n/check.mjs"
   },
   "dependencies": {
     "@fluentui/react-components": "9.74.9",

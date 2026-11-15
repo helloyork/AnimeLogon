@@ -20,6 +20,7 @@ export const pv = {
   bounds: [] as Bound[],
   screens: [] as ScreenRect[],
   layer: false,     // the picture is the components alone, over a video or scene playing in the page
+  spectra: [] as string[],  // panels left out of it ("instance.p1"), which the page draws moving (SpectrumFrames)
   asked: '',        // the size last asked for
   waiting: false,
   pending: null as Pending | null,
@@ -61,13 +62,13 @@ export function requestPreviewAgain() {
 export function resetPreview() {
   clearTimeout(fitTimer);
   if (pv.url) URL.revokeObjectURL(pv.url);
-  Object.assign(pv, { asked: '', width: 0, height: 0, bounds: [], screens: [], layer: false, url: '', previous: '', wallpaper: '', pending: null, waiting: false, commit: false });
+  Object.assign(pv, { asked: '', width: 0, height: 0, bounds: [], screens: [], layer: false, spectra: [], url: '', previous: '', wallpaper: '', pending: null, waiting: false, commit: false });
   dropLift();
   notify();
 }
 
-export function onPreview(m: { rev: number; seq: number; width: number; height: number; layer: boolean; bounds: Bound[]; screens: ScreenRect[] }) {
-  Object.assign(pv, { rev: m.rev, width: m.width, height: m.height, bounds: m.bounds || [], screens: m.screens || [], layer: !!m.layer, waiting: false });
+export function onPreview(m: { rev: number; seq: number; width: number; height: number; layer: boolean; bounds: Bound[]; screens: ScreenRect[]; spectra?: string[] }) {
+  Object.assign(pv, { rev: m.rev, width: m.width, height: m.height, bounds: m.bounds || [], screens: m.screens || [], layer: !!m.layer, spectra: m.spectra || [], waiting: false });
   notify();
   show(m.rev, m.seq, !!m.layer);
   if (pv.pending) pump();

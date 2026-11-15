@@ -6,6 +6,11 @@
 //
 // "default" is the built-in wallpaper: the gradient the installer uses as the sign-in
 // background. It has no files; the overlay draws it itself.
+//
+// kBundledWallpaper is the wallpaper AnimeLogon comes with: a video install.exe carries and
+// writes into wallpapers\ itself. It is the default theme's wallpaper and otherwise an ordinary
+// entry, loaded and trusted like any other; while it is missing, the default theme shows the
+// built-in "default" in its place.
 #pragma once
 
 #include <cstdint>
@@ -47,6 +52,9 @@ struct WallpaperInfo {
 
 constexpr const wchar_t *kDefaultWallpaper = L"default";
 constexpr const wchar_t *kNoWallpaper = L"none";
+// The bundled wallpaper's id. NewWallpaperId never returns it, and the settings app's elevated
+// helper neither writes nor removes it: install.exe owns that entry.
+constexpr const wchar_t *kBundledWallpaper = L"0000000000000001";
 // The longest side an image wallpaper may have; larger images are scaled down on import.
 constexpr int kMaxImageSide = 7680;
 
@@ -82,5 +90,10 @@ bool LoadWallpaper(const std::wstring &id, WallpaperInfo *info, std::wstring *wh
 
 // The built-in wallpaper first, then the entries of wallpapers\ that load, oldest first.
 std::vector<WallpaperInfo> ListWallpapers();
+
+// wallpaper.ini of the bundled wallpaper, as install.exe writes it, given the SHA-256 of the video
+// it carries (res/wallpapers/soft-hills.mp4). The size, frame rate and duration are that file's;
+// a test reads them back from it.
+WallpaperInfo BundledWallpaperInfo(const std::wstring &sha256);
 
 }  // namespace animelogon

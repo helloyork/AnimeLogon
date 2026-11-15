@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="#0078D4">
+  <!-- The AnimeLogon mark: a rounded square cut into four comic panels by tilted gutters, with the
+       bottom-right panel left open. Each panel is a polygon whose corners are rounded by a round-joined
+       stroke of the same colour; the page is clipped to the rounded square. animelogon.ico holds this
+       drawing for 40 px and up, and redraws with thicker strokes (and, at 16 and 20 px, straight
+       pixel-aligned gutters) for the smaller sizes. -->
+  <defs>
+    <clipPath id="page"><rect x="24" y="24" width="208" height="208" rx="60"/></clipPath>
+    <clipPath id="rim"><rect x="37" y="37" width="182" height="182" rx="47"/></clipPath>
+    <mask id="open">
+      <rect width="256" height="256" fill="#fff"/>
+      <path clip-path="url(#rim)" d="M216 121.9L216 216H135.4L127.7 130.1z" fill="#000"
+            stroke="#000" stroke-width="6" stroke-linejoin="round"/>
+    </mask>
+  </defs>
+  <g clip-path="url(#page)" mask="url(#open)" stroke="#0078D4" stroke-width="32" stroke-linejoin="round">
+    <path d="M40 40H135.4L129.3 81.8L40 90.1z"/>
+    <path d="M183.9 40H216V73.6L178.5 77.2z"/>
+    <path d="M87.2 216H40V138.4L79.9 134.6z"/>
+    <path d="M216 121.9V216H135.4L127.7 130.1z"/>
+  </g>
+</svg>

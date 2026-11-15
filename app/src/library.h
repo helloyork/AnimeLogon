@@ -69,8 +69,11 @@ public:
 
     // --- the library -----------------------------------------------------------------------
     // Puts theme `id` on the logon screen. In per-monitor mode, `monitor` names one display,
-    // or is "all"; otherwise it is ignored.
+    // or is "all"; otherwise it is ignored. The theme becomes the first of the recent ones.
     bool Apply(const std::wstring &id, const std::wstring &monitor);
+    // What the icon in the notification area offers: the installed themes among the recent ones,
+    // at most `count`, those on the logon screen first and always; otherwise newest first.
+    std::vector<std::wstring> Recent(size_t count) const;
     // After a theme is removed: drops its overrides and whatever pointed at it.
     void Forget(const std::wstring &id);
     // After a theme is installed again under a new id: its overrides and references follow it.
@@ -96,8 +99,22 @@ public:
     std::wstring AddInstance(const std::wstring &component);
     // Only instances that were added can be removed; the theme's own can be hidden.
     bool RemoveInstance(const std::wstring &instance);
+    // Gives each theme of `targets` the open theme's components as they are now: the same
+    // components, shown or hidden alike, with the same values. A target keeps its wallpaper, its fit,
+    // its brightness and blur and its wake transition; the components and adjustments it had are replaced. The targets do
+    // not follow later edits, and this is no step to undo on the open theme's page. Returns how
+    // many themes changed, or -1, changing nothing, when settings.ini would grow past
+    // kMaxSettingsBytes.
+    int CopyComponents(const std::vector<std::wstring> &targets);
     bool SetWallpaper(const std::wstring &ref);
     bool SetFit(animelogon::Scaling fit);
+    // How the open theme gives way to the sign-in screen when woken, and over how long.
+    bool SetWake(animelogon::WakeStyle style);
+    bool SetWakeSeconds(float seconds, int gesture);
+    // How bright the open theme's wallpaper is drawn, kBrightnessMin to 1.
+    bool SetBrightness(float brightness, int gesture);
+    // How much the open theme's wallpaper is blurred, 0 to kBlurMax (a percentage of the height).
+    bool SetBlur(float blur, int gesture);
     bool Reset();
     bool Undo();
     bool Redo();
@@ -116,9 +133,14 @@ public:
 
 private:
     animelogon::ThemeOverrides &Overrides();  // the open theme's
+    void Used(const std::wstring &id);        // first among the recent themes
+    std::vector<std::wstring> InUse() const;  // the themes the logon screen shows
     void Step(int gesture);
     void Tidy();
     void Touched(const std::wstring &id);
+    // The overrides that give theme `target` the instances `want`, keeping the rest of its own.
+    animelogon::ThemeOverrides ComponentsFor(const std::wstring &target,
+                                             const std::vector<animelogon::theme::Instance> &want) const;
     std::wstring InstanceLabel(const animelogon::theme::Theme &edited, const animelogon::theme::Instance &i) const;
     std::wstring WallpaperName(const std::wstring &ref) const;
     std::wstring WallpaperMeta(const std::wstring &ref) const;

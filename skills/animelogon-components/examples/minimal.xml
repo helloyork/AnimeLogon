@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The smallest useful component: the time at the top centre, 12% of the display's height. -->
+<component format="1" name="Minimal clock" author="AnimeLogon">
+  <panel anchor="top" size="12">
+    <line>
+      <text value="{time}" weight="semibold"/>
+    </line>
+    <shadow blur="0.08" opacity="0.3" y="0.02"/>
+  </panel>
+</component>

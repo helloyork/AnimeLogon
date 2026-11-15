@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The battery: its icon and charge, and while on battery the time left. On a PC without a battery
+     nothing is drawn, because the panel is shown only while there is a charge to show. -->
+<component format="1" name="Battery" author="AnimeLogon">
+  <settings>
+    <choice id="position" label="Position" default="top-right">
+      <option value="top-left" label="Top left"/>
+      <option value="top-right" label="Top right"/>
+    </choice>
+    <number id="size" label="Size" default="2.6" min="1.5" max="8" step="0.1"/>
+    <color id="color" label="Color" default="#FFFFFF"/>
+    <toggle id="remaining" label="Time left" detail="Shows the estimated time left while on battery." default="on" on="true" off="false"/>
+  </settings>
+  <panel anchor="$position" size="$size" margin="4.5" when="battery.percent">
+    <line>
+      <text label="Icon" value="{battery.glyph}" font="Segoe Fluent Icons" color="$color" size="1.2" rise="-0.24"/>
+      <text label="Charge" value="{battery.percent}%" weight="semibold" color="$color" space="0.32" figures="tabular"/>
+      <text label="Time left" value="{battery.remaining.long}" show="$remaining" when="battery.state=discharging" color="$color" opacity="0.85" size="0.72" space="0.5"/>
+      <text label="Status" value="{battery.status}" when="power.source=mains" color="$color" opacity="0.85" size="0.72" space="0.5"/>
+    </line>
+    <shadow blur="0.05" opacity="0.5" y="0.025"/>
+    <shadow blur="0.35" opacity="0.22" y="0.06"/>
+  </panel>
+</component>

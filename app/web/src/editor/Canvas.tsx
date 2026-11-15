@@ -5,12 +5,17 @@
 // A drag moves pixels at once: when the component was lifted out of the picture beforehand (on
 // hover or selection, see preview.ts), the stage shows the picture without it and moves the
 // component's own layer under the pointer; the native side draws the exact result when the drag
-// ends. Without a lift (scene layers; a component drawn on several displays of a wall) the
-// picture is redrawn live as before.
+// ends. Without a lift (scene layers; a component drawn on several displays of a wall; a panel
+// that hangs past its display's edge, whose cut-off part is in no picture) the picture is
+// redrawn live as before.
+//
+// A panel may hang past its display's edges (geometry.ts edgeRange). The pictures are cut at the
+// display's edge, as the logon screen cuts them; the marks are not, so the box and its handles
+// still show, and can be grabbed, beyond it.
 import { useEffect, useLayoutEffect, useReducer, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
-import { Button, Caption1, makeStyles, Menu, MenuItem, MenuList, MenuPopover, MenuTrigger, mergeClasses, tokens } from '@fluentui/react-components';
-import { ChevronDownRegular } from '@fluentui/react-icons';
-import { SceneFrames, WallpaperVideo } from '../media';
+import { t as tr } from '../i18n';
+import { Desktop16Regular } from '@fluentui/react-icons';
+import { SceneFrames, SpectrumFrames, WallpaperVideo } from '../media';
 import { calm } from '../motion';
 import {
   endGesture,
@@ -27,99 +32,38 @@ import {
   askPreview,
   type Lift,
 } from '../preview';
-import { getState, instOf, multiPanel, panelKey, ratioLabel, screenOf, select, setState, shapeOf, spanning, useStore } from '../store';
+import { displayName, getState, instOf, multiPanel, panelKey, ratioLabel, screenOf, select, setState, shapeOf, spanning, useStore, wallSlices } from '../store';
 import type { Bound } from '../types';
+import { cx } from '../ui/controls';
+import { setDraft } from './draft';
 import {
   adjustment,
-  anchorName,
   boundOf,
   clamp,
   copiesOf,
+  fixedCorner,
   geometry,
+  hangsOff,
   hitTest,
+  middleMoved,
+  offsetsScaledAbout,
   panelBounds,
   placeDragged,
   rectOf,
   roundTo,
-  signed,
+  scaleRange,
   unionOf,
   valueOf,
   type Geometry,
   type Rect,
+  type SnapLine,
 } from './geometry';
 
-const MARK = '#ffffff', EDGE = 'rgba(0, 0, 0, .55)';
-
-const useStyles = makeStyles({
-  area: {
-    flex: 1,
-    minWidth: 0,
-    minHeight: 0,
-    display: 'flex',
-    flexDirection: 'column',
-    backgroundColor: tokens.colorNeutralBackground4,
-  },
-  well: { flex: 1, minHeight: 0, position: 'relative' },
-  stage: {
-    position: 'absolute',
-    overflow: 'hidden',
-    backgroundColor: '#000',
-    borderRadius: tokens.borderRadiusMedium,
-    // The lock screen is often dark on a dark canvas: a hairline shows where it ends.
-    boxShadow: `${tokens.shadow8}, 0 0 0 1px ${tokens.colorNeutralStroke2}`,
-    touchAction: 'none',
-    cursor: 'default',
-  },
-  over: { cursor: 'grab' },
-  dragging: { cursor: 'grabbing' },
-  layer: { position: 'absolute', inset: 0, width: '100%', height: '100%', display: 'block', pointerEvents: 'none' },
-  sprite: { position: 'absolute', inset: 0, backgroundSize: '100% 100%', pointerEvents: 'none', willChange: 'transform' },
-  box: { position: 'absolute', pointerEvents: 'none', borderRadius: '2px', boxSizing: 'border-box' },
-  selected: {
-    border: `1.5px solid ${MARK}`,
-    boxShadow: `0 0 0 1px ${EDGE}, inset 0 0 0 1px ${EDGE}`,
-    zIndex: 4,
-    transitionProperty: 'left, top, width, height',
-    transitionDuration: tokens.durationFaster,
-    transitionTimingFunction: tokens.curveDecelerateMax,
-  },
-  still: { transitionProperty: 'none' },
-  part: { border: `1px dashed ${MARK}`, boxShadow: `0 0 0 1px ${EDGE}`, zIndex: 4 },
-  hover: { border: `1px dashed ${MARK}`, boxShadow: `0 0 0 1px ${EDGE}`, zIndex: 3, opacity: 0.85 },
-  handle: {
-    position: 'absolute',
-    width: '10px',
-    height: '10px',
-    boxSizing: 'border-box',
-    backgroundColor: MARK,
-    border: `1px solid ${EDGE}`,
-    borderRadius: '2px',
-    pointerEvents: 'auto',
-    touchAction: 'none',
-  },
-  marks: { position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 3, overflow: 'visible' },
-  readout: {
-    position: 'absolute',
-    zIndex: 5,
-    pointerEvents: 'none',
-    whiteSpace: 'nowrap',
-    fontSize: tokens.fontSizeBase200,
-    lineHeight: tokens.lineHeightBase200,
-    fontVariantNumeric: 'tabular-nums',
-    color: '#fff',
-    backgroundColor: 'rgba(0, 0, 0, .78)',
-    padding: `${tokens.spacingVerticalXXS} ${tokens.spacingHorizontalS}`,
-    borderRadius: tokens.borderRadiusMedium,
-  },
-  foot: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS, paddingInline: tokens.spacingHorizontalM, minHeight: '36px' },
-  quiet: { color: tokens.colorNeutralForeground3 },
-});
-
 const HANDLES: [string, CSSProperties][] = [
-  ['nw', { left: -6, top: -6, cursor: 'nwse-resize' }],
-  ['ne', { right: -6, top: -6, cursor: 'nesw-resize' }],
-  ['sw', { left: -6, bottom: -6, cursor: 'nesw-resize' }],
-  ['se', { right: -6, bottom: -6, cursor: 'nwse-resize' }],
+  ['nw', { left: -5, top: -5, cursor: 'nwse-resize' }],
+  ['ne', { right: -5, top: -5, cursor: 'nesw-resize' }],
+  ['sw', { left: -5, bottom: -5, cursor: 'nesw-resize' }],
+  ['se', { right: -5, bottom: -5, cursor: 'nwse-resize' }],
 ];
 
 // A drag or resize under way, or one that has ended and waits for its exact picture.
@@ -138,20 +82,20 @@ interface Drag {
   by?: number;
   rx?: number;      // the point it is held by
   ry?: number;
-  snapX?: boolean;
-  snapY?: boolean;
-  // A resize: how much larger the panel is drawn than it was.
+  lines?: SnapLine[];  // what it has snapped to
+  // A resize: how much larger the panel is drawn than it was, about which point.
   scale?: number;
+  origin?: { x: number; y: number };
   readout: string;
   settling?: number;  // the request whose picture ends it
 }
 
-const posText = (anchor: string, ox: number, oy: number) => `${anchorName(anchor)} · 水平 ${signed(ox)}% · 垂直 ${signed(oy)}%`;
+// Where the middle of the moving box is, as the panel's horizontal and vertical position say it.
+const centreText = (x: number, y: number) => tr('canvas.position', { x: x.toFixed(1), y: y.toFixed(1) });
 const pad = (r: Rect, p: number): CSSProperties => ({ left: r.left - p, top: r.top - p, width: r.width + p * 2, height: r.height + p * 2 });
 
 export function Canvas() {
   const s = useStore();
-  const styles = useStyles();
   const t = s.open!;
   const [, redraw] = useReducer((x: number) => x + 1, 0);
   useEffect(() => subscribePreview(redraw), []);
@@ -169,15 +113,16 @@ export function Canvas() {
     const el = well.current;
     if (!el) return;
     const fit = () => {
-      const r = el.getBoundingClientRect(), margin = 24, ratio = shape.width / shape.height;
-      let w = Math.max(0, r.width - margin * 2), h = w / ratio;
-      if (h > r.height - margin * 2) {
-        h = Math.max(0, r.height - margin * 2);
+      // Room around the picture, more below it for the line that says which display it is.
+      const r = el.getBoundingClientRect(), side = 32, above = 32, below = 48, ratio = shape.width / shape.height;
+      let w = Math.max(0, r.width - side * 2), h = w / ratio;
+      if (h > r.height - above - below) {
+        h = Math.max(0, r.height - above - below);
         w = h * ratio;
       }
       w = Math.floor(w);
       h = Math.floor(h);
-      setStage({ left: Math.round((r.width - w) / 2), top: Math.round((r.height - h) / 2), width: w, height: h });
+      setStage({ left: Math.round((r.width - w) / 2), top: Math.round(above + (r.height - above - below - h) / 2), width: w, height: h });
       const dpr = window.devicePixelRatio || 1;
       askPreview(Math.round(w * dpr), Math.round(h * dpr));
     };
@@ -192,6 +137,9 @@ export function Canvas() {
   }, [s.noVideo]);
 
   const k = pv.width ? stage.width / pv.width : 0;
+  // The size the stage's picture is drawn at (askPreview), for the spectra drawn over it.
+  const dpr = window.devicePixelRatio || 1;
+  const liveSize = `w=${Math.round(stage.width * dpr)}&h=${Math.round(stage.height * dpr)}`;
 
   /* --- lifting: what the pointer is over or what is selected is made ready to drag --- */
   const hoverInst = s.hover?.inst ?? null;
@@ -205,15 +153,17 @@ export function Canvas() {
   }, [hoverInst, pv.rev, pv.url, busy]);
 
   // A finished drag stays on the stage until the picture that answers it is shown.
+  const settle = () => {
+    setDrag(null);
+    hold(null);
+    setDraft(null);
+  };
   useEffect(() => {
-    if (drag?.settling && pv.shownSeq >= drag.settling) {
-      setDrag(null);
-      hold(null);
-    }
+    if (drag?.settling && pv.shownSeq >= drag.settling) settle();
   });
   useEffect(() => {
     if (!drag?.settling) return;
-    const timer = window.setTimeout(() => { setDrag(null); hold(null); }, 4000);
+    const timer = window.setTimeout(settle, 4000);
     return () => clearTimeout(timer);
   }, [drag?.settling]);
 
@@ -235,9 +185,10 @@ export function Canvas() {
   };
   const onDown = (e: ReactPointerEvent) => {
     if (e.button !== 0 || dragRef.current?.settling) return;
-    if ((e.target as HTMLElement).dataset.handle) {
+    const handle = (e.target as HTMLElement).dataset.handle;
+    if (handle) {
       e.preventDefault();
-      startResize(e);
+      startResize(e, handle);
       return;
     }
     const p = local(e), hit = hitTest(p.x, p.y, k);
@@ -272,63 +223,99 @@ export function Canvas() {
     window.addEventListener('pointercancel', up);
   }
 
+  // The other panels on the same display, which a dragged one snaps to.
+  const othersOf = (inst: string, pk: string, screen: number) => {
+    const own = boundOf(inst, pk, screen);
+    return pv.bounds
+      .filter(b => b.instance !== 'wallpaper' && /^p\d+$/.test(b.key) && !(b.instance === inst && b.key === pk) && b.screen === own?.screen)
+      .map(b => rectOf(b, k));
+  };
+
+  // The end of a drag or resize: what it set is written, and the stage keeps showing the moved
+  // component until the picture drawn with it arrives.
+  const finish = (inst: string, last: Record<string, string> | null, lift: Lift | null, gesture: number) => {
+    if (lift && last) {
+      const seq = setValues(inst, last, gesture);
+      setDrag(d => (d ? { ...d, settling: seq } : null));
+    } else {
+      endGesture();
+      settle();
+    }
+  };
+
   function startDrag(e: ReactPointerEvent, inst: string, pk: string, partOnClick: string | null) {
-    const g = geometry(inst, pk, k, stage, getState().screen);
+    const screen = getState().screen, g = geometry(inst, pk, k, stage, screen);
     if (!g) return;
-    const lift = inst !== 'wallpaper' && copiesOf(inst, pk) === 1 ? liftFor(inst) : null;
+    const lift = inst !== 'wallpaper' && copiesOf(inst, pk) === 1 && !hangsOff(g) ? liftFor(inst) : null;
+    const others = othersOf(inst, pk, screen);
     const gesture = newGesture();
     let last: Record<string, string> | null = null;
-    track((dx, dy) => {
-      const place = placeDragged(g, dx, dy);
+    track((dx, dy, ev) => {
+      // Shift keeps to the axis it has moved along most; Ctrl drags without snapping.
+      if (ev.shiftKey) {
+        if (Math.abs(dx) >= Math.abs(dy)) dy = 0;
+        else dx = 0;
+      }
+      const place = placeDragged(g, dx, dy, { free: ev.ctrlKey, others });
       last = { [pk + '.anchor']: place.anchor, [pk + '.offset-x']: String(place.ox), [pk + '.offset-y']: String(place.oy) };
+      const at = middleMoved(g, place.left - g.r.left, place.top - g.r.top);
       if (lift) hold(lift);
       setDrag({ inst, pk, g, lift, left: place.left, top: place.top, anchor: place.anchor, col: place.col, row: place.row, bx: place.bx, by: place.by,
-        rx: place.rx, ry: place.ry, snapX: place.snapX, snapY: place.snapY, readout: posText(place.anchor, place.ox, place.oy) });
+        rx: place.rx, ry: place.ry, lines: place.lines, readout: centreText(at.x, at.y) });
+      setDraft({ inst, values: { ...last, '#x': at.x.toFixed(1), '#y': at.y.toFixed(1) } });
       if (!lift) liveSet(inst, last, gesture);
     }, moved => {
       if (!moved) {
-        setDrag(null);
+        settle();
         if (partOnClick) select(inst, partOnClick);
         return;
       }
-      if (lift && last) {
-        const seq = setValues(inst, last, gesture);
-        setDrag(d => (d ? { ...d, settling: seq } : null));
-      } else {
-        endGesture();
-        setDrag(null);
-      }
+      finish(inst, last, lift, gesture);
     }, e.clientX, e.clientY);
   }
 
-  function startResize(e: ReactPointerEvent) {
+  function startResize(e: ReactPointerEvent, handle: string) {
     const sel = getState().sel, inst = sel.inst;
     if (!inst || !instOf(inst)) return;
     const pk = panelKey(sel), g = geometry(inst, pk, k, stage, getState().screen);
     if (!g) return;
     const a = adjustment(inst, pk + '.size'), s0 = +(a ? a.value : 10);
-    const rs = stageRef.current!.getBoundingClientRect(), cx = rs.left + g.r.left + g.r.width / 2, cy = rs.top + g.r.top + g.r.height / 2;
-    const d0 = Math.max(8, Math.hypot(e.clientX - cx, e.clientY - cy));
+    const lo = a ? a.min : 1, hi = a ? a.max : 50;
+    // A layer filling the picture has no corner to keep: it grows about the point it is held by.
     const full = inst === 'wallpaper' && valueOf(inst, pk + '.anchor') === 'full';
-    const lift = inst !== 'wallpaper' && copiesOf(inst, pk) === 1 ? liftFor(inst) : null;
+    const origin = full ? { x: g.rx, y: g.ry } : fixedCorner(g, handle);
+    // As large and as small as keeps a quarter of it on its display; never so that the first move
+    // jumps away from the size it has.
+    const [least, most] = full ? [0, Infinity] : scaleRange(g, origin);
+    const top = full ? hi : Math.max(s0, lo, Math.min(hi, Math.floor(s0 * most * 2) / 2));
+    const bottom = full ? lo : Math.min(s0, Math.max(lo, Math.ceil(s0 * least * 2) / 2));
+    // How far along the box's diagonal the pointer is, from the fixed corner; the size follows it.
+    const rs = stageRef.current!.getBoundingClientRect();
+    const far = { x: origin.x === g.r.left ? g.r.left + g.r.width : g.r.left, y: origin.y === g.r.top ? g.r.top + g.r.height : g.r.top };
+    const dx0 = far.x - origin.x || 1, dy0 = far.y - origin.y || 1, len = dx0 * dx0 + dy0 * dy0;
+    const along = (x: number, y: number) => ((x - rs.left - origin.x) * dx0 + (y - rs.top - origin.y) * dy0) / len;
+    const t0 = Math.max(0.05, along(e.clientX, e.clientY));
+    const lift = inst !== 'wallpaper' && copiesOf(inst, pk) === 1 && !hangsOff(g) ? liftFor(inst) : null;
     const gesture = newGesture();
     let last: Record<string, string> | null = null;
     track((_dx, _dy, ev) => {
-      const size = clamp(roundTo((s0 * Math.hypot(ev.clientX - cx, ev.clientY - cy)) / d0, 0.5), a ? a.min : 1, a ? a.max : 50);
+      const size = clamp(roundTo((s0 * along(ev.clientX, ev.clientY)) / t0, 0.5), bottom, top);
+      const scale = size / s0;
       last = { [pk + '.size']: String(size) };
       if (full) last[pk + '.anchor'] = 'center';
+      else {
+        const o = offsetsScaledAbout(g, origin, scale);
+        last[pk + '.offset-x'] = String(o.ox);
+        last[pk + '.offset-y'] = String(o.oy);
+      }
       if (lift) hold(lift);
-      setDrag({ inst, pk, g, lift, left: g.r.left, top: g.r.top, scale: size / s0, readout: `大小 ${size.toFixed(1)}% 屏高` });
+      setDrag({ inst, pk, g, lift, left: g.r.left, top: g.r.top, scale, origin, readout: tr('canvas.size', { size: size.toFixed(1) }) });
+      const at = middleMoved(g, 0, 0, scale, origin);
+      setDraft({ inst, values: { ...last, '#x': at.x.toFixed(1), '#y': at.y.toFixed(1) } });
       if (!lift) liveSet(inst, last, gesture);
     }, moved => {
-      if (!moved) return setDrag(null);
-      if (lift && last) {
-        const seq = setValues(inst, last, gesture);
-        setDrag(d => (d ? { ...d, settling: seq } : null));
-      } else {
-        endGesture();
-        setDrag(null);
-      }
+      if (!moved) return settle();
+      finish(inst, last, lift, gesture);
     }, e.clientX, e.clientY);
   }
 
@@ -336,7 +323,7 @@ export function Canvas() {
   const sel = s.sel;
   const whole = !!sel.inst && multiPanel(sel.inst) && !sel.part;
   const pk = panelKey(sel);
-  let selRect: Rect | null = null, partRect: Rect | null = null, g: Geometry | null = null;
+  let selRect: Rect | null = null, partRect: Rect | null = null;
   if (sel.inst && k) {
     if (whole) {
       const all = panelBounds(sel.inst);
@@ -345,7 +332,6 @@ export function Canvas() {
       const b = boundOf(sel.inst, pk, s.screen);
       if (b) {
         selRect = rectOf(b, k);
-        g = geometry(sel.inst, pk, k, stage, s.screen);
         const pb = sel.part && sel.part.includes('.') ? boundOf(sel.inst, sel.part, s.screen) : undefined;
         if (pb) partRect = rectOf(pb, k);
       }
@@ -354,8 +340,8 @@ export function Canvas() {
   // While dragging, the box is where the panel is going.
   if (drag && selRect && drag.inst === sel.inst) {
     if (drag.scale != null) {
-      const sc = drag.scale, ox = drag.g.rx, oy = drag.g.ry, r = drag.g.r;
-      selRect = { left: ox + (r.left - ox) * sc, top: oy + (r.top - oy) * sc, width: r.width * sc, height: r.height * sc };
+      const sc = drag.scale, o = drag.origin ?? { x: drag.g.rx, y: drag.g.ry }, r = drag.g.r;
+      selRect = { left: o.x + (r.left - o.x) * sc, top: o.y + (r.top - o.y) * sc, width: r.width * sc, height: r.height * sc };
     } else selRect = { ...selRect, left: drag.left, top: drag.top };
     partRect = null;
   }
@@ -368,18 +354,27 @@ export function Canvas() {
       hoverRects.push(rectOf(b, k));
     }
   }
-  const readoutStyle = (r: Rect): CSSProperties => ({ left: Math.max(4, r.left - 6), top: r.top - 6 - 26 < 4 ? r.top + r.height + 12 : r.top - 6 - 26 });
+  // Above the box, or below it near the top; from its left edge, or from its right edge on the
+  // right half of the stage, so the text stays on the stage.
+  const readoutStyle = (r: Rect): CSSProperties => ({
+    ...(r.left + r.width / 2 > stage.width / 2 ? { right: Math.max(4, stage.width - r.left - r.width - 6) } : { left: Math.max(4, r.left - 6) }),
+    top: r.top - 6 - 26 < 4 ? r.top + r.height + 12 : r.top - 6 - 26,
+  });
 
   /* --- the lifted component --- */
   const lifted = drag?.lift ?? null;
-  let sprite: CSSProperties | null = null, rest: CSSProperties | null = null;
+  let sprite: CSSProperties | null = null, rest: CSSProperties | null = null, cut: CSSProperties | null = null;
   if (lifted && drag) {
+    // Cut at the edges of the panel's own display: on a wall, what goes past them is not drawn on
+    // the next one.
+    const f = drag.g.f;
+    cut = { clipPath: `inset(${f.top}px ${stage.width - f.left - f.width}px ${stage.height - f.top - f.height}px ${f.left}px)` };
     const multi = multiPanel(drag.inst), r = drag.g.r, W = stage.width, H = stage.height, m = 8;
     const transform = drag.scale != null ? `scale(${drag.scale})` : `translate(${drag.left - r.left}px, ${drag.top - r.top}px)`;
     sprite = {
       backgroundImage: `url(${lifted.only})`,
       transform,
-      transformOrigin: `${drag.g.rx}px ${drag.g.ry}px`,
+      transformOrigin: `${(drag.origin ?? { x: drag.g.rx }).x}px ${(drag.origin ?? { y: drag.g.ry }).y}px`,
       ...(multi ? { clipPath: `inset(${r.top - m}px ${W - r.left - r.width - m}px ${H - r.top - r.height - m}px ${r.left - m}px)` } : {}),
     };
     if (multi) {
@@ -393,30 +388,42 @@ export function Canvas() {
   const video = wallpaper.kind === 'video' && pv.shownLayer && !scene;
   const m = screenOf(t.id);
   return (
-    <div className={styles.area}>
-      <div className={styles.well} ref={well}>
+    <div className="stage-area">
+      <div className="well" ref={well}>
         {stage.width > 0 && (
           <div
             ref={stageRef}
             data-stage
-            className={mergeClasses(styles.stage, over && styles.over, !!drag && !drag.settling && styles.dragging)}
+            className={cx('stage', over && 'over', !!drag && !drag.settling && 'dragging')}
             style={{ left: stage.left, top: stage.top, width: stage.width, height: stage.height }}
             onPointerDown={onDown}
             onPointerMove={onMove}
             onPointerLeave={() => { setOver(false); if (!dragRef.current) setHover(null); }}
           >
-            {scene && pv.width > 0 && (
-              <SceneFrames theme={t.id} width={pv.width} height={pv.height} moving={motion() && !scene.static} refresh={pv.rev}
-                onBounds={rects => { pv.bounds = pv.bounds.filter(b => b.instance !== 'wallpaper').concat(rects as Bound[]); redraw(); }} />
-            )}
-            {video && <WallpaperVideo key={wallpaper.ref} wallpaper={wallpaper.ref} fit={t.fit} />}
-            {pv.url && <Picture url={pv.url} hidden={!!lifted} />}
-            {lifted && <img className={styles.layer} src={lifted.base} alt="" draggable={false} />}
-            {rest && <div className={styles.sprite} style={rest} />}
-            {sprite && <div className={styles.sprite} style={sprite} />}
-            {pv.previous && <Leaving url={pv.previous} />}
+            {/* What the display shows, cut at its edges. */}
+            <div className="view">
+              {scene && pv.width > 0 && (
+                <SceneFrames theme={t.id} width={pv.width} height={pv.height} moving={motion() && !scene.static} refresh={pv.rev}
+                  onBounds={rects => { pv.bounds = pv.bounds.filter(b => b.instance !== 'wallpaper').concat(rects as Bound[]); redraw(); }} />
+              )}
+              {video && <WallpaperVideo key={wallpaper.ref} wallpaper={wallpaper.ref} fit={t.fit} brightness={t.brightness} blur={t.blur} slices={wallSlices()} />}
+              {pv.url && <Picture url={pv.url} hidden={!!lifted} />}
+              {lifted && <img className="layer" src={lifted.base} alt="" draggable={false} />}
+              {pv.url && motion() && pv.spectra.length > 0 && (
+                // The panels with a spectrum, left out of the picture, moving with the sound; the one
+                // being dragged with a lift moves with the pointer as part of its lifted layer instead.
+                <div className="live-spectra" aria-hidden="true">
+                  {pv.spectra.filter(p => !drag?.lift || !p.startsWith(drag.inst + '.')).map(p => (
+                    <SpectrumFrames key={p} theme={t.id} part={p} query={liveSize} />
+                  ))}
+                </div>
+              )}
+              {rest && <div className="sprite" style={rest} />}
+              {sprite && <div className="cut" style={cut ?? undefined}><div className="sprite" style={sprite} /></div>}
+              {pv.previous && <Leaving url={pv.previous} />}
+            </div>
 
-            <svg className={styles.marks}>
+            <svg className="marks">
               {pv.screens.length > 1 && pv.screens.map((sc, i) => {
                 const a = { x: sc.left * k + 0.5, y: sc.top * k + 0.5, width: Math.max(0, (sc.right - sc.left) * k - 1), height: Math.max(0, (sc.bottom - sc.top) * k - 1), fill: 'none' };
                 return (
@@ -426,39 +433,25 @@ export function Canvas() {
                   </g>
                 );
               })}
-              {drag && drag.scale == null && <Anchors g={drag.g} />}
-              {drag && drag.scale == null && drag.snapX && <Guide x1={drag.bx!} y1={drag.g.f.top} x2={drag.bx!} y2={drag.g.f.top + drag.g.f.height} />}
-              {drag && drag.scale == null && drag.snapY && <Guide x1={drag.g.f.left} y1={drag.by!} x2={drag.g.f.left + drag.g.f.width} y2={drag.by!} />}
-              {g && !whole && <Tether g={g} drag={drag} />}
+              {drag && !drag.settling && drag.lines?.map((l, i) => <Guide key={i} {...l} />)}
             </svg>
 
-            {hoverRects.map((r, i) => <div key={i} className={mergeClasses(styles.box, styles.hover)} style={pad(r, 4)} />)}
-            {partRect && <div className={mergeClasses(styles.box, styles.part)} style={pad(partRect, 2)} />}
+            {hoverRects.map((r, i) => <div key={i} className="box hov" style={pad(r, 4)} />)}
+            {partRect && <div className="box part" style={pad(partRect, 2)} />}
             {selRect && (
-              <div className={mergeClasses(styles.box, styles.selected, (drag || calm()) && styles.still)} style={pad(selRect, 6)}>
-                {!whole && !drag?.settling && HANDLES.map(([name, at]) => <span key={name} data-handle={name} className={styles.handle} style={at} />)}
+              <div className={cx('box', 'sel', (drag || calm()) && 'still')} style={pad(selRect, 6)}>
+                {!whole && !drag?.settling && HANDLES.map(([name, at]) => <span key={name} data-handle={name} className="handle" style={at} />)}
               </div>
             )}
-            {drag && !drag.settling && selRect && <div className={styles.readout} style={readoutStyle(selRect)}>{drag.readout}</div>}
+            {drag && !drag.settling && selRect && <div className="readout num" style={readoutStyle(selRect)}>{drag.readout}</div>}
           </div>
         )}
       </div>
-      <div className={styles.foot}>
-        <Menu>
-          <MenuTrigger disableButtonEnhancement>
-            <Button appearance="subtle" size="small" icon={<ChevronDownRegular />} iconPosition="after">
-              {spanning() ? '横跨所有显示器' : `${m.name} · ${ratioLabel(m.width, m.height)}`}
-            </Button>
-          </MenuTrigger>
-          <MenuPopover>
-            <MenuList>
-              {[[16, 10], [21, 9], [32, 9], [4, 3]].map(([a, b]) => (
-                <MenuItem key={a + ':' + b} onClick={() => setState({ lock: { theme: t.id, ratio: a / b } })}>{`以 ${a}:${b} 预览锁屏`}</MenuItem>
-              ))}
-            </MenuList>
-          </MenuPopover>
-        </Menu>
-        {!s.lib!.settings.components && <Caption1 className={styles.quiet}>组件已在设置里关闭，锁屏上只显示壁纸。</Caption1>}
+      {/* Which display's shape the stage has; other shapes are in the toolbar's lock screen preview. */}
+      <div className="stage-foot">
+        <Desktop16Regular />
+        <span>{spanning() ? tr('settings.monitors.span') : `${displayName(m)} · ${ratioLabel(m.width, m.height)}`}</span>
+        {!s.lib!.settings.components && <span>· {tr('canvas.components_off')}</span>}
       </div>
     </div>
   );
@@ -466,19 +459,17 @@ export function Canvas() {
 
 // The picture on the stage; the first one of a page fades in.
 function Picture({ url, hidden }: { url: string; hidden: boolean }) {
-  const styles = useStyles();
   const ref = useRef<HTMLImageElement>(null);
   const first = useRef(true);
   useEffect(() => {
     if (first.current && !calm()) ref.current?.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 150, easing: 'linear' });
     first.current = false;
   }, [url]);
-  return <img ref={ref} className={styles.layer} style={hidden ? { visibility: 'hidden' } : undefined} src={url} alt="" draggable={false} />;
+  return <img ref={ref} className="layer" style={hidden ? { visibility: 'hidden' } : undefined} src={url} alt="" draggable={false} />;
 }
 
 // The picture before a new wallpaper or fit, fading out over the new one.
 function Leaving({ url }: { url: string }) {
-  const styles = useStyles();
   const ref = useRef<HTMLImageElement>(null);
   useEffect(() => {
     if (calm() || !ref.current) return forgetPrevious();
@@ -486,15 +477,7 @@ function Leaving({ url }: { url: string }) {
     a.onfinish = () => forgetPrevious();
     return () => a.cancel();
   }, [url]);
-  return <img ref={ref} className={styles.layer} src={url} alt="" draggable={false} />;
-}
-
-function Anchors({ g }: { g: Geometry }) {
-  const dots = [];
-  for (let r = 0; r < 3; r++)
-    for (let c = 0; c < 3; c++)
-      dots.push(<circle key={r * 3 + c} cx={g.f.left + [g.M, g.W / 2, g.W - g.M][c]} cy={g.f.top + [g.M, g.H / 2, g.H - g.M][r]} r={3} fill="rgba(255,255,255,.7)" stroke="rgba(0,0,0,.4)" />);
-  return <>{dots}</>;
+  return <img ref={ref} className="layer" src={url} alt="" draggable={false} />;
 }
 
 function Guide(p: { x1: number; y1: number; x2: number; y2: number }) {
@@ -502,28 +485,6 @@ function Guide(p: { x1: number; y1: number; x2: number; y2: number }) {
     <>
       <line {...p} stroke="rgba(0,0,0,.45)" strokeWidth={3} />
       <line {...p} stroke="#fff" strokeWidth={1} />
-    </>
-  );
-}
-
-// The anchor the selected panel is placed by, and a dashed line to the point of it held there.
-function Tether({ g, drag }: { g: Geometry; drag: Drag | null }) {
-  let bx = g.bx, by = g.by, rx = g.rx, ry = g.ry;
-  if (drag && drag.scale == null && drag.rx != null && drag.ry != null) {
-    bx = drag.bx!;
-    by = drag.by!;
-    rx = drag.rx;
-    ry = drag.ry;
-  }
-  return (
-    <>
-      {Math.hypot(rx - bx, ry - by) > 2 && (
-        <>
-          <line x1={bx} y1={by} x2={rx} y2={ry} stroke="rgba(0,0,0,.45)" strokeWidth={3} />
-          <line x1={bx} y1={by} x2={rx} y2={ry} stroke="#fff" strokeWidth={1.2} strokeDasharray="4 3" />
-        </>
-      )}
-      <circle cx={bx} cy={by} r={5} fill="#fff" stroke="rgba(0,0,0,.55)" strokeWidth={1.5} />
     </>
   );
 }

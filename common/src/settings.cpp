@@ -1,7 +1,10 @@
 #include "animelogon/settings.h"
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cwchar>
+#include <mutex>
 
 #include <windows.h>
 
@@ -16,12 +19,12 @@
 namespace animelogon {
 namespace {
 
-constexpr size_t kMaxSettingsBytes = 256 * 1024;
 constexpr int kReadAttempts = 5;
 constexpr DWORD kRetryMs = 50;
 constexpr const wchar_t *kScreenPrefix = L"screen.";
 constexpr const wchar_t *kThemePrefix = L"theme.";
 const wchar_t *const kComponentDisplays[] = {L"auto", L"primary", L"all"};
+const wchar_t *const kOtherDisplays[] = {L"blur", L"picture", L"black"};
 
 bool ParseBool(std::wstring_view v, bool *out) {
     if (EqualsNoCase(v, L"true") || v == L"1") return *out = true, true;
@@ -54,6 +57,30 @@ bool ParseThemeOverride(std::wstring_view rest, std::wstring_view value, Setting
         Scaling fit = Scaling::Fill;
         if (!Parse(value, &fit)) return false;
         s->themeOverrides[themeId].fit = fit;
+        return true;
+    }
+    if (what == L"wake") {
+        WakeStyle wake = WakeStyle::Fade;
+        if (!Parse(value, &wake)) return false;
+        s->themeOverrides[themeId].wake = wake;
+        return true;
+    }
+    if (what == L"wake-duration") {
+        float seconds = kWakeSeconds;
+        if (!ParseWakeSeconds(value, &seconds)) return false;
+        s->themeOverrides[themeId].wakeSeconds = seconds;
+        return true;
+    }
+    if (what == L"brightness") {
+        float brightness = kBrightness;
+        if (!ParseBrightness(value, &brightness)) return false;
+        s->themeOverrides[themeId].brightness = brightness;
+        return true;
+    }
+    if (what == L"blur") {
+        float blur = 0.0f;
+        if (!ParseBlur(value, &blur)) return false;
+        s->themeOverrides[themeId].blur = blur;
         return true;
     }
     const size_t inner = what.find(L'.');
@@ -119,11 +146,73 @@ bool Parse(std::wstring_view text, Scaling *out) {
     return true;
 }
 
+const wchar_t *ToString(WakeStyle style) {
+    switch (style) {
+    case WakeStyle::Zoom: return L"zoom";
+    case WakeStyle::Slide: return L"slide";
+    case WakeStyle::Cut: return L"cut";
+    default: return L"fade";
+    }
+}
+
+bool Parse(std::wstring_view text, WakeStyle *out) {
+    if (text == L"fade") *out = WakeStyle::Fade;
+    else if (text == L"zoom") *out = WakeStyle::Zoom;
+    else if (text == L"slide") *out = WakeStyle::Slide;
+    else if (text == L"cut") *out = WakeStyle::Cut;
+    else return false;
+    return true;
+}
+
+// A number of at most eight characters from `low` to `high`, both included. It is judged as the
+// float it is kept as: read as a double, "0.1" is a hair below the float 0.1f a bound is written
+// in, and the lowest value the settings app offers would be turned away -- the theme's own value
+// then standing in for it.
+static bool ParseBoundedFloat(std::wstring_view text, float low, float high, float *out) {
+    if (text.empty() || text.size() > 8) return false;
+    const std::wstring copy(text);
+    wchar_t *end = nullptr;
+    const double v = std::wcstod(copy.c_str(), &end);
+    if (end != copy.c_str() + copy.size() || !std::isfinite(v)) return false;
+    const float f = (float)v;
+    if (!(f >= low && f <= high)) return false;
+    *out = f;
+    return true;
+}
+
+bool ParseWakeSeconds(std::wstring_view text, float *out) {
+    return ParseBoundedFloat(text, kWakeSecondsMin, kWakeSecondsMax, out);
+}
+
+bool ParseBrightness(std::wstring_view text, float *out) { return ParseBoundedFloat(text, kBrightnessMin, kBrightness, out); }
+
+bool ParseBlur(std::wstring_view text, float *out) { return ParseBoundedFloat(text, 0.0f, kBlurMax, out); }
+
+void ApplyBrightness(uint8_t *pixels, size_t count, int stride, float brightness) {
+    if (brightness >= 1.0f) return;
+    // One multiply per byte value, looked up: the same rounding everywhere it is applied.
+    uint8_t table[256];
+    for (int v = 0; v < 256; ++v) table[v] = (uint8_t)std::min(255, (int)(v * brightness + 0.5f));
+    for (size_t i = 0; i < count; ++i, pixels += stride) {
+        pixels[0] = table[pixels[0]];
+        pixels[1] = table[pixels[1]];
+        pixels[2] = table[pixels[2]];
+    }
+}
+
 const wchar_t *ToString(ComponentDisplays displays) { return kComponentDisplays[(int)displays]; }
 
 bool Parse(std::wstring_view text, ComponentDisplays *out) {
     for (size_t i = 0; i < ARRAYSIZE(kComponentDisplays); ++i)
         if (EqualsNoCase(text, kComponentDisplays[i])) return *out = (ComponentDisplays)i, true;
+    return false;
+}
+
+const wchar_t *ToString(OtherDisplays displays) { return kOtherDisplays[(int)displays]; }
+
+bool Parse(std::wstring_view text, OtherDisplays *out) {
+    for (size_t i = 0; i < ARRAYSIZE(kOtherDisplays); ++i)
+        if (EqualsNoCase(text, kOtherDisplays[i])) return *out = (OtherDisplays)i, true;
     return false;
 }
 
@@ -180,6 +269,8 @@ void Read(const std::wstring &text, Settings *out, bool *namesTheme, std::vector
             ok = ParseBool(value, &s.components);
         } else if (key == L"component_displays") {
             ok = Parse(value, &s.componentDisplays);
+        } else if (key == L"other_displays") {
+            ok = Parse(value, &s.otherDisplays);
         } else if (key == L"media") {
             ok = ParseBool(value, &s.media);
         } else if (key.substr(0, wcslen(kThemePrefix)) == kThemePrefix) {
@@ -195,6 +286,29 @@ void Read(const std::wstring &text, Settings *out, bool *namesTheme, std::vector
             ok = ParseBool(value, &s.audio.videoTrack.enabled);
         } else if (key == L"video_audio_volume") {
             ok = ParseVolume(value, &s.audio.videoTrack.volume);
+        } else if (key == L"video_audio_yield") {
+            ok = ParseBool(value, &s.audio.videoYields);
+        } else if (key == L"tray") {
+            ok = ParseBool(value, &s.tray);
+        } else if (key == L"tray_recent") {
+            long long n = 0;
+            ok = ParseInt(value, &n) && n >= kTrayRecentMin && n <= kTrayRecentMax;
+            if (ok) s.trayRecent = (int)n;
+        } else if (key == L"recent") {
+            // Ids that are not themes' are left out; the rest are kept in their order.
+            s.recent.clear();
+            for (size_t at = 0; at <= value.size() && !value.empty();) {
+                size_t comma = value.find(L',', at);
+                if (comma == std::wstring_view::npos) comma = value.size();
+                const std::wstring id(Trim(value.substr(at, comma - at)));
+                at = comma + 1;
+                if (!IsThemeId(id)) {
+                    ok = false;
+                    continue;
+                }
+                if (s.recent.size() < kRecentMax && std::find(s.recent.begin(), s.recent.end(), id) == s.recent.end())
+                    s.recent.push_back(id);
+            }
         } else if (key == L"clock_hours") {
             ok = Parse(std::wstring(value), &s.clock.hours);
         } else if (key == L"clock_ampm") {
@@ -219,6 +333,10 @@ void AppendOverrides(const Settings &s, std::wstring *out) {
         const std::wstring prefix = kThemePrefix + themeId + L".";
         if (o.wallpaper) *out += prefix + L"wallpaper = " + *o.wallpaper + L"\r\n";
         if (o.fit) *out += prefix + L"fit = " + ToString(*o.fit) + L"\r\n";
+        if (o.wake) *out += prefix + L"wake = " + ToString(*o.wake) + L"\r\n";
+        if (o.wakeSeconds) *out += prefix + L"wake-duration = " + Format(L"%g", *o.wakeSeconds) + L"\r\n";
+        if (o.brightness) *out += prefix + L"brightness = " + Format(L"%g", *o.brightness) + L"\r\n";
+        if (o.blur) *out += prefix + L"blur = " + Format(L"%g", *o.blur) + L"\r\n";
         for (const auto &[key, value] : o.wallpaperValues)
             *out += prefix + L"wallpaper." + key + L" = " + value + L"\r\n";
         for (const auto &[instance, io] : o.instances) {
@@ -253,6 +371,7 @@ std::wstring SerializeSettings(const Settings &s) {
     for (const auto &[monitor, id] : s.screens) out += kScreenPrefix + monitor + L" = " + id + L"\r\n";
     out += L"components = " + std::wstring(s.components ? L"true" : L"false") + L"\r\n";
     out += L"component_displays = " + std::wstring(ToString(s.componentDisplays)) + L"\r\n";
+    out += L"other_displays = " + std::wstring(ToString(s.otherDisplays)) + L"\r\n";
     out += L"media = " + std::wstring(s.media ? L"true" : L"false") + L"\r\n";
     const ClockStyle &style = s.clock;
     out += L"clock_hours = " + std::wstring(ToString(style.hours)) + L"\r\n";
@@ -264,6 +383,12 @@ std::wstring SerializeSettings(const Settings &s) {
     out += L"audio_volume = " + std::to_wstring(s.audio.volume) + L"\r\n";
     out += L"video_audio = " + std::wstring(s.audio.videoTrack.enabled ? L"true" : L"false") + L"\r\n";
     out += L"video_audio_volume = " + std::to_wstring(s.audio.videoTrack.volume) + L"\r\n";
+    out += L"video_audio_yield = " + std::wstring(s.audio.videoYields ? L"true" : L"false") + L"\r\n";
+    out += L"tray = " + std::wstring(s.tray ? L"true" : L"false") + L"\r\n";
+    out += L"tray_recent = " + std::to_wstring(s.trayRecent) + L"\r\n";
+    std::wstring recent;
+    for (size_t i = 0; i < s.recent.size() && i < kRecentMax; ++i) recent += (i ? L"," : L"") + s.recent[i];
+    out += L"recent = " + recent + L"\r\n";
     AppendOverrides(s, &out);
     return out;
 }
@@ -292,7 +417,20 @@ Settings LoadSettings(bool requireTrusted, std::wstring *why) {
     std::vector<std::wstring> problems;
     Settings s = ParseSettings(FromUtf8(std::string_view((const char *)bytes.data() + skip, bytes.size() - skip)),
                                &problems);
-    for (const std::wstring &p : problems) ALOG(L"settings.ini %s", p.c_str());
+    // The services read the file every few seconds; a broken line is written to the log once, and
+    // again only after the file's problems change (or it was clean in between).
+    std::wstring all;
+    for (const std::wstring &p : problems) all += p + L'\n';
+    static std::mutex said;
+    static std::wstring last;
+    bool fresh = false;
+    {
+        std::lock_guard<std::mutex> l(said);
+        fresh = all != last;
+        last = all;
+    }
+    if (fresh)
+        for (const std::wstring &p : problems) ALOG(L"settings.ini %s", p.c_str());
     return s;
 }
 

@@ -73,12 +73,16 @@ public:
             }
         }
         if (!format || theme_->name.empty()) return Fail(root, L"<theme> needs format and name");
-        bool wallpaper = false;
+        bool wallpaper = false, wake = false;
         for (const xml::Element &e : root.children) {
             if (e.name == L"wallpaper") {
                 if (wallpaper) return Fail(e, L"<wallpaper> must come once");
                 wallpaper = true;
                 if (!Wallpaper(e)) return false;
+            } else if (e.name == L"wake") {
+                if (wake) return Fail(e, L"<wake> may come once");
+                wake = true;
+                if (!Wake(e)) return false;
             } else if (e.name == L"component") {
                 if (theme_->components.size() >= kMaxInstances) return Fail(e, L"too many components");
                 if (!Component(e)) return false;
@@ -105,12 +109,30 @@ private:
         for (const auto &[name, value] : e.attributes) {
             if (name == L"ref") ref = &value;
             else if (name == L"fit") fit = &value;
-            else return Fail(e, L"unknown attribute " + name + L" on <wallpaper>");
+            else if (name == L"brightness") {
+                if (!ParseBrightness(value, &theme_->brightness)) return Fail(e, L"a bad brightness " + value);
+            } else if (name == L"blur") {
+                if (!ParseBlur(value, &theme_->blur)) return Fail(e, L"a bad blur " + value);
+            } else return Fail(e, L"unknown attribute " + name + L" on <wallpaper>");
         }
         if (!ref || !fit) return Fail(e, L"<wallpaper> needs ref and fit");
         if (!IsWallpaperRefIn(form_, *ref)) return Fail(e, L"a bad wallpaper ref " + *ref);
         if (!animelogon::Parse(*fit, &theme_->fit)) return Fail(e, L"a bad fit " + *fit);
         theme_->wallpaper = *ref;
+        return true;
+    }
+
+    bool Wake(const xml::Element &e) {
+        if (!e.children.empty()) return Fail(e, L"<wake> holds nothing");
+        for (const auto &[name, value] : e.attributes) {
+            if (name == L"style") {
+                if (!animelogon::Parse(value, &theme_->wake)) return Fail(e, L"a bad wake style " + value);
+            } else if (name == L"duration") {
+                if (!ParseWakeSeconds(value, &theme_->wakeSeconds)) return Fail(e, L"a bad wake duration " + value);
+            } else {
+                return Fail(e, L"unknown attribute " + name + L" on <wake>");
+            }
+        }
         return true;
     }
 
@@ -259,6 +281,10 @@ Theme Edited(const Theme &theme, const ThemeOverrides &overrides, std::vector<st
     Theme e = theme;
     if (overrides.wallpaper) e.wallpaper = *overrides.wallpaper;
     if (overrides.fit) e.fit = *overrides.fit;
+    if (overrides.wake) e.wake = *overrides.wake;
+    if (overrides.wakeSeconds) e.wakeSeconds = *overrides.wakeSeconds;
+    if (overrides.brightness) e.brightness = *overrides.brightness;
+    if (overrides.blur) e.blur = *overrides.blur;
     for (const auto &[id, o] : overrides.instances) {
         Instance *instance = nullptr;
         for (Instance &i : e.components)
@@ -290,7 +316,18 @@ std::string Normalize(const Theme &theme) {
     xml::Element wallpaper;
     wallpaper.name = L"wallpaper";
     wallpaper.attributes = {{L"ref", theme.wallpaper}, {L"fit", ToString(theme.fit)}};
+    // Like <wake>, only when it is not the default.
+    if (theme.brightness != kBrightness) wallpaper.attributes.emplace_back(L"brightness", Format(L"%g", theme.brightness));
+    if (theme.blur > 0.0f) wallpaper.attributes.emplace_back(L"blur", Format(L"%g", theme.blur));
     root.children.push_back(std::move(wallpaper));
+    // Written only when it is not the default, so a theme that never set it stays as it was.
+    if (theme.wake != WakeStyle::Fade || theme.wakeSeconds != kWakeSeconds) {
+        xml::Element wake;
+        wake.name = L"wake";
+        if (theme.wake != WakeStyle::Fade) wake.attributes.emplace_back(L"style", ToString(theme.wake));
+        if (theme.wakeSeconds != kWakeSeconds) wake.attributes.emplace_back(L"duration", Format(L"%g", theme.wakeSeconds));
+        root.children.push_back(std::move(wake));
+    }
     for (const Instance &i : theme.components) {
         xml::Element c;
         c.name = L"component";
@@ -326,10 +363,19 @@ bool Parse(std::string_view utf8, Form form, Theme *theme, std::wstring *error, 
 
 std::string DefaultText() {
     return R"(<?xml version="1.0" encoding="utf-8"?>
-<!-- The theme that comes with AnimeLogon: the built-in wallpaper and the clock. -->
+<!-- The theme that comes with AnimeLogon: the bundled wallpaper (kBundledWallpaper) and the clock.
+     The wallpaper is a light lavender, where the clock's dark shade reads as a grey smudge: it is
+     off here, and a soft deep-indigo shadow lifts the white strokes instead, which still reads on
+     the dark built-in gradient shown when the bundled wallpaper is missing. -->
 <theme format="1" name="默认" author="AnimeLogon">
-  <wallpaper ref="default" fit="fill"/>
-  <component id="clock" ref="clock"/>
+  <wallpaper ref="0000000000000001" fit="fill"/>
+  <component id="clock" ref="clock">
+    <set key="shade" value="off"/>
+    <set key="p1.s1.opacity" value="0.5"/>
+    <set key="p1.s1.color" value="#34285F"/>
+    <set key="p1.s1.blur" value="0.09"/>
+    <set key="p1.s1.y" value="0.02"/>
+  </component>
 </theme>
 )";
 }

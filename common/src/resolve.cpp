@@ -48,6 +48,10 @@ ResolvedTheme Themed(const Settings &s, std::wstring id, const ThemeStore &store
     const theme::Theme edited = theme::Edited(own, overrides, &editProblems);
     for (const std::wstring &p : editProblems) Report(problems, L"theme." + id + L": " + p);
     r.fit = edited.fit;
+    r.wake = edited.wake;
+    r.wakeSeconds = edited.wakeSeconds;
+    r.brightness = edited.brightness;
+    r.blur = edited.blur;
     r.componentDisplays = s.componentDisplays;
 
     if (edited.wallpaper != kNoWallpaper) {

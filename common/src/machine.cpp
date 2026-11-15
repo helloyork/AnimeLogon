@@ -3,6 +3,7 @@
 #include <vector>
 
 #include "animelogon/log.h"
+#include "animelogon/i18n.h"
 #include "animelogon/paths.h"
 #include "animelogon/text.h"
 
@@ -16,6 +17,8 @@ constexpr const wchar_t *kRestoreKey = L"SOFTWARE\\AnimeLogon\\Restore";
 constexpr const wchar_t *kProtectedKey = L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\SystemProtectedUserData";
 constexpr const wchar_t *kHideValue = L"HideLogonBackgroundImage";
 constexpr const wchar_t *kSignInTag = L"SignIn.";
+// Under paths::kRegistryKey: 1 while an install has left switching on to the person (SetupPending).
+constexpr const wchar_t *kSetupPendingValue = L"SetupPending";
 
 struct Tracked {
     const wchar_t *key;
@@ -348,7 +351,9 @@ DWORD InstallService(const std::wstring &launcherPath) {
         if (!svc) e = GetLastError();
     }
     if (svc) {
-        SERVICE_DESCRIPTIONW description{const_cast<wchar_t *>(L"在登录界面上播放 AnimeLogon 视频。")};
+        // In the language the installer was run in: services.msc shows it as written.
+        std::wstring text = i18n::Tr("service.description");
+        SERVICE_DESCRIPTIONW description{text.data()};
         ChangeServiceConfig2W(svc, SERVICE_CONFIG_DESCRIPTION, &description);
         // Restarted by the service manager if it ever stops unexpectedly.
         SC_ACTION actions[3] = {{SC_ACTION_RESTART, 2000}, {SC_ACTION_RESTART, 5000}, {SC_ACTION_RESTART, 30000}};
@@ -443,8 +448,12 @@ DWORD TurnOn(const std::wstring &launcherPath, const std::wstring &image) {
     if (e != ERROR_SUCCESS) {
         ALOG(L"turn on: failed (%lu), undoing", e);
         TurnOff();
+        return e;
     }
-    return e;
+    // On once is set up: the settings app no longer opens on its setup wizard.
+    const DWORD cleared = DeleteValue(paths::kRegistryKey, kSetupPendingValue);
+    if (cleared != ERROR_SUCCESS) ALOG(L"turn on: setup still marked pending (%lu)", cleared);
+    return ERROR_SUCCESS;
 }
 
 DWORD TurnOff() {
@@ -458,6 +467,13 @@ DWORD TurnOff() {
 }
 
 bool IsOn() { return ServiceAutoStart() && WindowsLockScreenApplied(); }
+
+bool SetupPending() {
+    DWORD v = 0;
+    return AsDword(ReadValue(paths::kRegistryKey, kSetupPendingValue), &v) && v != 0;
+}
+
+DWORD MarkSetupPending() { return WriteDword(paths::kRegistryKey, kSetupPendingValue, 1); }
 
 bool Paused() { return GetFileAttributesW(paths::PausedMarkerPath().c_str()) != INVALID_FILE_ATTRIBUTES; }
 

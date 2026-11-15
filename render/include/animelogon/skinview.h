@@ -1,7 +1,8 @@
 // Draws a skin with Direct2D. Each panel's text is laid out when its words change -- once a
 // minute for a clock, when the data changes, and every second for a playback position -- into a
 // cached bitmap; drawing composites the bitmaps with their shadows. Bars are laid out with the
-// text, as inline objects.
+// text, as inline objects. A spectrum takes its room in the line the same way, but its bands move
+// with the sound, so they are drawn again every frame, into a second bitmap beside the text's.
 #pragma once
 
 #include <windows.h>
@@ -9,13 +10,26 @@
 #include <dwrite.h>
 #include <wrl/client.h>
 
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "animelogon/clock.h"
 #include "animelogon/skin.h"
+#include "animelogon/spectrum.h"
 
 namespace animelogon {
+
+// A panel may hang past the edges of its display -- what lies beyond is simply not on it -- but
+// at least this much of its box stays on the display in each direction, so that it is never lost
+// and can always be grabbed back on the settings page (app/web/src/editor/geometry.ts keeps the
+// same rule).
+constexpr float kPanelStaysOn = 0.25f;
+
+// How far to move a panel whose box runs from `lo` to `hi` along one direction of a display
+// `limit` pixels long so that it keeps to that rule, in whole pixels so that its text stays on the
+// pixel grid: 0 when it already does. A box at least as long as the display is centred on it.
+float PanelShift(float lo, float hi, float limit);
 
 class SkinView {
 public:
@@ -28,6 +42,16 @@ public:
     // The battery and what is playing, for the next Tick.
     void SetData(const data::Snapshot &snapshot);
 
+    // What the output device is playing, for the spectra: once a frame on the logon screen. Each
+    // spectrum's bands follow it as quickly as its smoothing allows. Until the first frame they
+    // lie at rest.
+    void SetAudio(const spectrum::Frame &frame);
+    // Every spectrum straight at `frame`'s levels, as previews show them.
+    void SettleAudio(const spectrum::Frame &frame);
+    // Whether a panel holds a spectrum; whether one is still moving, so must be drawn again.
+    bool Listens() const { return !spectra_.empty(); }
+    bool Moving() const;
+
     // Reads the time; returns true when the words changed. `utc` is the same moment as UTC
     // FILETIME ticks, for playback positions; 0 reads the clock.
     bool Tick();
@@ -36,6 +60,13 @@ public:
     // Draws onto `target` as the skin appears on a display of that size. `slot` keeps one
     // cache per display.
     bool Draw(ID2D1Bitmap1 *target, UINT width, UINT height, size_t slot, float opacity = 1.0f);
+
+    // The logon screen brings each panel in as its `enter`, `enter-delay` and `enter-duration`
+    // say, counted from the moment the wallpaper is up: `seconds` is how long ago that was.
+    // Negative (the default, and what previews use) draws every panel in place.
+    void SetEntrance(float seconds) { entrance_ = seconds; }
+    // Whether some panel is still on its way in at the time last set.
+    bool Entering() const;
 
     ID2D1DeviceContext *context() const { return dc_.Get(); }
 
@@ -53,6 +84,9 @@ public:
         float holdX[3]{}, holdY[3]{};
     };
     std::vector<Bound> Bounds(size_t slot) const;
+    // Everything the panels last drawn in `slot` can touch -- their ink, shadows and backdrops --
+    // in the target's pixels. False when nothing was drawn.
+    bool Reach(size_t slot, D2D1_RECT_F *area) const;
 
 private:
     // A panel laid out for one display.
@@ -61,8 +95,24 @@ private:
         Microsoft::WRL::ComPtr<ID2D1Bitmap1> text;
         D2D1_POINT_2F at{};
         float px = 0.0f;  // 1 em
-        Microsoft::WRL::ComPtr<ID2D1RadialGradientBrush> backdrop;
+        // A glow fills the ellipse, a plate the rounded rectangle.
+        Microsoft::WRL::ComPtr<ID2D1Brush> backdrop;
+        bool plate = false;
         D2D1_ELLIPSE backdropArea{};
+        D2D1_ROUNDED_RECT plateArea{};
+        // The spectra, where they are in `text`'s pixels, and `live`, a bitmap of its size that
+        // they are drawn into each frame.
+        struct Spectrum {
+            size_t audio = 0;        // in spectra_
+            size_t line = 0, text = 0;
+            D2D1_RECT_F box{};
+            // Plain colours, or gradients from `start` to `end` (`linear`), mirrored beyond them.
+            Microsoft::WRL::ComPtr<ID2D1Brush> fill, peak;
+            bool linear = false;
+            D2D1_POINT_2F start{}, end{};
+        };
+        std::vector<Spectrum> spectra;
+        Microsoft::WRL::ComPtr<ID2D1Bitmap1> live;
     };
     struct Slot {
         UINT width = 0, height = 0;
@@ -80,12 +130,40 @@ private:
             DWRITE_TEXT_RANGE range;
         };
         std::vector<Run> runs;
+        // Where each spectrum's room was drawn, once the line has been: its top left, in the
+        // target's pixels, and how wide it was laid out.
+        struct Room {
+            size_t text;
+            std::shared_ptr<D2D1_POINT_2F> at;
+            float width = 0.0f;
+        };
+        std::vector<Room> rooms;
+    };
+    // A spectrum in the skin, and its bands as they move.
+    struct Audio {
+        size_t panel = 0, line = 0, text = 0;
+        spectrum::Bands bands;
     };
 
     bool Build(Built &built, size_t panel, UINT width, UINT height);
+    // What a built panel can touch: its text, its shadows and its backdrop.
+    D2D1_RECT_F AreaOf(const Built &built, const skin::Panel &panel) const;
+    // Lays out a line at `px` to the em. Its spectra are laid out at `spectra` times their own
+    // length: less than 1 where the line would otherwise be wider than its display.
     bool Lay(Line &line, const skin::Panel &panel, const skin::Line &source, const std::vector<std::wstring> &words,
-             float px);
+             float px, float spectra = 1.0f);
     std::wstring Family(const std::wstring &wanted) const;
+    // `words` laid out alone as `text` says, on one line, for measuring or for drawing apart from
+    // its line.
+    Microsoft::WRL::ComPtr<IDWriteTextLayout> Alone(const skin::Text &text, const std::wstring &words, float px) const;
+    // `words`, cut short with an ellipsis where they are wider than the text's `max`.
+    std::wstring Fit(const skin::Text &text, const std::wstring &words, float px) const;
+    void Figures(IDWriteTextLayout *layout, const skin::Text &text, DWRITE_TEXT_RANGE range) const;
+    // What a spectrum asks of each frame: its own bands, or for one with the bass in the middle,
+    // each band shown twice.
+    static spectrum::Shape ShapeOf(const skin::Text &text);
+    bool Brushes(Built::Spectrum &place, const skin::Text &text);
+    void DrawSpectrum(const Built::Spectrum &place, const skin::Text &text, float px);
 
     skin::Resolved skin_;
     ClockStyle style_;
@@ -93,12 +171,16 @@ private:
     // Panel, line, text: the words, or for a bar its fraction; empty where nothing is drawn.
     std::vector<std::vector<std::vector<std::wstring>>> words_;
     unsigned version_ = 0;
+    float entrance_ = -1.0f;
     SYSTEMTIME shown_{};
     data::Snapshot data_;
     unsigned dataVersion_ = 0, dataShown_ = 0;
     bool everySecond_ = false;  // a text or bar follows a playback position
+    std::vector<Audio> spectra_;
 
     Microsoft::WRL::ComPtr<ID2D1DeviceContext> dc_;
+    Microsoft::WRL::ComPtr<ID2D1Factory> factory_;
+    Microsoft::WRL::ComPtr<ID2D1StrokeStyle> round_;  // round caps and joins, for lines
     Microsoft::WRL::ComPtr<IDWriteFactory> write_;
     std::vector<Microsoft::WRL::ComPtr<ID2D1Effect>> shadows_;
     std::vector<Slot> slots_;

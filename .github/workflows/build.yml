@@ -4,24 +4,55 @@ on:
   push:
     branches: [master, develop]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+# One run per branch at a time. A pull request's newer push cancels the run in progress, since only
+# its latest commit matters. A push to master or develop lets the run in progress finish: several
+# changes can land a few minutes apart, and cancelling each run for the next would mean the tests,
+# which take longer than that gap, never finish at all. Only the newest waiting run is kept.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: pwsh
 
 jobs:
-  build:
-    name: ${{ matrix.arch }}
+  # The public formats against the reader that enforces them: the component skill's examples are
+  # accepted and its attribute reference is the one the reader generates (tools/CMakeLists.txt).
+  # Only the checker is built, so this answers in a few minutes, before the full builds below.
+  interfaces:
+    name: interfaces
     runs-on: windows-latest
-    # A build and test take a few minutes; anything stuck is ended well before GitHub's six hours.
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      # Configuring needs Node.js and npm (app/CMakeLists.txt), though nothing here runs them.
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - name: Configure
+        run: cmake --preset x64
+
+      - name: Build the checker
+        run: cmake --build --preset x64-release --target component_check
+
+      - name: Check the component format's examples and reference
+        run: ctest --preset x64-release --tests-regex "^component_"
+
+  # ARM64 is cross-built on an x64 runner, so its tests are built but not run. Its programs go to
+  # the x64 job, whose install.exe carries them as a release's does.
+  arm64:
+    name: arm64
+    runs-on: windows-latest
+    # A build takes a few minutes; anything stuck is ended well before GitHub's six hours.
     timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        arch: [x64, arm64]
     steps:
       - uses: actions/checkout@v7
 
@@ -33,19 +64,66 @@ jobs:
           cache-dependency-path: app/web/package-lock.json
 
       - name: Configure
-        run: cmake --preset ${{ matrix.arch }} -DANIMELOGON_BUILD=${{ github.run_number }}
+        run: cmake --preset arm64 -DANIMELOGON_BUILD=${{ github.run_number }}
 
       - name: Build
-        run: cmake --build --preset ${{ matrix.arch }}-release
+        run: cmake --build --preset arm64-release
 
-      # ARM64 is cross-built on an x64 runner, so only x64 runs the tests. --verbose prints the
-      # test program's whole output, so the log shows which Media Foundation tests ran and which
-      # said they were skipped.
+      # What install.exe carries for ARM64 (installer/CMakeLists.txt), for the x64 job.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: arm64-programs
+          path: |
+            build/arm64/bin/Release/overlay.exe
+            build/arm64/bin/Release/launcher.exe
+            build/arm64/bin/Release/animelogon.exe
+            build/arm64/bin/Release/scene.exe
+            build/arm64/bin/Release/WebView2Loader.dll
+            build/arm64/bin/Release/uninstall.exe
+          retention-days: 1
+          if-no-files-found: error
+
+  # The setup program as a release makes it, with both architectures' programs, and the tests,
+  # which check that it carries what the installer's list names.
+  x64:
+    name: x64
+    needs: arm64
+    runs-on: windows-latest
+    # A build and test take a few minutes; anything stuck is ended well before GitHub's six hours.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: app/web/package-lock.json
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: arm64-programs
+          path: arm64-programs
+
+      - name: Configure
+        run: cmake --preset x64 -DANIMELOGON_BUILD=${{ github.run_number }} "-DANIMELOGON_ARM64_PAYLOAD_DIR=$((Resolve-Path arm64-programs).Path)"
+
+      - name: Build
+        run: cmake --build --preset x64-release
+
+      # --verbose prints the test program's whole output, so the log shows which Media Foundation
+      # tests ran and which said they were skipped.
       - name: Test
-        if: matrix.arch == 'x64'
         run: ctest --preset x64-release --verbose
 
       # The build installed the page's packages; the bundler does not check types, so this does.
       - name: Check the page's types
-        if: matrix.arch == 'x64'
         run: npm run check --prefix app/web
+
+      # The setup program of this commit, for trying it in a virtual machine.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: setup
+          path: build/x64/bin/Release/install.exe
+          retention-days: 7
+          if-no-files-found: error

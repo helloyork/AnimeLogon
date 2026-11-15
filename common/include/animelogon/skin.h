@@ -3,8 +3,9 @@
 // (elements and their attributes) plus settings the person can adjust; the settings' values
 // come from a theme and from settings.ini. Nothing in a component computes: an attribute is either a literal, or "$id"
 // for the value of one of its settings, and text may name data such as {time} or
-// {battery.percent} (data.h). A bar shows a fraction such as {media.progress}, and a panel,
-// line, text or bar may be drawn only `when` a condition on the data holds. Beyond the
+// {battery.percent} (data.h). A bar shows a fraction such as {media.progress}, a spectrum the
+// sound the output device plays (spectrum.h), and a panel, line, text, bar or spectrum may be
+// drawn only `when` a condition on the data holds. Beyond the
 // component's own settings, any attribute that shapes how an element looks can be adjusted by
 // hand, element by element; those values come from the same places.
 //
@@ -24,7 +25,17 @@
 
 namespace animelogon::skin {
 
-enum class SettingKind { Choice, Toggle, Number, Color, Font, Date };
+// The most a component may hold, besides the limits of the file itself (xml::Limits).
+constexpr size_t kMaxSettings = 32, kMaxOptions = 32;  // settings; options of one choice
+constexpr size_t kMaxPanels = 8, kMaxLines = 8;        // panels; lines of one panel
+constexpr size_t kMaxTexts = 8;                        // texts, bars and spectra of one line
+constexpr size_t kMaxShadows = 4;                      // shadows of one panel, besides one backdrop
+constexpr size_t kMaxLabel = 40, kMaxDetail = 80;      // characters of a name or label; of a detail
+constexpr size_t kMaxTemplate = 256;                   // characters of a text's value
+constexpr size_t kMaxSettingId = 32;                   // characters of a setting id
+
+// Colors: a list of colours at places along a gradient (Stop, ParseStops).
+enum class SettingKind { Choice, Toggle, Number, Color, Font, Date, Colors };
 
 struct Option {
     std::wstring value, label;
@@ -65,11 +76,12 @@ bool IsSettingId(const std::wstring &id);
 // --- adjusting one attribute of one element ----------------------------------------------
 //
 // Elements are named by where they are: p1 is the first panel, p1.l2.t1 the first text on its
-// second line, p1.l2.r1 the first bar on it, p1.s1 its first shadow, p1.b its backdrop. An adjustment is stored under the
+// second line, p1.l2.r1 the first bar on it, p1.l2.a1 the first spectrum on it, p1.s1 its first
+// shadow, p1.b its backdrop. An adjustment is stored under the
 // element's name and the attribute's, as in p1.l1.t1.weight, and wins over the skin's own
 // value for that attribute.
 
-enum class Control { Slider, Choice, Color, Font };
+enum class Control { Slider, Choice, Color, Font, Toggle, Colors };
 
 struct Adjustment {
     std::wstring key;  // e.g. p1.l1.t1.weight
@@ -101,12 +113,61 @@ std::vector<std::wstring> AdjustmentsOf(const Skin &skin, const std::wstring &se
 // --- the skin with its settings applied --------------------------------------------------
 
 enum class Align { Auto, Left, Center, Right };
+// How a panel comes in once the logon screen's wallpaper is up: fading in, rising a little while
+// it fades, growing a little while it fades, or at once.
+enum class Enter { Fade, Rise, Zoom, None };
 enum class Case { None, Upper, Lower };
+// What is drawn behind a panel: a soft glow that fades out around the ink, or a plate with
+// rounded corners around it.
+enum class Shape { Glow, Plate };
 
-// A text, or a bar: what a line holds, in order.
+// How a spectrum draws its bands: as bars, as a line through their tops, or as the area under
+// that line.
+enum class Mode { Bars, Line, Area };
+// Which way the bands reach from where they start: up from the bottom, down from the top, or
+// both ways from the middle.
+enum class Direction { Up, Down, Both };
+// Where the bass is: at the left end, at the right, or in the middle with the treble at both ends.
+enum class Bass { Left, Right, Middle };
+// How a spectrum's colours lie: from its left end to its right, from where the bands start to where
+// they reach, or each bar in the one colour its height reads off the gradient (a line or an area,
+// which has no bars, as Vertical).
+enum class Gradient { Horizontal, Vertical, Level };
+
+// A colour at a place along a gradient, `at` from 0 to 1.
+struct Stop {
+    float at = 0.0f;
+    uint32_t color = 0xFFFFFFFF;  // 0xAARRGGBB
+};
+// "#RRGGBB[AA] P%, ...": one to eight colours, each at a place from 0% to 100%, the places in
+// order. The value of a Colors setting and of a spectrum's `colors`.
+bool ParseStops(const std::wstring &text, std::vector<Stop> *out);
+
+// A <spectrum>'s own attributes. Its length, corner radius, opacity and the space before it are a
+// Text's, as a bar's are.
+struct Spectrum {
+    int bands = 64;
+    float low = 40.0f, high = 16000.0f;  // Hz
+    float sensitivity = 1.0f, smoothing = 0.5f;
+    Mode mode = Mode::Bars;
+    Direction direction = Direction::Up;
+    Bass bass = Bass::Left;
+    float height = 1.0f;   // em, as far as a band reaches
+    float gap = 0.35f;     // between bars, as a share of each band's part of the length
+    float floor = 0.05f;   // a band at rest, as a share of the height
+    float stroke = 0.06f;  // em: the width of a line
+    std::vector<Stop> stops{{0.0f, 0xFFFFFFFF}};  // its colours; one is a plain colour
+    Gradient gradient = Gradient::Horizontal;
+    float flow = 0.0f;  // seconds for the colours to slide once along the gradient and back; 0 still
+    float idleOpacity = 1.0f;  // while nothing is heard, times the opacity
+    float peak = 0.0f;         // the opacity of a mark held above each bar, times the opacity
+};
+
+// A text, a bar or a spectrum: what a line holds, in order.
 struct Text {
-    std::wstring name;   // t1, r1 ...: where it is among the line's texts or its bars
+    std::wstring name;   // t1, r1, a1 ...: where it is among the line's texts, bars or spectra
     std::optional<data::Condition> when;
+    bool shown = true;   // false: left out entirely, as if the line did not hold it
     std::wstring value;  // may name data: {time}, {date} ...; a bar's is one fraction
     std::wstring font;   // empty: the default
     float size = 1.0f;   // em
@@ -117,17 +178,24 @@ struct Text {
     float tracking = 0.0f, space = 0.0f;  // em
     Case textCase = Case::None;
     bool hang = false;  // left out when the line is aligned
+    float rise = 0.0f;  // em: how far above the line's baseline it sits; negative is below
+    float max = 0.0f;   // em: wider words are cut short with an ellipsis; 0 is no limit
+    bool tabular = false;  // every figure as wide as the others, so numbers keep their width
 
     bool bar = false;  // the rest is a bar's
     float length = 6.0f, thickness = 0.12f;  // em
     float radius = 0.5f;                     // of the thickness: 0.5 rounds the ends fully
     uint32_t track = 0xFFFFFFFF;             // the part not yet filled
     float trackOpacity = 0.25f;
+
+    bool spectrum = false;  // a spectrum: `audio`, and length, radius, opacity and space
+    Spectrum audio;
 };
 
 struct Line {
     float gap = 0.2f;  // em, from the line above's baseline to the top of this line's ink
     std::optional<data::Condition> when;
+    bool shown = true;
     std::vector<Text> texts;
 };
 
@@ -144,10 +212,17 @@ struct Panel {
     Align align = Align::Auto;
     std::vector<Line> lines;
     std::vector<Shadow> shadows;
-    float backdrop = 0.0f;  // opacity of a soft dark glow behind the panel
+    float backdrop = 0.0f;  // opacity of what is behind the panel's ink
     uint32_t backdropColor = 0xFF000000;
+    Shape backdropShape = Shape::Glow;
+    float backdropRadius = 0.35f;                               // em, a plate's corners
+    float backdropPaddingX = 0.6f, backdropPaddingY = 0.4f;     // em, from the ink to a plate's edge
+    float opacity = 1.0f;  // of everything the panel draws
     std::optional<data::Condition> when;
     data::Date until;  // what until.* counts down to
+    Enter enter = Enter::Fade;
+    float enterDelay = 0.0f;     // seconds after the wallpaper is up
+    float enterDuration = 0.4f;  // seconds
 };
 
 struct Resolved {
@@ -155,10 +230,30 @@ struct Resolved {
 };
 
 Resolved Resolve(const Skin &skin, const Values &values);
+// Whether a panel holds a spectrum, so the logon screen has to listen to its output device.
+bool Listens(const Resolved &skin);
 
 // The data a text may name.
 bool IsDataName(const std::wstring &name);
 // The sources of the data the component shows or tests, besides the clock, in data::Source order.
 std::vector<data::Source> SourcesOf(const Skin &skin);
+
+// --- the format, described ---------------------------------------------------------------
+//
+// Every attribute each element may carry, as Parse checks it, for documentation and tools
+// (tools/component_check). Reading a component does not go through this.
+
+struct AttributeInfo {
+    std::wstring element, name;  // e.g. text, weight
+    // How the value is written: number, count (a whole number), color, colors, font, weight,
+    // words (one of `words`), label, template, fraction, condition or date.
+    std::wstring type;
+    double min = 0, max = 0;          // number, count
+    std::vector<std::wstring> words;  // words; for a weight, the names it may be given by
+    bool adjustable = false;          // may be adjusted element by element (p1.l1.t1.weight)
+    std::wstring fallback;            // what it is when not written; empty when nothing is drawn for it
+};
+// Panel, line, text, bar, spectrum, shadow and backdrop, each attribute in the reader's order.
+std::vector<AttributeInfo> Attributes();
 
 }  // namespace animelogon::skin

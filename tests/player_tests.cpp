@@ -27,9 +27,12 @@
 #include <vector>
 
 #include "animelogon/secure.h"
+#include "animelogon/sha256.h"
 #include "animelogon/text.h"
+#include "animelogon/wallpaper.h"
 #include "nv12.h"
 #include "player.h"
+#include "transcode.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -505,6 +508,8 @@ bool PlaysAndLoops(const std::wstring &scratch, ID3D11Device *device, IMFDXGIDev
     if (!manager) CHECK(!player->hardware());
     CHECK(player->width() == (int)w && player->height() == (int)h);
     CHECK(std::fabs(player->frameSeconds() - 1.0 / kFps) < 1e-4);
+    // One loop's length, which the sound track is looped to.
+    CHECK(std::fabs(player->durationSeconds() - (double)kFrames / kFps) < 1e-3);
     const ULONGLONG start = GetTickCount64();
     UINT texW = 0, texH = 0;
     const int want = (int)kFrames * 2 + 5;
@@ -690,6 +695,162 @@ TEST(FirstSoftwareFrameIsReadWhereTheDecoderPutsIt) {
         const Yuv &top = ColourAt(w, h, 0, 0);
         CHECK(std::abs(lock.luma()[0] - top.y) <= kTolerance);
         CHECK(std::abs(lock.chroma()[0] - top.u) <= kTolerance && std::abs(lock.chroma()[1] - top.v) <= kTolerance);
+    }
+    animelogon::secure::RemoveTree(scratch);
+}
+
+// The bundled wallpaper's video, which install.exe writes for the default theme. It is what
+// BundledWallpaperInfo says it is -- and wallpaper.ini as install.exe writes it reads back the same --
+// and the overlay's player decodes it on the software path, the slowest a machine can take.
+TEST(BundledWallpaperIsWhatInstallExeDescribes) {
+    std::wstring path = L"" ANIMELOGON_BUNDLED_WALLPAPER;
+    std::replace(path.begin(), path.end(), L'/', L'\\');
+    std::vector<uint8_t> bytes;
+    CHECK(animelogon::secure::ReadFileBytes(path, &bytes, 100u << 20));
+    if (bytes.empty()) return;
+    CHECK(animelogon::LooksLikeMp4(bytes.data(), bytes.size()));
+    const animelogon::WallpaperInfo w =
+        animelogon::BundledWallpaperInfo(animelogon::Sha256Of(bytes.data(), bytes.size()));
+    CHECK(w.id == animelogon::kBundledWallpaper && w.sha256.size() == 64);
+    animelogon::WallpaperInfo back;
+    CHECK(animelogon::ParseWallpaperInfo(animelogon::SerializeWallpaperInfo(w), &back));
+    CHECK(back.kind == animelogon::WallpaperKind::Video && back.width == w.width && back.height == w.height);
+    CHECK(back.frameRateNum == w.frameRateNum && back.frameRateDen == w.frameRateDen);
+    CHECK(back.durationMs == w.durationMs && !back.hasAudio && back.sha256 == w.sha256);
+
+    if (!MediaFoundationHere()) return Skipped("no Media Foundation here");
+    Media media;
+    ComPtr<ID3D11Device> device;
+    if (!media.mf || !MakeDevice(false, &device)) return Skipped("no Media Foundation or no WARP device");
+    auto player = std::make_unique<VideoPlayer>();
+    const bool opened = player->Open(path, device.Get(), nullptr);
+    CHECK(opened);
+    if (!opened) return;
+    CHECK(!player->hardware());
+    CHECK(player->width() == w.width && player->height() == w.height);
+    CHECK(std::fabs(player->frameSeconds() * w.frameRateNum / w.frameRateDen - 1.0) < 1e-3);
+    CHECK(std::fabs(player->durationSeconds() - w.durationMs / 1000.0) < 0.05);
+    const int want = 30;
+    const int shown = Play(*player, want, 20.0, [](int, const VideoPlayer::Frame &) {});
+    if (!player->failed() && shown < want) {
+        Abandon(std::move(player), "the bundled wallpaper", shown, want);
+        return Stalled(media, device.Get(), false);
+    }
+    if (player->failed()) std::printf("  the player failed: %ls\n", player->failure().c_str());
+    CHECK(!player->failed() && shown == want);
+}
+
+// The settings app's transcoder (config/src/transcode.h): the decisions it makes, which need no
+// codec.
+TEST(TranscoderChoosesItsPathAndSettings) {
+    using transcode::Path;
+    // 0.12 bits per pixel per frame, within 4..60 Mbit/s.
+    CHECK(transcode::Bitrate(1920, 1080, 30) == 7464960);
+    CHECK(transcode::Bitrate(640, 360, 30) == 4000000);
+    CHECK(transcode::Bitrate(3840, 2160, 60) == 59719680);
+    CHECK(transcode::Bitrate(3840, 2160, 120) == 60000000);
+    // An IDR picture every second.
+    CHECK(transcode::KeyFrameInterval(60, 1) == 60);
+    CHECK(transcode::KeyFrameInterval(30000, 1001) == 30);
+    CHECK(transcode::KeyFrameInterval(24, 1) == 24);
+    CHECK(transcode::KeyFrameInterval(1, 2) == 1);
+    CHECK(transcode::KeyFrameInterval(0, 0) == 30);
+    // The graphics card first where it has an encoder, unless the processor is asked for.
+    CHECK(transcode::StartsOnHardware(Path::Auto, true));
+    CHECK(!transcode::StartsOnHardware(Path::Auto, false));
+    CHECK(!transcode::StartsOnHardware(Path::Cpu, true));
+    CHECK(transcode::StartsOnHardware(Path::Hardware, true));
+    // After it fails: the processor, except after a cancel, a fault the processor would meet too,
+    // or when only the graphics card was asked for.
+    CHECK(transcode::RetriesOnCpu(Path::Auto, false, false));
+    CHECK(!transcode::RetriesOnCpu(Path::Auto, true, false));
+    CHECK(!transcode::RetriesOnCpu(Path::Auto, false, true));
+    CHECK(!transcode::RetriesOnCpu(Path::Hardware, false, false));
+}
+
+// The transcoder on the quadrants at 1080p, whose decoded frames are 1088 lines with 1080 to show:
+// on the processor and, where the machine has one, on the graphics card's encoder. What it writes
+// must play in the overlay's player, decoded in software and on the hardware path, with every
+// quadrant where it was -- a picture cut from the wrong rows or a chroma plane out of place fails.
+TEST(TranscodedVideoPlaysInThePlayer) {
+    if (!MediaFoundationHere()) return Skipped("Media Foundation cannot encode H.264 here");
+    Media media;
+    ComPtr<ID3D11Device> warp, gpu;
+    ComPtr<IMFDXGIDeviceManager> manager;
+    UINT token = 0;
+    if (!media.mf || !MakeDevice(false, &warp)) return Skipped("no Media Foundation or no WARP device");
+    const bool hardwareDecoding = MakeDevice(true, &gpu) && SUCCEEDED(MFCreateDXGIDeviceManager(&token, &manager)) &&
+                                  SUCCEEDED(manager->ResetDevice(gpu.Get(), token));
+    const std::wstring scratch = ScratchDir();
+    const std::wstring clip = scratch + L"\\source.mp4";
+    if (!MakeClip(clip, 1920, 1080, 20)) {
+        animelogon::secure::RemoveTree(scratch);
+        return Skipped("Media Foundation cannot encode H.264 here");
+    }
+    const bool encoder = !transcode::HardwareEncoders().empty();
+    for (const transcode::Path path : {transcode::Path::Cpu, transcode::Path::Hardware}) {
+        const bool onCard = path == transcode::Path::Hardware;
+        if (onCard && !encoder) {
+            Skipped("no graphics card's H.264 encoder for the second half");
+            break;
+        }
+        const std::wstring out = scratch + (onCard ? L"\\card" : L"\\processor");
+        transcode::Source source;
+        source.path = clip;
+        transcode::Options options;
+        options.path = path;
+        std::atomic<bool> cancel{false};
+        double last = -1;
+        bool forwards = true;
+        const transcode::Result r = transcode::Run(source, out, L"Quadrants", cancel, [&](double f) {
+            forwards = forwards && f >= last;
+            last = f;
+        }, options);
+        CHECK(r.ok);
+        if (!r.ok) {
+            std::printf("  %s: %ls\n", onCard ? "graphics card" : "processor", r.error.c_str());
+            continue;
+        }
+        CHECK(r.hardware == onCard);
+        CHECK(r.info.width == 1920 && r.info.height == 1080 && r.info.frameRateNum == 30 && r.info.frameRateDen == 1);
+        CHECK(!r.info.hasAudio && r.info.sourceName == L"source.mp4");
+        CHECK(forwards && last == 1.0);
+        // Played as the overlay finds it, under the name PlaysAndLoops looks for.
+        const std::wstring play = scratch + (onCard ? L"\\play-card" : L"\\play-processor");
+        CreateDirectoryW(play.c_str(), nullptr);
+        CHECK(CopyFileW((out + L"\\video.mp4").c_str(), (play + L"\\quadrants 1920x1080.mp4").c_str(), TRUE));
+        std::printf("  written on the %s:\n", onCard ? "graphics card" : "processor");
+        if (!PlaysAndLoops(play, warp.Get(), nullptr, 1920, 1080)) return Stalled(media, warp.Get(), false);
+        if (hardwareDecoding && !PlaysAndLoops(play, gpu.Get(), manager.Get(), 1920, 1080))
+            return Stalled(media, gpu.Get(), true);
+    }
+    animelogon::secure::RemoveTree(scratch);
+}
+
+// A cancel during the conversion ends it on either path with nothing left in the output directory
+// but what was there.
+TEST(TranscoderStopsWhenCancelled) {
+    if (!MediaFoundationHere()) return Skipped("Media Foundation cannot encode H.264 here");
+    Media media;
+    if (!media.mf) return Skipped("no Media Foundation");
+    const std::wstring scratch = ScratchDir();
+    const std::wstring clip = scratch + L"\\source.mp4";
+    if (!MakeClip(clip, 640, 360, 60)) {
+        animelogon::secure::RemoveTree(scratch);
+        return Skipped("Media Foundation cannot encode H.264 here");
+    }
+    for (const transcode::Path path : {transcode::Path::Cpu, transcode::Path::Auto}) {
+        const std::wstring out = scratch + (path == transcode::Path::Cpu ? L"\\processor" : L"\\auto");
+        transcode::Source source;
+        source.path = clip;
+        transcode::Options options;
+        options.path = path;
+        std::atomic<bool> cancel{false};
+        const transcode::Result r =
+            transcode::Run(source, out, L"Quadrants", cancel, [&](double f) { if (f > 0.2) cancel = true; }, options);
+        CHECK(!r.ok && !r.error.empty());
+        CHECK(GetFileAttributesW((out + L"\\video.mp4").c_str()) == INVALID_FILE_ATTRIBUTES);
+        CHECK(GetFileAttributesW((out + L"\\wallpaper.ini").c_str()) == INVALID_FILE_ATTRIBUTES);
     }
     animelogon::secure::RemoveTree(scratch);
 }

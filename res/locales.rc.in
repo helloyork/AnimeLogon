@@ -1,0 +1,8 @@
+// The strings of every language (common/include/animelogon/i18n.h), for the programs built with
+// the LOCALES option of animelogon_add_executable. The names are the ones i18n.cpp looks up.
+#pragma code_page(65001)
+
+LOCALE_ZH_HANS RCDATA "@ANIMELOGON_LOCALES@/zh-Hans.json"
+LOCALE_ZH_HANT RCDATA "@ANIMELOGON_LOCALES@/zh-Hant.json"
+LOCALE_EN      RCDATA "@ANIMELOGON_LOCALES@/en.json"
+LOCALE_JA      RCDATA "@ANIMELOGON_LOCALES@/ja.json"

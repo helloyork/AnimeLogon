@@ -18,6 +18,7 @@
 #include <string>
 #include <vector>
 
+#include "animelogon/blur.h"
 #include "animelogon/clock.h"
 #include "animelogon/components.h"
 #include "animelogon/monitors.h"
@@ -294,5 +295,307 @@ TEST(SkinPanelsSayThePointTheyAreHeldBy) {
         // The texts are not placed by an anchor.
         for (const SkinView::Bound &t : bounds) CHECK(t.key == L"p1" || !t.holds);
     }
+    // Counted in, the marker moves the whole first line onto the centre: the panel is held by the
+    // middle of its full width, and the date is centred under the time and the marker together.
+    {
+        Picture out;
+        std::vector<SkinView::Bound> bounds;
+        CHECK(preview.Render(background, skin::Resolve(skin::Default(), {{L"p1.anchor", L"top"}, {L"p1.l1.t2.hang", L"false"}}),
+                             ClockStyle{}, us, now, &out, &bounds));
+        const auto at = [&](const wchar_t *key) {
+            return std::find_if(bounds.begin(), bounds.end(), [&](const SkinView::Bound &b) { return b.key == key; });
+        };
+        const auto p1 = at(L"p1"), time = at(L"p1.l1.t1"), marker = at(L"p1.l1.t2"), date = at(L"p1.l2.t1");
+        CHECK(p1 != bounds.end() && time != bounds.end() && marker != bounds.end() && date != bounds.end());
+        if (p1 != bounds.end() && time != bounds.end() && marker != bounds.end() && date != bounds.end()) {
+            CHECK(about(p1->holdX[1], 320.0f) && about(p1->holdX[1], (p1->rect.left + p1->rect.right) / 2));
+            CHECK(about((time->rect.left + marker->rect.right) / 2, (date->rect.left + date->rect.right) / 2));
+        }
+    }
+    if (SUCCEEDED(co)) CoUninitialize();
+}
+
+// What is hidden takes no room, and the space before a text goes only where something is drawn
+// before it; a text with a widest width is cut short; a text that rises is drawn higher; a plate
+// fills the padding around the ink; a panel at no opacity draws nothing.
+TEST(SkinPanelsLeaveOutTrimShiftAndPlate) {
+    const HRESULT co = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    SkinPreview preview;
+    Picture background;
+    background.width = 640;
+    background.height = 360;
+    background.bgra.assign((size_t)640 * 360 * 4, 0);
+    const RegionalFormat us{L"en-US", L"h:mm tt", L"dddd, MMMM d, yyyy"};
+    SYSTEMTIME now{};
+    now.wYear = 2026;
+    now.wMonth = 11;
+    now.wDay = 13;
+    now.wHour = 9;
+    now.wMinute = 41;
+    skin::Skin s;
+    std::wstring error;
+    CHECK(skin::Parse("<component format=\"1\" name=\"t\"><panel anchor=\"top-left\" size=\"10\" margin=\"20\">"
+                      "<line><text value=\"MM\"/><text value=\"MM\" space=\"1\"/></line>"
+                      "<backdrop opacity=\"0\" shape=\"plate\" padding-x=\"1\" padding-y=\"0.5\" color=\"#FF0000\"/>"
+                      "</panel></component>",
+                      &s, &error));
+    const float em = 36.0f, margin = 72.0f;
+    auto draw = [&](skin::Values values, Picture *out) {
+        std::vector<SkinView::Bound> bounds;
+        CHECK(preview.Render(background, skin::Resolve(s, values), ClockStyle{}, us, now, out, &bounds));
+        std::map<std::wstring, D2D1_RECT_F> at;
+        for (const SkinView::Bound &b : bounds) at[b.key] = b.rect;
+        return at;
+    };
+    Picture out;
+    auto both = draw({}, &out);
+    CHECK(both.count(L"p1.l1.t1") && both.count(L"p1.l1.t2"));
+    // Hidden, the first takes no room, and the second starts where the first did, without its space.
+    auto alone = draw({{L"p1.l1.t1.show", L"false"}}, &out);
+    CHECK(!alone.count(L"p1.l1.t1") && alone.count(L"p1.l1.t2"));
+    if (both.count(L"p1.l1.t1") && alone.count(L"p1.l1.t2")) {
+        CHECK(std::fabs(alone[L"p1.l1.t2"].left - both[L"p1.l1.t1"].left) <= 1.5f);
+        CHECK(alone[L"p1"].right - alone[L"p1"].left < both[L"p1"].right - both[L"p1"].left - em);
+    }
+    // Hidden altogether: nothing is drawn.
+    auto none = draw({{L"p1.l1.t1.show", L"false"}, {L"p1.l1.t2.show", L"false"}}, &out);
+    CHECK(!none.count(L"p1"));
+    // Cut short: no wider than its widest, an ellipsis included.
+    auto cut = draw({{L"p1.l1.t1.max", L"0.8"}}, &out);
+    if (cut.count(L"p1.l1.t1")) CHECK(cut[L"p1.l1.t1"].right - cut[L"p1.l1.t1"].left <= 0.8f * em + 1.0f);
+    // Raised by half an em: the panel's ink starts at the raised text, so the other one is drawn
+    // half an em lower than when neither rises.
+    auto inkTop = [&](const D2D1_RECT_F &r) {
+        for (int y = 0; y < (int)out.height; ++y)
+            for (int x = std::max(0, (int)r.left); x < std::min((int)out.width, (int)r.right); ++x)
+                if (out.bgra[((size_t)y * out.width + x) * 4 + 1] > 128) return (float)y;
+        return -1.0f;
+    };
+    both = draw({}, &out);
+    const float level = both.count(L"p1.l1.t1") ? inkTop(both[L"p1.l1.t1"]) : -1.0f;
+    auto raised = draw({{L"p1.l1.t2.rise", L"0.5"}}, &out);
+    if (raised.count(L"p1.l1.t1") && level >= 0.0f)
+        CHECK(std::fabs(inkTop(raised[L"p1.l1.t1"]) - level - 0.5f * em) <= 2.0f);
+    // A plate: red in its padding, left of the ink and above it, and nothing beyond it.
+    draw({{L"p1.b.opacity", L"1"}}, &out);
+    auto red = [&](int x, int y) {
+        if (x < 0 || y < 0 || x >= (int)out.width || y >= (int)out.height) return false;
+        const uint8_t *px = out.bgra.data() + ((size_t)y * out.width + x) * 4;
+        return px[2] > 200 && px[1] < 40 && px[0] < 40;
+    };
+    if (both.count(L"p1")) {
+        const D2D1_RECT_F &ink = both[L"p1"];
+        CHECK(red((int)(ink.left - 0.5f * em), (int)((ink.top + ink.bottom) / 2)));
+        CHECK(red((int)((ink.left + ink.right) / 2), (int)(ink.top - 0.25f * em)));
+        CHECK(!red((int)(ink.left - 1.2f * em), (int)((ink.top + ink.bottom) / 2)));
+        CHECK(ink.left >= margin - 2.0f);
+    }
+    // At no opacity, the panel leaves the picture as it was.
+    draw({{L"p1.opacity", L"0"}, {L"p1.b.opacity", L"1"}}, &out);
+    CHECK(std::all_of(out.bgra.begin(), out.bgra.end(), [i = 0](uint8_t v) mutable { return (i++ % 4) == 3 || v == 0; }));
+    if (SUCCEEDED(co)) CoUninitialize();
+}
+
+// A panel may hang past its display's edges by up to three quarters of its box in each direction;
+// a box as long as the display or longer is centred on it. The moves are whole pixels.
+TEST(PanelShiftKeepsAQuarterOfTheBoxOnTheDisplay) {
+    CHECK(PanelShift(100.0f, 200.0f, 1000.0f) == 0.0f);   // on the display
+    CHECK(PanelShift(-75.0f, 25.0f, 1000.0f) == 0.0f);    // three quarters before its start
+    CHECK(PanelShift(975.0f, 1075.0f, 1000.0f) == 0.0f);  // three quarters past its end
+    CHECK(PanelShift(-300.0f, -200.0f, 1000.0f) == 225.0f);  // all of it before: a quarter comes back
+    CHECK(PanelShift(1500.0f, 1600.0f, 1000.0f) == -525.0f);
+    CHECK(PanelShift(-75.5f, 24.5f, 1000.0f) == 1.0f);    // whole pixels, never short of the rule
+    CHECK(PanelShift(975.5f, 1075.5f, 1000.0f) == -1.0f);
+    CHECK(PanelShift(300.0f, 1500.0f, 1000.0f) == -400.0f);  // longer than the display: centred
+    CHECK(PanelShift(0.0f, 1000.0f, 1000.0f) == 0.0f);
+}
+
+TEST(SkinPanelsMayHangPastTheirDisplay) {
+    const HRESULT co = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    SkinPreview preview;
+    Picture background;
+    background.width = 640;
+    background.height = 360;
+    background.bgra.assign((size_t)640 * 360 * 4, 0);
+    const RegionalFormat us{L"en-US", L"h:mm tt", L"dddd, MMMM d, yyyy"};
+    SYSTEMTIME now{};
+    now.wYear = 2026;
+    now.wMonth = 10;
+    now.wDay = 16;
+    now.wDayOfWeek = 5;
+    now.wHour = 15;
+    now.wMinute = 4;
+    auto place = [&](const skin::Skin &s, std::map<std::wstring, std::wstring> values, Picture *out = nullptr) {
+        Picture drawn;
+        std::vector<SkinView::Bound> bounds;
+        CHECK(preview.Render(background, skin::Resolve(s, values), ClockStyle{}, us, now, out ? out : &drawn, &bounds));
+        const auto p1 = std::find_if(bounds.begin(), bounds.end(), [](const SkinView::Bound &b) { return b.key == L"p1"; });
+        CHECK(p1 != bounds.end());
+        return p1 == bounds.end() ? SkinView::Bound{} : *p1;
+    };
+    const skin::Skin clock = skin::Default();
+    auto wide = [](const SkinView::Bound &b) { return b.rect.right - b.rect.left; };
+    auto tall = [](const SkinView::Bound &b) { return b.rect.bottom - b.rect.top; };
+    // Offsets well past an edge leave a quarter of the clock on the display, the rest past it.
+    const SkinView::Bound right = place(clock, {{L"p1.anchor", L"top-right"}, {L"p1.offset-x", L"50"}});
+    CHECK(right.rect.right > 640.0f + wide(right) / 2);
+    CHECK(640.0f - right.rect.left >= wide(right) / 4 && 640.0f - right.rect.left <= wide(right) / 4 + 1.0f);
+    const SkinView::Bound corner = place(clock, {{L"p1.anchor", L"bottom-left"}, {L"p1.offset-x", L"-50"}, {L"p1.offset-y", L"50"}});
+    CHECK(corner.rect.right >= wide(corner) / 4 && corner.rect.right <= wide(corner) / 4 + 1.0f);
+    CHECK(360.0f - corner.rect.top >= tall(corner) / 4 && 360.0f - corner.rect.top <= tall(corner) / 4 + 1.0f);
+    const SkinView::Bound up = place(clock, {{L"p1.anchor", L"top"}, {L"p1.offset-y", L"-50"}});
+    CHECK(up.rect.bottom >= tall(up) / 4 && up.rect.bottom <= tall(up) / 4 + 1.0f);
+    // The point it is held by moves with it, so the settings page's marks follow.
+    CHECK(right.holdX[2] > right.rect.left && right.holdX[2] <= right.rect.right);
+    CHECK(corner.holdY[2] > corner.rect.top && corner.holdY[2] <= corner.rect.bottom);
+    // An offset that keeps the quarter on is left alone, also where it carries the clock past the
+    // bottom edge: the date's baseline 10% of the height lower than the anchor, below the display.
+    const SkinView::Bound kept = place(clock, {{L"p1.anchor", L"top"}, {L"p1.offset-y", L"10"}});
+    CHECK(std::fabs(kept.holdY[0] - (0.07f * 360 + 36.0f)) <= 1.5f);
+    const SkinView::Bound low = place(clock, {{L"p1.anchor", L"bottom"}, {L"p1.offset-y", L"10"}});
+    CHECK(std::fabs(low.holdY[2] - (360.0f - 0.07f * 360 + 36.0f)) <= 1.5f && low.rect.bottom > 360.0f);
+    // A spectrum pushed half past the bottom edge is cut there: its bands reach the last row.
+    skin::Skin bands;
+    CHECK(BuiltInComponent(L"spectrum", &bands));
+    Picture out;
+    const SkinView::Bound cut = place(bands, {{L"p1.offset-y", L"8"}, {L"p1.s1.opacity", L"0"}}, &out);
+    CHECK(cut.rect.top < 360.0f && cut.rect.bottom > 360.0f + tall(cut) / 4);
+    bool reaches = false;
+    for (int x = std::max(0, (int)cut.rect.left); x < std::min(640, (int)cut.rect.right) && !reaches; ++x) {
+        const uint8_t *px = out.bgra.data() + ((size_t)359 * out.width + x) * 4;
+        reaches = px[0] > 100 || px[2] > 100;
+    }
+    CHECK(reaches);
+    // A panel taller than the display is centred on it, wherever its offsets say.
+    skin::Skin big;
+    std::wstring error;
+    CHECK(skin::Parse("<component format=\"1\" name=\"t\"><panel anchor=\"top\" size=\"50\">"
+                      "<line><text value=\"M\"/></line><line gap=\"0.3\"><text value=\"M\"/></line>"
+                      "<line gap=\"0.3\"><text value=\"M\"/></line></panel></component>",
+                      &big, &error));
+    for (const wchar_t *offset : {L"0", L"50", L"-50"}) {
+        const SkinView::Bound centred = place(big, {{L"p1.offset-y", offset}});
+        CHECK(tall(centred) > 360.0f && std::fabs(centred.rect.top + centred.rect.bottom - 360.0f) <= 1.5f);
+    }
+    if (SUCCEEDED(co)) CoUninitialize();
+}
+
+// The wallpaper is drawn at the theme's brightness, as the logon screen draws it, and the
+// components over it are not darkened.
+TEST(AppPicturesDrawTheWallpaperAtTheThemesBrightness) {
+    const HRESULT co = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    OneThemeStores stores;
+    app::Library library(stores);
+    app::Pictures pictures(library);
+    theme::Theme t = library.Edited(kTheme);
+    Picture full, dim, everything;
+    CHECK(pictures.Theme(t, 320, 180, app::Draw::WallpaperOnly, &full));
+    t.brightness = 0.5f;
+    CHECK(pictures.Theme(t, 320, 180, app::Draw::WallpaperOnly, &dim));
+    bool half = full.bgra.size() == dim.bgra.size() && !full.bgra.empty();
+    for (size_t i = 0; half && i < full.bgra.size(); i += 4)
+        for (size_t c = 0; c < 3; ++c) half = half && dim.bgra[i + c] == (uint8_t)(full.bgra[i + c] * 0.5f + 0.5f);
+    CHECK(half);
+    std::vector<app::Bound> bounds;
+    CHECK(pictures.Theme(t, 320, 180, app::Draw::Everything, &everything, &bounds));
+    uint8_t brightest = 0;
+    for (const app::Bound &b : bounds)
+        if (b.key == L"p1")
+            for (UINT y = (UINT)std::max(0.0f, b.rect.top); y < (UINT)b.rect.bottom && y < everything.height; ++y)
+                for (UINT x = (UINT)std::max(0.0f, b.rect.left); x < (UINT)b.rect.right && x < everything.width; ++x)
+                    brightest = std::max(brightest, everything.bgra[((size_t)y * everything.width + x) * 4 + 2]);
+    CHECK(brightest > 200);
+    if (SUCCEEDED(co)) CoUninitialize();
+}
+
+// Spanning, the wallpaper's blur is drawn as the logon screen draws it on each display: every
+// display's part of the wall blurred on its own, its edges held, by the sigma the main display's
+// height gives -- on the side display too, though it is shorter. Nothing crosses from one display to
+// the next, and the side display is not blurred by its own height. One display: the whole picture,
+// by its height.
+TEST(AppPicturesBlurEachDisplayOfAWallOnItsOwn) {
+    Settings s;
+    s.monitorMode = MonitorMode::Span;
+    // 1920 x 1080 main, 1280 x 1024 beside it 56 lower: 384 x 216 and 256 x 205 of a 640 x 216 wall.
+    const std::vector<app::Screen> wall = app::Wall(s, TwoDisplays(), 640, 216);
+    CHECK(wall.size() == 2 && wall[0].primary && !wall[1].primary);
+    CHECK(std::fabs(app::WallSigma(2.8f, wall, 216) - blur::Sigma(2.8f, 216)) < 1e-4f);
+    CHECK(std::fabs(app::WallSigma(2.8f, {}, 180) - blur::Sigma(2.8f, 180)) < 1e-4f);
+    // The main display named second still gives its height.
+    const std::vector<app::Screen> swapped{wall[1], wall[0]};
+    CHECK(std::fabs(app::WallSigma(2.8f, swapped, 216) - blur::Sigma(2.8f, 216)) < 1e-4f);
+
+    // White on the main display, black on the side one, a grey strip in the corner no display shows,
+    // with a mark in the middle of each display so that the blur has something to spread.
+    const UINT W = 640, H = 216;
+    std::vector<uint8_t> picture((size_t)W * H * 4, 0);
+    auto put = [&](std::vector<uint8_t> &p, UINT w, UINT x, UINT y, uint8_t v) {
+        uint8_t *px = &p[((size_t)y * w + x) * 4];
+        px[0] = px[1] = px[2] = v;
+        px[3] = 255;
+    };
+    for (UINT y = 0; y < H; ++y)
+        for (UINT x = 0; x < W; ++x) put(picture, W, x, y, x < 384 ? 255 : y < 11 ? 128 : 0);
+    for (UINT y = 90; y < 126; ++y)
+        for (UINT x = 170; x < 214; ++x) put(picture, W, x, y, 0);
+    for (UINT y = 90; y < 126; ++y)
+        for (UINT x = 490; x < 534; ++x) put(picture, W, x, y, 255);
+    std::vector<uint8_t> blurred = picture;
+    app::BlurWallpaper(blurred.data(), W, H, 2.8f, wall);
+
+    // Each display's part is exactly that part blurred alone by the main display's sigma.
+    const float sigma = blur::Sigma(2.8f, 216);
+    for (const app::Screen &screen : wall) {
+        const UINT w = (UINT)(screen.rect.right - screen.rect.left), h = (UINT)(screen.rect.bottom - screen.rect.top);
+        std::vector<uint8_t> alone((size_t)w * h * 4);
+        for (UINT y = 0; y < h; ++y)
+            memcpy(&alone[(size_t)y * w * 4], &picture[(((size_t)screen.rect.top + y) * W + screen.rect.left) * 4], (size_t)w * 4);
+        blur::Apply(alone.data(), (int)w, (int)h, 4, sigma);
+        bool same = true;
+        for (UINT y = 0; y < h && same; ++y)
+            same = memcmp(&alone[(size_t)y * w * 4], &blurred[(((size_t)screen.rect.top + y) * W + screen.rect.left) * 4], (size_t)w * 4) == 0;
+        CHECK(same);
+    }
+    // At the seam, the main display's last column stays white and the side display's first black.
+    CHECK(blurred[((size_t)150 * W + 383) * 4] == 255 && blurred[((size_t)150 * W + 384) * 4] == 0);
+    // The side display's mark spreads as far as the main display's sigma takes it, not its own.
+    std::vector<uint8_t> ownHeight((size_t)256 * 205 * 4);
+    for (UINT y = 0; y < 205; ++y)
+        memcpy(&ownHeight[(size_t)y * 256 * 4], &picture[(((size_t)11 + y) * W + 384) * 4], (size_t)256 * 4);
+    blur::Apply(ownHeight.data(), 256, 205, 4, blur::Sigma(2.8f, 205));
+    bool differs = false;
+    for (UINT y = 0; y < 205 && !differs; ++y)
+        differs = memcmp(&ownHeight[(size_t)y * 256 * 4], &blurred[(((size_t)11 + y) * W + 384) * 4], (size_t)256 * 4) != 0;
+    CHECK(differs);
+    // The corner no display shows is blurred too, as one piece of the whole picture.
+    std::vector<uint8_t> whole = picture;
+    blur::Apply(whole.data(), (int)W, (int)H, 4, sigma);
+    CHECK(memcmp(&whole[((size_t)5 * W + 500) * 4], &blurred[((size_t)5 * W + 500) * 4], 4) == 0);
+
+    // One display: the whole picture by its own height, as before.
+    std::vector<uint8_t> one = picture, plain = picture;
+    app::BlurWallpaper(one.data(), W, H, 2.8f, {});
+    blur::Apply(plain.data(), (int)W, (int)H, 4, blur::Sigma(2.8f, (int)H));
+    CHECK(one == plain);
+}
+
+// The wallpaper is blurred, the components over it stay sharp.
+TEST(AppPicturesBlurTheWallpaperAloneAtTheThemesBlur) {
+    const HRESULT co = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    OneThemeStores stores;
+    app::Library library(stores);
+    app::Pictures pictures(library);
+    theme::Theme t = library.Edited(kTheme);
+    t.blur = 3.0f;
+    Picture everything;
+    std::vector<app::Bound> bounds;
+    CHECK(pictures.Theme(t, 320, 180, app::Draw::Everything, &everything, &bounds));
+    uint8_t brightest = 0;
+    for (const app::Bound &b : bounds)
+        if (b.key == L"p1")
+            for (UINT y = (UINT)std::max(0.0f, b.rect.top); y < (UINT)b.rect.bottom && y < everything.height; ++y)
+                for (UINT x = (UINT)std::max(0.0f, b.rect.left); x < (UINT)b.rect.right && x < everything.width; ++x)
+                    brightest = std::max(brightest, everything.bgra[((size_t)y * everything.width + x) * 4 + 2]);
+    CHECK(brightest > 200);
     if (SUCCEEDED(co)) CoUninitialize();
 }

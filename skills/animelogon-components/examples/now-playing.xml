@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- What plays in the signed-in user's session, on a rounded plate: the title, the artist, and a
+     line with the play or pause icon, a progress bar and the time. The whole panel is hidden while
+     nothing plays, and the time is hidden when the length is unknown. Long titles end in an
+     ellipsis instead of widening the plate. -->
+<component format="1" name="Now playing card" author="AnimeLogon">
+  <settings>
+    <choice id="position" label="Position" default="bottom-left">
+      <option value="bottom-left" label="Bottom left"/>
+      <option value="bottom" label="Bottom center"/>
+      <option value="bottom-right" label="Bottom right"/>
+    </choice>
+    <number id="size" label="Size" default="2.4" min="1.5" max="6" step="0.1"/>
+    <color id="color" label="Color" default="#FFFFFF"/>
+    <toggle id="album" label="Album" detail="Shows the album after the artist." default="off" on="true" off="false"/>
+    <number id="plate" label="Plate opacity" default="0.45" min="0" max="1" step="0.05"/>
+  </settings>
+  <panel anchor="$position" size="$size" margin="4.5" align="left" when="media.state">
+    <line>
+      <text label="Title" value="{media.title}" weight="semibold" color="$color" max="14"/>
+    </line>
+    <line gap="0.3" when="media.artist">
+      <text label="Artist" value="{media.artist}" color="$color" opacity="0.8" size="0.8" max="12"/>
+      <text label="Album" value="· {media.album}" show="$album" when="media.album" color="$color" opacity="0.6" size="0.8" space="0.3" max="10"/>
+    </line>
+    <line gap="0.55">
+      <text label="State" value="{media.glyph}" font="Segoe Fluent Icons" color="$color" size="0.7" rise="-0.04"/>
+      <bar label="Progress" value="{media.progress}" length="9" thickness="0.1" color="$color" track="$color" track-opacity="0.3" space="0.45"/>
+      <text label="Time" value="{media.position} / {media.duration}" when="media.duration" color="$color" opacity="0.75" size="0.65" space="0.45" figures="tabular"/>
+    </line>
+    <shadow blur="0.05" opacity="0.4" y="0.025"/>
+    <backdrop label="Plate" shape="plate" opacity="$plate" color="#101218" radius="0.5" padding-x="0.8" padding-y="0.6"/>
+  </panel>
+</component>

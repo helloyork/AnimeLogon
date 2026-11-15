@@ -1,4 +1,5 @@
 #include "staging.h"
+#include "animelogon/i18n.h"
 
 #include <windows.h>
 
@@ -74,7 +75,7 @@ std::wstring ThemeName(const std::wstring &stem) {
         if (IS_HIGH_SURROGATE(name[cut - 1])) --cut;
         name = std::wstring(Trim(name.substr(0, cut)));
     }
-    return name.empty() ? std::wstring(L"未命名主题") : name;
+    return name.empty() ? animelogon::i18n::Tr("theme.untitled") : name;
 }
 
 std::wstring Now() {
@@ -103,11 +104,11 @@ bool WriteNew(const std::wstring &path, const std::string &text) { return WriteN
 
 std::wstring PictureProblem(image::Status status) {
     switch (status) {
-    case image::Status::CannotOpen: return L"无法打开这个文件，它可能正被其他程序使用。";
-    case image::Status::TooLarge: return L"图片文件超过 256 MB，无法导入。";
-    case image::Status::NotAnImage: return L"无法识别这个文件，它不是受支持的图片。";
-    case image::Status::TooManyPixels: return L"图片的像素太多，无法导入。";
-    default: return L"无法解码这张图片。";
+    case image::Status::CannotOpen: return animelogon::i18n::Tr("picture.error.open");
+    case image::Status::TooLarge: return animelogon::i18n::Tr("picture.error.too_large");
+    case image::Status::NotAnImage: return animelogon::i18n::Tr("picture.error.not_picture");
+    case image::Status::TooManyPixels: return animelogon::i18n::Tr("picture.error.pixels");
+    default: return animelogon::i18n::Tr("picture.error.decode");
     }
 }
 
@@ -115,7 +116,7 @@ std::wstring PictureProblem(image::Status status) {
 Result StageImage(const image::Picture &p, const std::wstring &dir, const std::wstring &name,
                   const std::wstring &sourceName) {
     const std::vector<uint8_t> bmp = bitmap::Build(p.width, p.height, p.bgra.data(), p.bgra.size());
-    if (bmp.empty()) return Error(L"图片的尺寸超出了壁纸的上限。");
+    if (bmp.empty()) return Error(animelogon::i18n::Tr("picture.error.size"));
     WallpaperInfo info;
     info.kind = WallpaperKind::Image;
     info.name = name;
@@ -125,19 +126,26 @@ Result StageImage(const image::Picture &p, const std::wstring &dir, const std::w
     info.height = p.height;
     if (!paths::CreateDirectories(dir) || !WriteNew(dir + L"\\image.bmp", bmp.data(), bmp.size()) ||
         !WriteNew(dir + L"\\wallpaper.ini", ToUtf8(SerializeWallpaperInfo(info))))
-        return Error(L"无法写入临时文件。");
+        return Error(animelogon::i18n::Tr("error.temp_file"));
     Result r;
     r.ok = true;
     return r;
 }
 
-Result StageVideo(const std::wstring &source, const std::wstring &dir, const std::wstring &name,
+Result StageVideo(const transcode::Source &source, const std::wstring &dir, const std::wstring &name,
                   const std::atomic<bool> &cancel, const Progress &progress) {
     const transcode::Result t = transcode::Run(source, dir, name, cancel, progress);
     Result r;
     r.ok = t.ok;
-    r.error = t.ok ? L"" : (t.error.empty() ? std::wstring(L"转码失败。") : t.error);
+    r.error = t.ok ? L"" : (t.error.empty() ? animelogon::i18n::Tr("transcode.error.failed") : t.error);
     return r;
+}
+
+Result StageVideo(const std::wstring &path, const std::wstring &dir, const std::wstring &name,
+                  const std::atomic<bool> &cancel, const Progress &progress) {
+    transcode::Source source;
+    source.path = path;
+    return StageVideo(source, dir, name, cancel, progress);
 }
 
 // The picture or video at `source` as a wallpaper in `dir`; `picture` says which it turned out
@@ -170,6 +178,22 @@ std::wstring PackageWallpaperName(const std::wstring &source, bool picture) {
     return L"wallpaper.png";
 }
 
+// Where `dir` really is: the path Windows reaches it by once every junction and link on the way is
+// followed, with long names. Empty if that cannot be told.
+std::wstring RealPath(const std::wstring &dir) {
+    HANDLE h = CreateFileW(dir.c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                           OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return L"";
+    std::vector<wchar_t> buf(32768);
+    const DWORD n = GetFinalPathNameByHandleW(h, buf.data(), (DWORD)buf.size(), FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+    CloseHandle(h);
+    if (!n || n >= buf.size()) return L"";
+    std::wstring real(buf.data(), n);
+    // \\?\C:\... is a drive path; \\?\UNC\server\... is not one the elevated side takes anyway.
+    if (real.compare(0, 4, L"\\\\?\\") == 0 && real.size() > 6 && real[5] == L':') real.erase(0, 4);
+    return real;
+}
+
 }  // namespace
 
 std::wstring NewImportDir() {
@@ -178,7 +202,14 @@ std::wstring NewImportDir() {
     for (int attempt = 0; attempt < 8; ++attempt) {
         const std::wstring dir = base + L"\\import\\" + RandomHex(6);
         if (GetFileAttributesW(dir.c_str()) != INVALID_FILE_ATTRIBUTES) continue;
-        if (paths::CreateDirectories(dir)) return dir;
+        if (!paths::CreateDirectories(dir)) continue;
+        // The elevated side reads staged files only by the path they really have, and refuses
+        // one reached through a junction (secure::OpenPlainFile). Where the profile or AppData was
+        // moved with mklink /J, %LOCALAPPDATA% is such a path; the import directory is named by
+        // where it really is instead, which is the same directory.
+        const std::wstring real = RealPath(dir);
+        if (!real.empty() && real != dir) ALOG(L"import: %s is really %s", dir.c_str(), real.c_str());
+        return real.empty() ? dir : real;
     }
     return L"";
 }
@@ -188,8 +219,8 @@ bool LooksLikePicture(const std::wstring &path) {
 }
 
 Result Media(const std::wstring &source, const std::wstring &dir, const std::atomic<bool> &cancel,
-             const Progress &progress) {
-    const std::wstring name = ThemeName(FileStem(source));
+             const Progress &progress, const std::wstring &named) {
+    const std::wstring name = ThemeName(named.empty() ? FileStem(source) : named);
     bool picture = false;
     Result r = StageWallpaper(source, dir + L"\\wallpaper", name, cancel, progress, &picture);
     if (!r.ok) return r;
@@ -199,15 +230,15 @@ Result Media(const std::wstring &source, const std::wstring &dir, const std::ato
     t.wallpaper = PackageWallpaperName(source, picture);
     t.fit = Scaling::Fill;
     t.components.push_back({kClockComponent, kClockComponent, true, {}});
-    if (!WriteNew(dir + L"\\theme.xml", theme::Normalize(t))) return Error(L"无法写入临时文件。");
+    if (!WriteNew(dir + L"\\theme.xml", theme::Normalize(t))) return Error(animelogon::i18n::Tr("error.temp_file"));
     if (progress) progress(1.0);
     r.name = name;
     return r;
 }
 
 Result Wallpaper(const std::wstring &source, const std::wstring &dir, const std::atomic<bool> &cancel,
-                 const Progress &progress) {
-    const std::wstring name = ThemeName(FileStem(source));
+                 const Progress &progress, const std::wstring &named) {
+    const std::wstring name = ThemeName(named.empty() ? FileStem(source) : named);
     bool picture = false;
     Result r = StageWallpaper(source, dir, name, cancel, progress, &picture);
     if (!r.ok) return r;
@@ -217,16 +248,14 @@ Result Wallpaper(const std::wstring &source, const std::wstring &dir, const std:
 }
 
 Result Package(const std::wstring &source, const std::wstring &dir, const std::atomic<bool> &cancel,
-               const Progress &progress) {
+               const Progress &progress, const std::wstring &title) {
     package::Reader reader;
     std::wstring why;
     if (!reader.Open(source, &why)) {
         ALOG(L"import: %s %s", source.c_str(), why.c_str());
         if (reader.Compressed())
-            return Error(L"这个主题包经过了压缩，无法导入。.altheme 必须是不压缩（存储）的 zip 文件。"
-                         L"可以在 7-Zip 中选择 zip 格式、压缩等级“仅存储”重新打包，"
-                         L"或者在命令提示符中运行 tar -a -c --options zip:compression=store -f 主题.altheme 加上包内的文件。");
-        return Error(L"这个文件不是有效的主题包（.altheme）。");
+            return Error(animelogon::i18n::Tr("package.error.compressed"));
+        return Error(animelogon::i18n::Tr("package.error.invalid"));
     }
 
     std::vector<uint8_t> bytes;
@@ -235,38 +264,44 @@ Result Package(const std::wstring &source, const std::wstring &dir, const std::a
     if (!reader.Read(reader.Theme(), package::kMaxXmlBytes, &bytes, &why) ||
         !theme::Parse(std::string_view((const char *)bytes.data(), bytes.size()), theme::Form::Package, &t, &why, &newer)) {
         ALOG(L"import: %s theme.xml %s", source.c_str(), why.c_str());
-        return Error(newer ? L"这个主题需要新版 AnimeLogon。" : L"主题包里的 theme.xml 有误：" + why);
+        return Error(newer ? animelogon::i18n::Tr("package.error.newer") : animelogon::i18n::Tr("package.error.theme_xml", {{L"why", why}}));
+    }
+    if (!kTakesScenes && t.wallpaper == L"wallpaper.alscene")
+        return Error(animelogon::i18n::Tr("package.error.scene_wallpaper"));
+    if (!title.empty()) {
+        const std::wstring name = ThemeName(title);
+        if (!name.empty()) t.name = name;
     }
 
     // The files the archive carries must be the ones theme.xml names.
     const package::Entry *wallpaper = reader.Wallpaper();
     const bool namesWallpaper = theme::IsPackageWallpaperRef(t.wallpaper);
-    if (namesWallpaper && !wallpaper) return Error(L"主题包里缺少 theme.xml 指定的壁纸文件 " + t.wallpaper + L"。");
+    if (namesWallpaper && !wallpaper) return Error(animelogon::i18n::Tr("package.error.no_wallpaper", {{L"name", t.wallpaper}}));
     if (namesWallpaper && FromUtf8(wallpaper->name) != t.wallpaper)
-        return Error(L"主题包里的壁纸文件是 " + FromUtf8(wallpaper->name) + L"，与 theme.xml 指定的 " + t.wallpaper + L" 不一致。");
+        return Error(animelogon::i18n::Tr("package.error.wallpaper_mismatch", {{L"name", FromUtf8(wallpaper->name)}, {L"named", t.wallpaper}}));
     if (!namesWallpaper && wallpaper)
-        return Error(L"主题包里有壁纸文件 " + FromUtf8(wallpaper->name) + L"，但 theme.xml 没有使用它。");
+        return Error(animelogon::i18n::Tr("package.error.unused_wallpaper", {{L"name", FromUtf8(wallpaper->name)}}));
     std::vector<std::wstring> named;
     for (const std::wstring &file : theme::PackageFiles(t))
         if (theme::IsPackageComponentRef(file)) named.push_back(file);
     for (const package::Entry &e : reader.Entries())
         if (e.kind == package::Kind::Component &&
             std::find(named.begin(), named.end(), FromUtf8(e.name)) == named.end())
-            return Error(L"主题包里有组件文件 " + FromUtf8(e.name) + L"，但 theme.xml 没有使用它。");
+            return Error(animelogon::i18n::Tr("package.error.unused_component", {{L"name", FromUtf8(e.name)}}));
     for (const std::wstring &file : named)
-        if (!reader.Find(ToUtf8(file))) return Error(L"主题包里缺少 theme.xml 指定的组件文件 " + file + L"。");
+        if (!reader.Find(ToUtf8(file))) return Error(animelogon::i18n::Tr("package.error.no_component", {{L"name", file}}));
 
     // Components, normalised.
-    if (!named.empty() && !paths::CreateDirectories(dir + L"\\components")) return Error(L"无法写入临时文件。");
+    if (!named.empty() && !paths::CreateDirectories(dir + L"\\components")) return Error(animelogon::i18n::Tr("error.temp_file"));
     for (const std::wstring &file : named) {
         skin::Skin parsed;
         if (!reader.Read(*reader.Find(ToUtf8(file)), package::kMaxXmlBytes, &bytes, &why) ||
             !skin::Parse(std::string_view((const char *)bytes.data(), bytes.size()), &parsed, &why)) {
             ALOG(L"import: %s %s %s", source.c_str(), file.c_str(), why.c_str());
-            return Error(L"主题包里的组件 " + file + L" 有误：" + why);
+            return Error(animelogon::i18n::Tr("package.error.component", {{L"name", file}, {L"why", why}}));
         }
         const std::wstring out = dir + L"\\components\\" + file.substr(file.find(L'/') + 1);
-        if (!WriteNew(out, skin::Normalize(parsed))) return Error(L"无法写入临时文件。");
+        if (!WriteNew(out, skin::Normalize(parsed))) return Error(animelogon::i18n::Tr("error.temp_file"));
     }
 
     // The wallpaper, through the same normalisation as a file imported on its own.
@@ -275,20 +310,22 @@ Result Package(const std::wstring &source, const std::wstring &dir, const std::a
         Result r;
         if (t.wallpaper == L"wallpaper.alscene") {
             package::Reader sceneReader;
-            if (!reader.Read(*wallpaper,package::kMaxPictureBytes,&bytes,&why) || !sceneReader.OpenBytes(std::move(bytes),&why)) return Error(L"场景包有误："+why);
+            if (!reader.Read(*wallpaper,package::kMaxPictureBytes,&bytes,&why) || !sceneReader.OpenBytes(std::move(bytes),&why)) return Error(animelogon::i18n::Tr("package.error.scene", {{L"why", why}}));
             r = SceneWallpaper(sceneReader,wallpaperDir,t.name,cancel,progress);
+        } else if (t.wallpaper == L"wallpaper.mp4" && reader.File() != INVALID_HANDLE_VALUE) {
+            // Entries are stored (package.h), so the video is read where it lies in the package,
+            // which stays open, and unwritable, until it is transcoded: no copy of a video of up to
+            // 1 GB is written out and read back first.
+            transcode::Source video;
+            video.path = source;
+            video.file = reader.File();
+            video.offset = wallpaper->offset;
+            video.size = wallpaper->size;
+            video.name = L"wallpaper.mp4";
+            r = StageVideo(video, wallpaperDir, t.name, cancel, progress);
         } else if (t.wallpaper == L"wallpaper.mp4") {
-            // Media Foundation reads from a file. It goes beside the staging, not into it, and
-            // is gone once the video is transcoded.
-            const std::wstring scratch = dir + L"-source";
-            const std::wstring copy = scratch + L"\\wallpaper.mp4";
-            if (!paths::CreateDirectories(scratch) || !reader.Extract(*wallpaper, copy, &why)) {
-                ALOG(L"import: %s %s", source.c_str(), why.c_str());
-                secure::RemoveTree(scratch);
-                return Error(L"无法从主题包中取出视频。");
-            }
-            r = StageVideo(copy, wallpaperDir, t.name, cancel, progress);
-            secure::RemoveTree(scratch);
+            ALOG(L"import: %s cannot be read in place", source.c_str());
+            return Error(animelogon::i18n::Tr("package.error.video"));
         } else {
             image::Picture p;
             const bool read = reader.Read(*wallpaper, package::kMaxPictureBytes, &bytes, &why);
@@ -297,14 +334,14 @@ Result Package(const std::wstring &source, const std::wstring &dir, const std::a
             std::vector<uint8_t>().swap(bytes);
             if (status != image::Status::Ok) {
                 ALOG(L"import: %s %s %s", source.c_str(), t.wallpaper.c_str(), why.c_str());
-                return Error(L"主题包里的壁纸图片无法使用：" + PictureProblem(status));
+                return Error(animelogon::i18n::Tr("package.error.picture", {{L"why", PictureProblem(status)}}));
             }
             r = StageImage(p, wallpaperDir, t.name, FileName(source));
         }
         if (!r.ok) return r;
     }
 
-    if (!WriteNew(dir + L"\\theme.xml", theme::Normalize(t))) return Error(L"无法写入临时文件。");
+    if (!WriteNew(dir + L"\\theme.xml", theme::Normalize(t))) return Error(animelogon::i18n::Tr("error.temp_file"));
     if (progress) progress(1.0);
     Result r;
     r.ok = true;
@@ -316,10 +353,10 @@ Result Component(const std::wstring &source, const std::wstring &dir) {
     std::vector<uint8_t> bytes;
     skin::Skin parsed;
     std::wstring why;
-    if (!secure::ReadFileBytes(source, &bytes, kMaxComponentBytes)) return Error(L"无法读取这个文件，或者它超过了 64 KB。");
+    if (!secure::ReadFileBytes(source, &bytes, kMaxComponentBytes)) return Error(animelogon::i18n::Tr("component.error.read"));
     if (!skin::Parse(std::string_view((const char *)bytes.data(), bytes.size()), &parsed, &why))
-        return Error(L"这个组件文件有误：" + why);
-    if (!WriteNew(dir + L"\\component.xml", skin::Normalize(parsed))) return Error(L"无法写入临时文件。");
+        return Error(animelogon::i18n::Tr("component.error.invalid", {{L"why", why}}));
+    if (!WriteNew(dir + L"\\component.xml", skin::Normalize(parsed))) return Error(animelogon::i18n::Tr("error.temp_file"));
     Result r;
     r.ok = true;
     r.name = parsed.name;

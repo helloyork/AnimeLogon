@@ -1,56 +1,18 @@
 import { Component, useEffect, type ReactNode } from 'react';
-import {
-  Button,
-  FluentProvider,
-  makeStyles,
-  ProgressBar,
-  Tab,
-  TabList,
-  Text,
-  Toast,
-  Toaster,
-  ToastTitle,
-  tokens,
-  useId,
-  useToastController,
-} from '@fluentui/react-components';
+import { FluentProvider, Toast, Toaster, ToastTitle, useId, useToastController } from '@fluentui/react-components';
 import { Dialogs } from './dialogs/Dialogs';
 import { EditorPage } from './editor/EditorPage';
-import { UacShield } from './icons';
+import { WindowButtons, WindowTitle } from './frame';
 import { LibraryPage } from './library/LibraryPage';
 import { LockPreview } from './lock/LockPreview';
-import { send } from './native';
 import { SettingsPage } from './settings/SettingsPage';
-import { onToast, openDialog, setTab, useStore, type Tab as TabName } from './store';
+import { DiscoverPage } from './steam/DiscoverPage';
+import { SetupPage } from './setup/SetupPage';
+import { send } from './native';
+import { t } from './i18n';
+import { goBack, onToast, setTab, useStore, type Tab } from './store';
 import { darkTheme, lightTheme, useDark } from './theme';
-
-const useStyles = makeStyles({
-  root: {
-    height: '100%',
-    display: 'flex',
-    flexDirection: 'column',
-    backgroundColor: tokens.colorNeutralBackground2,
-    color: tokens.colorNeutralForeground1,
-  },
-  bar: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalM,
-    minHeight: '48px',
-    paddingInline: tokens.spacingHorizontalXXL,
-    flex: 'none',
-  },
-  brand: { marginRight: tokens.spacingHorizontalS },
-  spacer: { flex: 1 },
-  busy: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalM,
-    paddingInline: tokens.spacingHorizontalXXL,
-    paddingBlock: tokens.spacingVerticalS,
-  },
-  busyBar: { maxWidth: '320px' },
-});
+import { Button, cx, Progress } from './ui/controls';
 
 // Something on the page failed to draw: say so and offer to start the page again, rather than
 // leave the window empty.
@@ -62,10 +24,10 @@ class Fallback extends Component<{ children: ReactNode }, { failed: string | nul
   render() {
     if (!this.state.failed) return this.props.children;
     return (
-      <div style={{ padding: tokens.spacingHorizontalXXL, display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM, alignItems: 'flex-start' }}>
-        <Text weight="semibold">页面出现问题</Text>
-        <Text className="selectable" size={200}>{this.state.failed}</Text>
-        <Button appearance="primary" onClick={() => location.reload()}>重新载入</Button>
+      <div className="fallback">
+        <h1 className="t-h">{t('app.error.title')}</h1>
+        <p className="t-cap selectable">{this.state.failed}</p>
+        <Button variant="primary" onClick={() => location.reload()}>{t('app.error.reload')}</Button>
       </div>
     );
   }
@@ -74,11 +36,12 @@ class Fallback extends Component<{ children: ReactNode }, { failed: string | nul
 export function App() {
   const dark = useDark();
   const s = useStore();
-  const styles = useStyles();
+  useBack();
   return (
     <FluentProvider theme={dark ? darkTheme : lightTheme}>
-      <div className={styles.root}>
-        <Fallback>{!s.lib ? null : s.view === 'theme' && s.open ? <EditorPage /> : <LibraryShell />}</Fallback>
+      <div className="app">
+        <AppBar />
+        <Fallback>{s.setup ? <SetupPage /> : !s.lib ? null : <Page />}</Fallback>
       </div>
       <Toasts />
       <Dialogs />
@@ -87,37 +50,78 @@ export function App() {
   );
 }
 
-// The app bar over the library and the settings: the two pages, and the two things to do from either.
-function LibraryShell() {
+// 发现, the Steam Workshop, only in the Steam edition.
+const pagesFor = (steam: boolean): [Tab, Parameters<typeof t>[0]][] =>
+  [['mine', 'nav.library'], ...(steam ? [['discover', 'nav.discover']] as [Tab, Parameters<typeof t>[0]][] : []), ['settings', 'nav.settings']];
+
+// The app bar stays over every page: the library, a theme's own page under it, and the settings.
+// It is also the window's title bar, so it is there from the start and stays when a page fails to
+// draw: what is being done in the background, then the window's buttons, end it. The setup wizard
+// has no pages to go to.
+function AppBar() {
   const s = useStore();
-  const styles = useStyles();
   return (
-    <>
-      <header className={styles.bar}>
-        <Text weight="semibold" className={styles.brand}>AnimeLogon</Text>
-        <TabList selectedValue={s.tab} onTabSelect={(_, d) => setTab(d.value as TabName)} aria-label="页面">
-          <Tab value="mine">主题库</Tab>
-          <Tab value="settings">设置</Tab>
-        </TabList>
-        <div className={styles.spacer} />
-        <Button icon={<UacShield />} onClick={() => send('import')}>导入…</Button>
-        <Button appearance="primary" onClick={() => openDialog({ kind: 'newTheme' })}>新建主题</Button>
-      </header>
+    <header className="topbar">
+      <WindowTitle />
+      {!s.setup && (
+        <nav className="nav" aria-label={t('nav.label')}>
+          {pagesFor(s.env.steam).map(([tab, name]) => (
+            <button key={tab} type="button" className={cx(s.tab === tab && 'on')} aria-current={s.tab === tab ? 'page' : undefined} onClick={() => setTab(tab)}>{t(name)}</button>
+          ))}
+        </nav>
+      )}
       <BusyBar />
-      {s.tab === 'settings' ? <SettingsPage /> : <LibraryPage />}
-    </>
+      <WindowButtons overLock={!!s.lock} />
+    </header>
   );
 }
 
-export function BusyBar() {
+// Alt+Left and the mouse's back button go back (store.ts goBack), as in Windows' own apps.
+function useBack() {
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      if ((e.altKey && e.key === 'ArrowLeft') || e.key === 'BrowserBack') {
+        e.preventDefault();
+        goBack();
+      }
+    };
+    // The back button is button 3; taken on its press too, so that nothing else acts on it.
+    const press = (e: MouseEvent) => { if (e.button === 3) e.preventDefault(); };
+    const release = (e: MouseEvent) => {
+      if (e.button !== 3) return;
+      e.preventDefault();
+      goBack();
+    };
+    document.addEventListener('keydown', key);
+    document.addEventListener('mousedown', press);
+    document.addEventListener('mouseup', release);
+    return () => {
+      document.removeEventListener('keydown', key);
+      document.removeEventListener('mousedown', press);
+      document.removeEventListener('mouseup', release);
+    };
+  }, []);
+}
+
+function Page() {
+  const s = useStore();
+  const themePage = s.tab === 'mine' && s.view === 'theme' && !!s.open;
+  if (s.tab === 'discover' && s.env.steam) return <DiscoverPage />;
+  return s.tab === 'settings' ? <SettingsPage /> : themePage ? <EditorPage /> : <LibraryPage />;
+}
+
+// An import or an export under way, with Cancel. An export does not say how far it is, so its bar
+// only moves (a percent below 0).
+function BusyBar() {
   const { busy } = useStore();
-  const styles = useStyles();
   if (!busy) return null;
+  const known = busy.percent >= 0;
   return (
-    <div className={styles.busy} role="status">
-      <Text size={200}>{busy.label}</Text>
-      <ProgressBar className={styles.busyBar} value={busy.percent / 100} thickness="medium" />
-      <Text size={200}>{busy.percent}%</Text>
+    <div className="busy" role="status">
+      <span className="t-cap ellipsis">{busy.label}</span>
+      <Progress value={known ? busy.percent : null} label={busy.label} />
+      {known && <span className="t-cap num">{busy.percent}%</span>}
+      <Button size="sm" onClick={() => send('cancelImport')}>{t('button.cancel')}</Button>
     </div>
   );
 }
@@ -129,7 +133,7 @@ function Toasts() {
     () =>
       onToast(text =>
         dispatchToast(
-          <Toast>
+          <Toast className="toast">
             <ToastTitle>{text}</ToastTitle>
           </Toast>,
           { timeout: 3000 },
@@ -137,5 +141,5 @@ function Toasts() {
       ),
     [dispatchToast],
   );
-  return <Toaster toasterId={toasterId} position="bottom" />;
+  return <Toaster toasterId={toasterId} position="bottom" offset={{ vertical: 24 }} />;
 }

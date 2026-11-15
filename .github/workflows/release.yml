@@ -1,13 +1,18 @@
 name: Release
 
-# Pushing a tag such as v0.1.0 or v0.1.0-alpha builds x64 and ARM64 and attaches a zip of each
-# to a draft GitHub release. The draft is published by hand once its files have been checked.
+# Pushing a tag such as v1.0.0 or v1.1.0-beta1 builds ARM64 and x64 and attaches the one setup
+# program, which installs either, to a draft GitHub release. The draft is published by hand once its
+# files have been checked.
 on:
   push:
     tags: ['v*']
 
 permissions:
   contents: write
+
+defaults:
+  run:
+    shell: pwsh
 
 jobs:
   release:
@@ -26,10 +31,9 @@ jobs:
           cache: npm
           cache-dependency-path: app/web/package-lock.json
 
-      # v0.1.0-alpha is version 0.1.0 with the suffix -alpha. The numbers must be the ones in
+      # v1.1.0-beta1 is version 1.1.0 with the suffix -beta1. The numbers must be the ones in
       # CMakeLists.txt, so that a tag cannot ship programs that carry another version.
       - name: Read the version from the tag
-        shell: pwsh
         run: |
           if ($env:TAG -notmatch '^v(\d+\.\d+\.\d+)(-[0-9A-Za-z.]+)?$') {
             throw "Tag $env:TAG is not v<major>.<minor>.<patch> with an optional -<suffix>"
@@ -42,59 +46,43 @@ jobs:
           "SUFFIX=$suffix" >> $env:GITHUB_ENV
           "PRERELEASE=$(if ($suffix) { 'true' } else { 'false' })" >> $env:GITHUB_ENV
 
-      # Tags are made on master, whose commits the Build workflow has already built and tested,
-      # so the tests and tools are left out here.
+      # ARM64 first: the x64 build's install.exe carries the ARM64 programs as well as its own and
+      # installs whichever the machine runs (installer/CMakeLists.txt). Tags are made on master,
+      # whose commits the Build workflow has already built and tested, so the tests and tools are
+      # left out here.
       - name: Build
-        shell: pwsh
         run: |
-          foreach ($arch in 'x64', 'arm64') {
-            cmake --preset $arch -DBUILD_TESTING=OFF -DANIMELOGON_BUILD=${{ github.run_number }} "-DANIMELOGON_VERSION_SUFFIX=$env:SUFFIX"
-            if ($LASTEXITCODE) { exit $LASTEXITCODE }
-            cmake --build --preset "$arch-release"
-            if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          }
+          $common = @('-DBUILD_TESTING=OFF', "-DANIMELOGON_BUILD=${{ github.run_number }}", "-DANIMELOGON_VERSION_SUFFIX=$env:SUFFIX")
+          cmake --preset arm64 @common
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cmake --build --preset arm64-release
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $arm64 = (Resolve-Path build/arm64/bin/Release).Path
+          cmake --preset x64 @common "-DANIMELOGON_ARM64_PAYLOAD_DIR=$arm64"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cmake --build --preset x64-release
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
-      # Each zip holds one folder: install.exe, the files it copies from its own folder
-      # (kComponents in installer/src/engine.cpp), and the licences of the code they carry.
-      # The log lists every file with its SHA-256, and what each zip holds.
+      # One setup program: install.exe carries every file it installs for both architectures, the
+      # licences included. Beside it, the programs' symbols of both architectures in one zip, so
+      # that anyone can read a crash reported against this release; the project is open source,
+      # so they are published with it. The log lists every file's SHA-256, as SHA256SUMS.txt does.
       - name: Package
-        shell: pwsh
         run: |
-          Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
-          $programs = 'install.exe', 'uninstall.exe', 'overlay.exe', 'launcher.exe', 'animelogon.exe', 'scene.exe', 'WebView2Loader.dll'
-          # Full paths: .NET resolves relative ones against its own current directory, not PowerShell's.
-          $stage = (New-Item -ItemType Directory -Force stage).FullName
           $dist = (New-Item -ItemType Directory -Force dist).FullName
+          Copy-Item build/x64/bin/Release/install.exe (Join-Path $dist "AnimeLogon-$env:VERSION-setup.exe") -ErrorAction Stop
           foreach ($arch in 'x64', 'arm64') {
-            $name = "AnimeLogon-$env:VERSION-$arch"
-            $dir = Join-Path $stage $name
-            New-Item -ItemType Directory -Force (Join-Path $dir licenses) | Out-Null
-            foreach ($program in $programs) { Copy-Item "build/$arch/bin/Release/$program" $dir -ErrorAction Stop }
-            Copy-Item LICENSE (Join-Path $dir LICENSE.txt)
-            Copy-Item vendor/webview2/LICENSE (Join-Path $dir licenses/WebView2.txt)
-            Copy-Item vendor/thorvg/LICENSE (Join-Path $dir licenses/ThorVG.txt)
-            Copy-Item vendor/thorvg/src/loaders/lottie/rapidjson/LICENSE (Join-Path $dir licenses/RapidJSON.txt)
-            $zip = Join-Path $dist "$name.zip"
-            $archive = [System.IO.Compression.ZipFile]::Open($zip, 'Create')
-            Get-ChildItem $dir -Recurse -File | ForEach-Object {
-              # Entry names are written with forward slashes, whichever .NET this runs on.
-              $entry = $_.FullName.Substring($stage.Length + 1).Replace('\', '/')
-              [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, $_.FullName, $entry, 'Optimal') | Out-Null
-              '{0}  {1}' -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(), $entry
-            }
-            $archive.Dispose()
-            $archive = [System.IO.Compression.ZipFile]::OpenRead($zip)
-            "$($archive.Entries.Count) entries in $name.zip"
-            $archive.Dispose()
+            $to = (New-Item -ItemType Directory -Force "symbols/$arch").FullName
+            Copy-Item "build/$arch/bin/Release/*.pdb" $to -ErrorAction Stop
           }
-          Get-ChildItem $dist -Filter *.zip | ForEach-Object {
+          Compress-Archive -Path symbols/* -DestinationPath (Join-Path $dist "AnimeLogon-$env:VERSION-symbols.zip") -ErrorAction Stop
+          Get-ChildItem $dist -File | Where-Object Name -ne SHA256SUMS.txt | ForEach-Object {
             '{0}  {1}' -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(), $_.Name
           } | Set-Content (Join-Path $dist SHA256SUMS.txt)
           Get-Content (Join-Path $dist SHA256SUMS.txt)
 
       # A draft, so that its files can be checked and its notes written before anyone sees it.
       - name: Create a draft release
-        shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

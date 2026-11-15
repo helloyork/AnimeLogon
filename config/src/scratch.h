@@ -1,6 +1,6 @@
 // The stores in a plain directory, for the tests and the developer tools: what store::Disk()
-// and DiskStore() do, without administrators, ACLs or trust checks. The settings app never
-// uses these.
+// and DiskStore() do, without administrators, ACLs or trust checks. The settings app uses
+// these only in a sandbox (paths.h), on the sandbox's own copy.
 #pragma once
 
 #include <windows.h>

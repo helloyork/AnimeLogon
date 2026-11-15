@@ -109,6 +109,11 @@ public:
     // Copies an entry into a new file (never over an existing one), checking its CRC on
     // the way; on any failure the new file is deleted.
     bool Extract(const Entry &entry, const std::wstring &file, std::wstring *why) const;
+    // The archive's file, for reading a stored entry where it lies (Entry::size bytes from
+    // Entry::offset) while the reader stays open; INVALID_HANDLE_VALUE for an archive opened from
+    // memory. Its bytes passed their CRC checks in Open, and no one can write the file while it is
+    // open.
+    HANDLE File() const { return file_; }
 
 private:
     bool Check(std::wstring *why);

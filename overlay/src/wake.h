@@ -88,6 +88,15 @@ public:
         return false;
     }
 
+    // A pen or a finger touching the screen, from the window it touched (WM_POINTERDOWN): a press
+    // like a click. A pen hovering or coming into range sends no such message, so it never wakes.
+    // `isPenOrTouch` is false for the mouse and the touchpad, whose presses come through raw input.
+    // True when it counts: after the screen came up, and before anybody else woke it.
+    bool ObservePointer(bool isPenOrTouch, DWORD messageTick) {
+        if (!isPenOrTouch || !active() || static_cast<LONG>(messageTick - armedAt_) <= 0) return false;
+        return Request();
+    }
+
     bool ObserveKeys(const Keys &keys) {
         if (!active()) return false;
         bool pressed = false;

@@ -1,4 +1,5 @@
 #include "sceneimport.h"
+#include "animelogon/i18n.h"
 #include <mfapi.h>
 #include <mfidl.h>
 #include <mfreadwrite.h>
@@ -21,7 +22,7 @@ using Microsoft::WRL::ComPtr;
 using namespace animelogon;
 namespace staging {
 namespace {
-Result Error(const std::wstring &why) { Result r; r.error = L"场景无法导入：" + why; return r; }
+Result Error(const std::wstring &why) { Result r; r.error = animelogon::i18n::Tr("scene_import.error", {{L"why", why}}); return r; }
 bool Write(const std::wstring &path, const std::vector<uint8_t> &bytes) {
     HANDLE h = CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (h == INVALID_HANDLE_VALUE) return false;
@@ -134,25 +135,25 @@ Result SceneWallpaper(package::Reader &reader, const std::wstring &dir, const st
     scene::File manifest{L"scene.xml", {}};
     if (!xml || !reader.Read(*xml, package::kMaxXmlBytes, &manifest.bytes, &why) ||
         !scene::Parse(std::string_view((const char *)manifest.bytes.data(), manifest.bytes.size()), &d, &why))
-        return Error(why.empty() ? L"缺少 scene.xml。" : why);
+        return Error(why.empty() ? animelogon::i18n::Tr("scene_import.no_xml") : why);
     files.push_back(std::move(manifest));
     const auto names = scene::Assets(d, false);
     for (const auto &entry : reader.Entries())
         if (entry.name != "scene.xml" && entry.name != "preview.png" &&
-            std::find(names.begin(),names.end(),FromUtf8(entry.name)) == names.end()) return Error(L"包里有未使用的素材。");
+            std::find(names.begin(),names.end(),FromUtf8(entry.name)) == names.end()) return Error(animelogon::i18n::Tr("scene_import.unused"));
     WallpaperInfo info; info.kind = WallpaperKind::Scene; info.name = name.empty() ? d.name : name;
     info.sourceName = d.name; SYSTEMTIME st{}; GetLocalTime(&st);
     info.importedAt = Format(L"%04u-%02u-%02uT%02u:%02u:%02u", st.wYear,st.wMonth,st.wDay,st.wHour,st.wMinute,st.wSecond);
     info.width = 1920; info.height = 1080;
-    if (!paths::CreateDirectories(dir)) return Error(L"无法创建临时目录。");
+    if (!paths::CreateDirectories(dir)) return Error(animelogon::i18n::Tr("error.temp_dir"));
     size_t total = files.front().bytes.size();
     for (const auto &asset : names) {
         const auto *entry = reader.Find(ToUtf8(asset));
-        if (!entry) return Error(L"缺少素材 " + asset);
+        if (!entry) return Error(animelogon::i18n::Tr("scene_import.missing", {{L"name", asset}}));
         if (d.base.kind == scene::Kind::Video && asset == d.base.file) {
             const std::wstring scratch = dir + L"-source", source = scratch + L"\\video.mp4";
             if (!paths::CreateDirectories(scratch) || !reader.Extract(*entry, source, &why)) {
-                secure::RemoveTree(scratch); return Error(L"无法读取视频。");
+                secure::RemoveTree(scratch); return Error(animelogon::i18n::Tr("scene_import.video"));
             }
             const auto video = transcode::Run(source, dir, info.name, cancel, progress); secure::RemoveTree(scratch);
             if (!video.ok) return Error(video.error);
@@ -160,17 +161,17 @@ Result SceneWallpaper(package::Reader &reader, const std::wstring &dir, const st
             info.frameRateNum = video.info.frameRateNum; info.frameRateDen = video.info.frameRateDen; info.durationMs = video.info.durationMs;
             DeleteFileW((dir+L"\\wallpaper.ini").c_str());
             image::Picture poster;
-            if (!FirstFrame(dir+L"\\video.mp4", &poster)) return Error(L"无法读取视频的第一帧。");
+            if (!FirstFrame(dir+L"\\video.mp4", &poster)) return Error(animelogon::i18n::Tr("scene_import.first_frame"));
             files.push_back({L"images/video.bmp", bitmap::Build(poster.width,poster.height,poster.bgra.data(),poster.bgra.size())});
         } else {
             scene::File f{asset, {}};
             const size_t limit = entry->extension == "hlsl" ? scene::kMaxShaderBytes : entry->extension == "json" ? scene::kMaxLottieBytes : package::kMaxPictureBytes;
             if (!reader.Read(*entry,limit,&f.bytes,&why) || (total += f.bytes.size()) > scene::kMaxBundleBytes)
-                return Error(L"素材超过大小上限。");
+                return Error(animelogon::i18n::Tr("scene_import.too_large"));
             files.push_back(std::move(f));
         }
     }
-    if (cancel) return Error(L"已取消。");
+    if (cancel) return Error(animelogon::i18n::Tr("error.cancelled"));
     ComPtr<ID3D11Device> device; scene::Host renderer;
     const auto [trialWidth,trialHeight] = TrialSize();
     const double posterScale = std::min({1.0,1920.0/trialWidth,1080.0/trialHeight});
@@ -181,13 +182,13 @@ Result SceneWallpaper(package::Reader &reader, const std::wstring &dir, const st
     while (!renderer.Ready() && GetTickCount64()<deadline && !cancel) {
         renderer.Poll(); if (renderer.Failed(&why)) return Error(why); Sleep(5);
     }
-    if (cancel) return Error(L"已取消。");
-    if (!renderer.Ready()) return Error(L"场景试画超过 30 秒。");
+    if (cancel) return Error(animelogon::i18n::Tr("error.cancelled"));
+    if (!renderer.Ready()) return Error(animelogon::i18n::Tr("scene_import.timeout"));
     scene::Files normalized;
     if (!renderer.Normalized(&normalized,&why)) return Error(why);
     scene::Tier tier;
     const float milliseconds = renderer.Milliseconds();
-    if (!renderer.Profile(&tier) || !std::isfinite(milliseconds) || milliseconds < 0 || milliseconds > 10000) return Error(L"试画返回了无效的性能档位。");
+    if (!renderer.Profile(&tier) || !std::isfinite(milliseconds) || milliseconds < 0 || milliseconds > 10000) return Error(animelogon::i18n::Tr("scene_import.tier"));
     info.sceneTrialWidth = trialWidth; info.sceneTrialHeight = trialHeight;
     info.sceneFps = tier.fps; info.sceneScale = (int)std::lround(tier.scale*100);
     info.sceneP95Us = (int)std::lround(milliseconds*1000);
@@ -201,37 +202,40 @@ Result SceneWallpaper(package::Reader &reader, const std::wstring &dir, const st
         while (!renderer.Ready() && GetTickCount64()<until && !cancel) {
             renderer.Poll(); if (renderer.Failed(&why)) return Error(why); Sleep(5);
         }
-        if (cancel) return Error(L"已取消。");
-        if (!renderer.Ready()) return Error(L"静止画面试画超过 30 秒。");
+        if (cancel) return Error(animelogon::i18n::Tr("error.cancelled"));
+        if (!renderer.Ready()) return Error(animelogon::i18n::Tr("scene_import.still_timeout"));
         still = renderer.Bitmap(&why);
     }
-    if (still.empty()) return Error(L"无法生成静止画面。");
+    if (still.empty()) return Error(animelogon::i18n::Tr("scene_import.still"));
     // Copy and recheck the child's envelope before making paths from it.
     const auto *sceneXml = scene::Find(normalized,L"scene.xml"); scene::Document checked;
     if (!sceneXml || !scene::Parse(std::string_view((const char *)sceneXml->bytes.data(),sceneXml->bytes.size()),&checked,&why))
-        return Error(L"渲染器返回了无效的场景。");
+        return Error(animelogon::i18n::Tr("scene_import.invalid"));
     auto expected = scene::Assets(checked,true);
     if (checked.base.kind == scene::Kind::Video)
         expected.erase(std::remove(expected.begin(),expected.end(),checked.base.file),expected.end());
     expected.push_back(L"scene.xml");
-    if (normalized.size() != expected.size()) return Error(L"渲染器返回了意外的文件。");
+    if (normalized.size() != expected.size()) return Error(animelogon::i18n::Tr("scene_import.unexpected"));
     for (const auto &f : normalized) {
-        if (std::find(expected.begin(),expected.end(),f.name) == expected.end()) return Error(L"渲染器返回了意外的文件。");
+        if (std::find(expected.begin(),expected.end(),f.name) == expected.end()) return Error(animelogon::i18n::Tr("scene_import.unexpected"));
         std::wstring path = dir+L"\\"+f.name; std::replace(path.begin(),path.end(),L'/',L'\\');
-        if (!paths::CreateDirectories(path.substr(0,path.find_last_of(L'\\'))) || !Write(path,f.bytes)) return Error(L"无法写入临时文件。");
+        if (!paths::CreateDirectories(path.substr(0,path.find_last_of(L'\\'))) || !Write(path,f.bytes)) return Error(animelogon::i18n::Tr("error.temp_file"));
     }
-    if (!Write(dir+L"\\still.bmp",still) || !Text(dir+L"\\wallpaper.ini",ToUtf8(SerializeWallpaperInfo(info)))) return Error(L"无法保存静止画面。");
+    if (!Write(dir+L"\\still.bmp",still) || !Text(dir+L"\\wallpaper.ini",ToUtf8(SerializeWallpaperInfo(info)))) return Error(animelogon::i18n::Tr("scene_import.save_still"));
     ALOG(L"import: scene trial p95 %.2f ms at %dx%d, %d fps, %.2f scale", milliseconds,trialWidth,trialHeight,tier.fps,tier.scale);
     Result r; r.ok = true; r.name = info.name; if (progress) progress(1); return r;
 }
 Result Scene(const std::wstring &source, const std::wstring &dir, const std::atomic<bool> &cancel, const Progress &progress) {
+    if (!kTakesScenes) {
+        Result r; r.error = animelogon::i18n::Tr("scene_import.unsupported"); return r;
+    }
     package::Reader reader; std::wstring why;
-    if (!reader.Open(source,&why)) return Error(reader.Compressed() ? L".alscene 必须是不压缩（存储）的 zip 文件。" : why);
+    if (!reader.Open(source,&why)) return Error(reader.Compressed() ? animelogon::i18n::Tr("scene_import.compressed") : why);
     const auto r = SceneWallpaper(reader,dir+L"\\wallpaper",L"",cancel,progress);
     if (!r.ok) return r;
     theme::Theme t; t.name = r.name.substr(0,40); t.wallpaper = L"wallpaper.alscene";
     t.components.push_back({kClockComponent,kClockComponent,true,{}});
-    if (!Text(dir+L"\\theme.xml",theme::Normalize(t))) return Error(L"无法保存主题。");
+    if (!Text(dir+L"\\theme.xml",theme::Normalize(t))) return Error(animelogon::i18n::Tr("scene_import.save_theme"));
     return r;
 }
 }

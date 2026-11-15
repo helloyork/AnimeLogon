@@ -26,6 +26,9 @@ struct Battery {
     BatteryState state = BatteryState::None;  // None: no battery, or it could not be read
     int percent = -1;                         // 0..100, -1 when unknown
     int secondsLeft = -1;                     // while discharging; -1 when unknown
+    // On mains power: plugged in, or a machine with no battery at all (which runs on nothing
+    // else). False when running on the battery, and when Windows cannot tell.
+    bool mains = false;
 };
 
 enum class MediaState { None, Playing, Paused };
@@ -61,8 +64,9 @@ bool ParseDate(const std::wstring &text, Date *out);
 // Text: words for a text ({time}, {media.title}). Fraction: 0..1 for a bar. State: one of a few
 // words, only for conditions (battery.state).
 enum class Kind { Text, Fraction, State };
-// Which source a name belongs to, so the settings app can say what a component shows.
-enum class Source { Clock, Battery, Media, Until };
+// Which source a name belongs to, so the settings app can say what a component shows. Audio has no
+// names: it is what a <spectrum> shows, the sound the output device plays (spectrum.h).
+enum class Source { Clock, Battery, Media, Until, Audio };
 
 struct Variable {
     const wchar_t *name;
@@ -97,6 +101,10 @@ struct Context {
     const Snapshot *snapshot = nullptr;  // null: no battery, nothing playing
     Date until;                          // the panel's
     uint64_t now = 0;                    // UTC FILETIME ticks, for how far playback has got
+    // The language words such as {power.status} and {until.unit} are in, as a locale name
+    // (zh-CN, ja-JP ...): the clock's. Chinese, Japanese and English have their own; any other
+    // language has English.
+    std::wstring locale;
 };
 
 // The words for a non-clock Text variable; empty when it has no value. False if `name` is not

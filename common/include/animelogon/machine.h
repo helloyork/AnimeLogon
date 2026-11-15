@@ -45,11 +45,17 @@ bool ServiceAutoStart();
 
 // --- The switch in the settings app ----------------------------------------------------
 // On: Windows' lock screen off, the background set, the service automatic and running,
-// the paused marker gone; if any step fails, it is all undone again. Off: all of it
-// undone, files and settings kept.
+// the paused marker gone, setup finished (below); if any step fails, it is all undone
+// again. Off: all of it undone, files and settings kept.
 DWORD TurnOn(const std::wstring &launcherPath, const std::wstring &image);
 DWORD TurnOff();
 bool IsOn();
+
+// Installed but never switched on: an install that left switching on to the person (Steam's
+// install script runs one), so the settings app opens on its setup wizard until they do.
+// Kept under HKLM\SOFTWARE\AnimeLogon, so uninstalling forgets it; TurnOn clears it.
+bool SetupPending();
+DWORD MarkSetupPending();
 
 bool Paused();                    // Ctrl+Alt+F11 was pressed on the logon screen
 bool WritePausedMarker(const wchar_t *reason);

@@ -27,8 +27,18 @@ public:
 
     // The battery and what is playing, for every instance.
     void SetData(const animelogon::data::Snapshot &snapshot);
+    // What the output device plays, for every instance's spectra, once a frame; whether any
+    // instance has one, and whether one is still moving.
+    void SetAudio(const animelogon::spectrum::Frame &frame);
+    bool Listens() const;
+    bool Moving() const;
     // Reads the time; returns true when the words of any instance changed.
     bool Tick();
+
+    // How long ago the wallpaper came up, for each panel's way in (SkinView::SetEntrance), and
+    // whether any panel is still coming in.
+    void SetEntrance(float seconds);
+    bool Entering() const;
 
     // Draws the instances `which` names, in that order, onto `surface`, a window's back
     // buffer. `slot` keeps one cache per window.

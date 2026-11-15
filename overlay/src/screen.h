@@ -7,6 +7,10 @@
 #pragma once
 
 #include <windows.h>
+#include <wtsapi32.h>
+
+#include <string>
+#include <vector>
 
 namespace screen {
 
@@ -17,14 +21,41 @@ struct Session {
     bool console = false;   // this process's session is the console session
     bool signedIn = false;
     bool locked = false;
+    // The session's connect state (WTS_CONNECTSTATE_CLASS). A lock screen is a session that is
+    // Active; the logon screen at boot or after a sign-out is one that is Connected. Windows
+    // Update's progress screen at boot is drawn while the session is still ConnectQuery, and a
+    // shutdown that signed its user out leaves the session Down: neither is a screen to cover.
+    // (Measured on Windows 11 26200 and Windows 10 19045 with real cumulative updates.)
+    // -1 when it could not be read, which counts as at the logon stage: the gate then decides as
+    // it did before it knew about connect states.
+    int state = -1;
+    bool AtLogonStage() const { return state == -1 || state == WTSActive || state == WTSConnected; }
 };
 Session ReadSession(DWORD session);
 
-// The display LogonUI's credential window is on, if it has one up.
-bool CredentialMonitor(RECT *monitor);
+// Which display holds Windows' password box, from LogonUI's visible windows (`logonUi`) and the
+// displays (`displays`, with `primary` the index of the main one). LogonUI may have a window
+// spanning every display as well as the one with the password box; the largest of its windows is
+// then the spanning one, which lies mostly on whichever display is biggest -- not necessarily the
+// one with the box. So only windows within a single display count, and the largest of those wins.
+// If every LogonUI window spans displays, the main display is the answer: Windows asks for the
+// password there. -1 when LogonUI has no window yet. `why` says which rule decided, for the log.
+struct CredentialChoice {
+    int display = -1;
+    const wchar_t *why = L"LogonUI has no window up";
+};
+CredentialChoice ChooseCredentialDisplay(const std::vector<RECT> &logonUi, const std::vector<RECT> &displays, int primary);
+
+// The display Windows' password box is on, if LogonUI has a window up; `why` (optional) says
+// how it was told, for the log.
+bool CredentialMonitor(RECT *monitor, const wchar_t **why = nullptr);
 
 // Windows' shutdown screen is on this desktop.
 bool ShutdownUnderway();
+
+// The visible top-level windows of this desktop, topmost first (image, class, rectangle), for the
+// log: what the video is about to cover, or did.
+std::wstring DescribeDesktop(size_t most = 6);
 
 // How the parked process decides to go live.
 struct GateInput {
@@ -32,13 +63,40 @@ struct GateInput {
     Session session;
     bool hadUser = false;          // somebody was signed in to this session earlier
     bool shutdown = false;         // ShutdownUnderway()
+    bool goingDown = false;        // the launcher's events::kGoingDown is raised
     bool lockNotified = false;     // WTS_SESSION_LOCK arrived and no unlock since
+    bool noDisplays = false;       // no display is attached (a DisplayPort monitor powered down)
 };
 
 enum class Gate {
     Hold,
     GoLive,
     SignedOutInPlace,  // a shutdown or restart signed the user out; never cover it
+    GoingDown,         // Windows is shutting down or restarting; never cover it
+    NotYet,            // the session is not at its logon screen yet (or any more): an update screen
+    NoDisplays,        // a screen to cover, but no display to cover it on: wait for one
+};
+
+// When to lower events::kGoingDown again: a shutdown somebody cancelled leaves them at their own
+// unlocked desktop, which no shutdown, restart or update screen does. Twenty seconds of that and
+// the flag goes, so the next lock is covered as usual.
+class CancelWatch {
+public:
+    static constexpr ULONGLONG kCancelledMs = 20000;
+    // True once, when the flag should be lowered.
+    bool Update(bool goingDown, bool atDesktop, ULONGLONG now) {
+        if (!goingDown || !atDesktop) {
+            since_ = 0;
+            return false;
+        }
+        if (!since_) since_ = now;
+        if (now - since_ < kCancelledMs) return false;
+        since_ = 0;
+        return true;
+    }
+
+private:
+    ULONGLONG since_ = 0;
 };
 
 // The session's lock flag can lag the desktop by seconds; the lock notification usually

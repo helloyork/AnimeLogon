@@ -1,0 +1,15 @@
+/* The page's styles, bundled by build.mjs into app.css: the scale first, then the controls, then
+   each page's own. */
+@import "./tokens.css";
+@import "./base.css";
+@import "./controls.css";
+@import "./fluent.css";
+@import "./shell.css";
+@import "./library.css";
+@import "./settings.css";
+@import "./setup.css";
+@import "./dialogs.css";
+@import "./workshop.css";
+@import "./discover.css";
+@import "./editor.css";
+@import "./lock.css";

@@ -17,7 +17,8 @@ constexpr ULONGLONG kBatteryMs = 1000, kLiveMs = 500;
 bool Same(const data::Snapshot &a, const data::Snapshot &b) {
     const data::Battery &x = a.battery, &y = b.battery;
     const data::Media &m = a.media, &n = b.media;
-    return x.state == y.state && x.percent == y.percent && x.secondsLeft == y.secondsLeft && m.state == n.state &&
+    return x.state == y.state && x.percent == y.percent && x.secondsLeft == y.secondsLeft && x.mains == y.mains &&
+           m.state == n.state &&
            m.title == n.title && m.artist == n.artist && m.album == n.album && m.app == n.app &&
            m.position == n.position && m.duration == n.duration && m.rate == n.rate && m.at == n.at;
 }

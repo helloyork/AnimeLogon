@@ -11,12 +11,24 @@
 namespace animelogon::skin {
 namespace {
 
-constexpr size_t kMaxSettings = 32, kMaxOptions = 32, kMaxPanels = 8, kMaxLines = 8, kMaxTexts = 8;
-constexpr size_t kMaxShadows = 4, kMaxLabel = 40, kMaxDetail = 80, kMaxTemplate = 256;
-
 const wchar_t *const kAnchors[] = {L"top-left", L"top", L"top-right", L"left", L"center",
                                    L"right", L"bottom-left", L"bottom", L"bottom-right"};
-enum class Type { Label, Anchor, Number, Align, Template, Font, Weight, Style, Color, Case, Bool, Condition, Date, Fraction };
+// The words each attribute that takes one of a few words may be, by its Type.
+const wchar_t *const kAligns[] = {L"auto", L"left", L"center", L"right"};
+const wchar_t *const kStyles[] = {L"normal", L"italic"};
+const wchar_t *const kCases[] = {L"none", L"upper", L"lower"};
+const wchar_t *const kBools[] = {L"true", L"false"};
+const wchar_t *const kEnters[] = {L"fade", L"rise", L"zoom", L"none"};
+const wchar_t *const kFigures[] = {L"proportional", L"tabular"};
+const wchar_t *const kShapes[] = {L"glow", L"plate"};
+const wchar_t *const kModes[] = {L"bars", L"line", L"area"};
+const wchar_t *const kDirections[] = {L"up", L"down", L"both"};
+const wchar_t *const kBasses[] = {L"left", L"right", L"middle"};
+const wchar_t *const kGradients[] = {L"horizontal", L"vertical", L"level"};
+enum class Type {
+    Label, Anchor, Number, Align, Template, Font, Weight, Style, Color, Case, Bool, Condition, Date, Fraction, Enter,
+    Figures, Shape, Count, Mode, Direction, Bass, Gradient, Stops
+};
 
 // `adjustable` attributes can be set by hand in the settings app.
 struct AttributeSpec {
@@ -30,30 +42,49 @@ const AttributeSpec kPanel[] = {{L"label", Type::Label, 0, 0, false}, {L"anchor"
                                 {L"size", Type::Number, 1, 50},       {L"margin", Type::Number, 0, 40},
                                 {L"offset-x", Type::Number, -50, 50}, {L"offset-y", Type::Number, -50, 50},
                                 {L"align", Type::Align},              {L"when", Type::Condition, 0, 0, false},
-                                {L"until", Type::Date, 0, 0, false}};
+                                {L"until", Type::Date, 0, 0, false}, {L"enter", Type::Enter},
+                                {L"enter-delay", Type::Number, 0, 10}, {L"enter-duration", Type::Number, 0, 5},
+                                {L"opacity", Type::Number, 0, 1}};
 const AttributeSpec kLine[] = {{L"label", Type::Label, 0, 0, false}, {L"gap", Type::Number, -2, 4},
-                               {L"when", Type::Condition, 0, 0, false}};
+                               {L"when", Type::Condition, 0, 0, false}, {L"show", Type::Bool}};
 const AttributeSpec kText[] = {{L"label", Type::Label, 0, 0, false}, {L"value", Type::Template, 0, 0, false},
                                {L"when", Type::Condition, 0, 0, false},
                                {L"font", Type::Font},                {L"size", Type::Number, 0.05, 4},
                                {L"weight", Type::Weight},            {L"style", Type::Style},
                                {L"color", Type::Color},              {L"opacity", Type::Number, 0, 1},
                                {L"tracking", Type::Number, -0.5, 1}, {L"space", Type::Number, 0, 4},
-                               {L"case", Type::Case},                {L"hang", Type::Bool, 0, 0, false}};
+                               {L"case", Type::Case},                {L"hang", Type::Bool},
+                               {L"show", Type::Bool},                {L"rise", Type::Number, -1, 1},
+                               {L"max", Type::Number, 0, 40},        {L"figures", Type::Figures}};
 const AttributeSpec kShadow[] = {{L"label", Type::Label, 0, 0, false},
                                  {L"blur", Type::Number, 0, 1},
                                  {L"opacity", Type::Number, 0, 1},
                                  {L"x", Type::Number, -1, 1},
                                  {L"y", Type::Number, -1, 1},
                                  {L"color", Type::Color}};
-const AttributeSpec kBackdrop[] = {
-    {L"label", Type::Label, 0, 0, false}, {L"opacity", Type::Number, 0, 1}, {L"color", Type::Color}};
+const AttributeSpec kBackdrop[] = {{L"label", Type::Label, 0, 0, false}, {L"opacity", Type::Number, 0, 1},
+                                   {L"color", Type::Color},              {L"shape", Type::Shape},
+                                   {L"radius", Type::Number, 0, 4},      {L"padding-x", Type::Number, 0, 4},
+                                   {L"padding-y", Type::Number, 0, 4}};
 const AttributeSpec kBar[] = {{L"label", Type::Label, 0, 0, false}, {L"value", Type::Fraction, 0, 0, false},
                               {L"when", Type::Condition, 0, 0, false}, {L"length", Type::Number, 0.2, 40},
                               {L"thickness", Type::Number, 0.02, 1},   {L"radius", Type::Number, 0, 0.5},
                               {L"color", Type::Color},                 {L"opacity", Type::Number, 0, 1},
                               {L"track", Type::Color},                 {L"track-opacity", Type::Number, 0, 1},
-                              {L"space", Type::Number, 0, 4}};
+                              {L"space", Type::Number, 0, 4},          {L"show", Type::Bool}};
+const AttributeSpec kSpectrum[] = {
+    {L"label", Type::Label, 0, 0, false},   {L"when", Type::Condition, 0, 0, false},
+    {L"mode", Type::Mode},                  {L"direction", Type::Direction},
+    {L"bass", Type::Bass},                  {L"length", Type::Number, 0.5, 80},
+    {L"height", Type::Number, 0.05, 8},     {L"bands", Type::Count, 4, 128},
+    {L"gap", Type::Number, 0, 0.95},        {L"radius", Type::Number, 0, 0.5},
+    {L"stroke", Type::Number, 0.005, 1},    {L"floor", Type::Number, 0, 1},
+    {L"colors", Type::Stops},               {L"flow", Type::Number, 0, 60},
+    {L"gradient", Type::Gradient},          {L"opacity", Type::Number, 0, 1},
+    {L"idle-opacity", Type::Number, 0, 1},  {L"peak", Type::Number, 0, 1},
+    {L"sensitivity", Type::Number, 0.05, 10}, {L"smoothing", Type::Number, 0, 0.99},
+    {L"low", Type::Number, 10, 20000},      {L"high", Type::Number, 20, 24000},
+    {L"space", Type::Number, 0, 4},         {L"show", Type::Bool}};
 
 struct SpecList {
     const AttributeSpec *begin;
@@ -71,6 +102,7 @@ SpecList SpecsOf(const std::wstring &element) {
     if (element == L"shadow") return List(kShadow);
     if (element == L"backdrop") return List(kBackdrop);
     if (element == L"bar") return List(kBar);
+    if (element == L"spectrum") return List(kSpectrum);
     return {nullptr, 0};
 }
 const AttributeSpec *SpecFor(const std::wstring &element, const std::wstring &attribute) {
@@ -87,6 +119,46 @@ int IndexOf(const wchar_t *const (&names)[N], const std::wstring &value) {
     return -1;
 }
 
+struct WordList {
+    const wchar_t *const *begin;
+    size_t size;
+};
+template <size_t N>
+constexpr WordList Words(const wchar_t *const (&words)[N]) {
+    return {words, N};
+}
+// The words an attribute of this type may be; none for a type that is not written as a word.
+WordList WordsOf(Type type) {
+    switch (type) {
+    case Type::Anchor: return Words(kAnchors);
+    case Type::Align: return Words(kAligns);
+    case Type::Style: return Words(kStyles);
+    case Type::Case: return Words(kCases);
+    case Type::Bool: return Words(kBools);
+    case Type::Enter: return Words(kEnters);
+    case Type::Figures: return Words(kFigures);
+    case Type::Shape: return Words(kShapes);
+    case Type::Mode: return Words(kModes);
+    case Type::Direction: return Words(kDirections);
+    case Type::Bass: return Words(kBasses);
+    case Type::Gradient: return Words(kGradients);
+    default: return {nullptr, 0};
+    }
+}
+bool IsWordOf(Type type, const std::wstring &value) {
+    const WordList words = WordsOf(type);
+    for (size_t i = 0; i < words.size; ++i)
+        if (value == words.begin[i]) return true;
+    return false;
+}
+
+const struct {
+    const wchar_t *name;
+    int weight;
+} kWeights[] = {{L"thin", 100},     {L"extralight", 200}, {L"light", 300}, {L"regular", 400},
+                {L"medium", 500},   {L"semibold", 600},   {L"bold", 700},  {L"extrabold", 800},
+                {L"black", 900}};
+
 bool ParseNumber(const std::wstring &text, double *out) {
     if (text.empty() || text.size() > 24) return false;
     wchar_t *end = nullptr;
@@ -97,13 +169,7 @@ bool ParseNumber(const std::wstring &text, double *out) {
 }
 
 int WeightOf(const std::wstring &text) {
-    static const struct {
-        const wchar_t *name;
-        int weight;
-    } names[] = {{L"thin", 100},     {L"extralight", 200}, {L"light", 300}, {L"regular", 400},
-                 {L"medium", 500},   {L"semibold", 600},   {L"bold", 700},  {L"extrabold", 800},
-                 {L"black", 900}};
-    for (const auto &n : names)
+    for (const auto &n : kWeights)
         if (text == n.name) return n.weight;
     double v = 0;
     return ParseNumber(text, &v) && v >= 1 && v <= 999 && v == std::floor(v) ? (int)v : 0;
@@ -150,19 +216,26 @@ bool Check(const AttributeSpec &spec, const std::wstring &value) {
     double v = 0;
     switch (spec.type) {
     case Type::Label: return IsLabel(value);
-    case Type::Anchor: return IndexOf(kAnchors, value) >= 0;
+    case Type::Anchor:
+    case Type::Align:
+    case Type::Style:
+    case Type::Case:
+    case Type::Bool:
+    case Type::Enter:
+    case Type::Figures:
+    case Type::Shape:
+    case Type::Mode:
+    case Type::Direction:
+    case Type::Bass:
+    case Type::Gradient: return IsWordOf(spec.type, value);
     case Type::Number: return ParseNumber(value, &v) && v >= spec.min && v <= spec.max;
-    case Type::Align: return value == L"auto" || value == L"left" || value == L"center" || value == L"right";
     case Type::Template: return IsTemplate(value);
     case Type::Font: return value.empty() || IsFontFamilyName(value);
     case Type::Weight: return WeightOf(value) > 0;
-    case Type::Style: return value == L"normal" || value == L"italic";
     case Type::Color: {
         uint32_t c = 0;
         return ParseRgba(value, &c);
     }
-    case Type::Case: return value == L"none" || value == L"upper" || value == L"lower";
-    case Type::Bool: return value == L"true" || value == L"false";
     case Type::Condition: {
         data::Condition c;
         return data::ParseCondition(value, &c);
@@ -172,6 +245,11 @@ bool Check(const AttributeSpec &spec, const std::wstring &value) {
         return data::ParseDate(value, &d);
     }
     case Type::Fraction: return IsFraction(value);
+    case Type::Count: return ParseNumber(value, &v) && v == std::floor(v) && v >= spec.min && v <= spec.max;
+    case Type::Stops: {
+        std::vector<Stop> stops;
+        return ParseStops(value, &stops);
+    }
     }
     return false;
 }
@@ -184,10 +262,16 @@ bool Suits(const Setting &setting, const AttributeSpec &spec) {
         for (const Option &o : setting.options)
             if (!Check(spec, o.value)) return false;
         return true;
-    case SettingKind::Number: return spec.type == Type::Number && setting.min >= spec.min && setting.max <= spec.max;
+    case SettingKind::Number:
+        // A count takes whole numbers only, so the setting must step by them from one.
+        if (spec.type == Type::Count)
+            return setting.min >= spec.min && setting.max <= spec.max && setting.min == std::floor(setting.min) &&
+                   setting.step == std::floor(setting.step);
+        return spec.type == Type::Number && setting.min >= spec.min && setting.max <= spec.max;
     case SettingKind::Color: return spec.type == Type::Color;
     case SettingKind::Font: return spec.type == Type::Font;
     case SettingKind::Date: return spec.type == Type::Date;
+    case SettingKind::Colors: return spec.type == Type::Stops;
     }
     return false;
 }
@@ -201,7 +285,12 @@ public:
         if (root.name != L"component") return Fail(root, L"the root element must be <component>");
         for (const auto &[name, value] : root.attributes) {
             if (name == L"format") {
-                if (value != L"1") return Fail(root, L"unsupported format " + value);
+                if (value != L"1") {
+                    // As theme.xml says it: a later format is one this version cannot read yet.
+                    double n = 0;
+                    const bool newer = ParseNumber(value, &n) && n > 1 && n == std::floor(n);
+                    return Fail(root, newer ? L"format " + value + L" needs a newer AnimeLogon" : L"unsupported format " + value);
+                }
             } else if (name == L"name" || name == L"author") {
                 if (!IsLabel(value) && !(name == L"author" && value.empty()))
                     return Fail(root, L"a bad " + name);
@@ -248,6 +337,7 @@ private:
             else if (e.name == L"color") s.kind = SettingKind::Color;
             else if (e.name == L"font") s.kind = SettingKind::Font;
             else if (e.name == L"date") s.kind = SettingKind::Date;
+            else if (e.name == L"colors") s.kind = SettingKind::Colors;
             else return Fail(e, L"unknown setting <" + e.name + L">");
             const std::wstring *on = nullptr, *off = nullptr, *min = nullptr, *max = nullptr, *step = nullptr;
             bool hasDefault = false;
@@ -323,10 +413,14 @@ private:
                 if (e.children.empty() || e.children.size() > kMaxTexts)
                     return Fail(e, L"a line needs 1 to 8 texts and bars");
                 for (const xml::Element &t : e.children) {
-                    if (t.name != L"text" && t.name != L"bar") return Fail(t, L"a line holds only <text> and <bar>");
+                    const bool spectrum = t.name == L"spectrum";
+                    if (t.name != L"text" && t.name != L"bar" && !spectrum)
+                        return Fail(t, L"a line holds only <text>, <bar> and <spectrum>");
                     if (!t.children.empty()) return Fail(t, L"<" + t.name + L"> holds nothing");
-                    if (!t.Find(L"value")) return Fail(t, L"<" + t.name + L"> needs a value");
-                    if (t.name == L"text" ? !Attributes(t, kText) : !Attributes(t, kBar)) return false;
+                    // A spectrum shows the sound playing; it names no data.
+                    if (!spectrum && !t.Find(L"value")) return Fail(t, L"<" + t.name + L"> needs a value");
+                    if (spectrum ? !Attributes(t, kSpectrum) : t.name == L"text" ? !Attributes(t, kText) : !Attributes(t, kBar))
+                        return false;
                 }
             } else if (e.name == L"shadow" || e.name == L"backdrop") {
                 if (!e.children.empty()) return Fail(e, L"<" + e.name + L"> holds nothing");
@@ -400,37 +494,75 @@ struct Offer {
 // What the settings app offers for each element, in order. Slider ranges are what is useful
 // to drag through; a skin may still write any value its attribute allows.
 const Offer kOffers[] = {
-    {L"panel", L"anchor", L"位置", L"相对屏幕的哪个位置。", Control::Choice, 0, 0, 0, L"top"},
-    {L"panel", L"offset-x", L"水平偏移", L"屏幕宽度的百分比，向右为正。", Control::Slider, -50, 50, 0.1, L"0"},
-    {L"panel", L"offset-y", L"垂直偏移", L"屏幕高度的百分比，向下为正。", Control::Slider, -50, 50, 0.1, L"0"},
-    {L"panel", L"margin", L"边距", L"离屏幕边缘的距离，短边的百分比。", Control::Slider, 0, 40, 0.5, L"7"},
-    {L"panel", L"size", L"大小", L"屏幕高度的百分比，其余文字按它的比例。", Control::Slider, 1, 50, 0.5, L"10"},
-    {L"panel", L"align", L"对齐", L"多行文字之间如何对齐。", Control::Choice, 0, 0, 0, L"auto"},
+    {L"panel", L"anchor", L"锚点", L"组件在屏幕上的对齐位置。", Control::Choice, 0, 0, 0, L"top"},
+    {L"panel", L"offset-x", L"水平偏移", L"以屏幕宽度的百分比计，正值向右。", Control::Slider, -50, 50, 0.1, L"0"},
+    {L"panel", L"offset-y", L"垂直偏移", L"以屏幕高度的百分比计，正值向下。", Control::Slider, -50, 50, 0.1, L"0"},
+    {L"panel", L"margin", L"边距", L"与屏幕边缘的距离，以屏幕短边的百分比计。", Control::Slider, 0, 40, 0.5, L"7"},
+    {L"panel", L"size", L"大小", L"以屏幕高度的百分比计，其他文字按比例缩放。", Control::Slider, 1, 50, 0.5, L"10"},
+    {L"panel", L"align", L"文字对齐", L"多行文字的对齐方式。", Control::Choice, 0, 0, 0, L"auto"},
+    {L"panel", L"enter", L"效果", L"锁屏显示时组件的入场效果。", Control::Choice, 0, 0, 0, L"fade"},
+    {L"panel", L"enter-delay", L"延迟", L"壁纸开始显示后，延迟多久开始入场。", Control::Slider, 0, 5, 0.05, L"0"},
+    {L"panel", L"enter-duration", L"时长", L"入场动画的持续时间。", Control::Slider, 0, 3, 0.05, L"0.4"},
+    {L"panel", L"opacity", L"不透明度", L"整个组件的不透明度。", Control::Slider, 0, 1, 0.01, L"1"},
+    {L"text", L"show", L"显示", L"关闭后不显示该文字，也不占位。", Control::Toggle, 0, 0, 0, L"true"},
+    {L"bar", L"show", L"显示", L"关闭后不显示该进度条，也不占位。", Control::Toggle, 0, 0, 0, L"true"},
+    {L"spectrum", L"show", L"显示", L"关闭后不显示该频谱，也不占位。", Control::Toggle, 0, 0, 0, L"true"},
     {L"text", L"font", L"字体", L"仅列出为所有用户安装的字体。", Control::Font, 0, 0, 0, L""},
-    {L"text", L"weight", L"字重", L"字体没有的字重会用最接近的代替。", Control::Slider, 100, 900, 50, L"400"},
-    {L"text", L"size", L"相对大小", L"相对于整体大小。", Control::Slider, 0.05, 2, 0.01, L"1"},
-    {L"text", L"tracking", L"字距", L"相对于这段文字的字号。", Control::Slider, -0.2, 0.5, 0.005, L"0"},
-    {L"text", L"space", L"前方留白", L"与前一段文字的距离，相对于整体大小。", Control::Slider, 0, 2, 0.01, L"0"},
-    {L"line", L"gap", L"与上一行的距离", L"从上一行的基线算起，相对于整体大小。", Control::Slider, -1, 2, 0.01, L"0.2"},
-    {L"text", L"color", L"颜色", L"也可以直接输入 #RRGGBB 或 #RRGGBBAA。", Control::Color, 0, 0, 0, L"#FFFFFF"},
+    {L"text", L"weight", L"字重", L"字体不含所选字重时，使用最接近的字重。", Control::Slider, 100, 900, 50, L"400"},
+    {L"text", L"size", L"相对大小", L"相对于组件大小。", Control::Slider, 0.05, 2, 0.01, L"1"},
+    {L"text", L"tracking", L"字距", L"相对于本段文字的字号。", Control::Slider, -0.2, 0.5, 0.005, L"0"},
+    {L"text", L"space", L"前间距", L"与前一段文字的间距，相对于组件大小。", Control::Slider, 0, 2, 0.01, L"0"},
+    {L"line", L"gap", L"行距", L"到上一行基线的距离，相对于组件大小。", Control::Slider, -1, 2, 0.01, L"0.2"},
+    {L"text", L"color", L"颜色", L"", Control::Color, 0, 0, 0, L"#FFFFFF"},
     {L"text", L"opacity", L"不透明度", L"", Control::Slider, 0, 1, 0.01, L"1"},
+    {L"text", L"rise", L"基线偏移", L"相对于本行基线上移的距离，负值下移；相对于组件大小。", Control::Slider, -0.5, 0.5, 0.005, L"0"},
+    {L"text", L"max", L"最大宽度", L"超出时以省略号截断；为 0 时不限制。相对于组件大小。", Control::Slider, 0, 30, 0.1, L"0"},
+    {L"text", L"figures", L"数字宽度", L"等宽数字在数值变化时宽度保持不变。", Control::Choice, 0, 0, 0, L"proportional"},
     {L"text", L"style", L"字形", L"", Control::Choice, 0, 0, 0, L"normal"},
-    {L"text", L"case", L"大小写", L"只影响拉丁字母。", Control::Choice, 0, 0, 0, L"none"},
-    {L"shadow", L"opacity", L"浓度", L"0 为不画阴影。", Control::Slider, 0, 1, 0.01, L"0.3"},
-    {L"shadow", L"blur", L"模糊", L"相对于整体大小。", Control::Slider, 0, 0.5, 0.005, L"0.1"},
-    {L"shadow", L"x", L"水平偏移", L"相对于整体大小。", Control::Slider, -0.3, 0.3, 0.005, L"0"},
-    {L"shadow", L"y", L"垂直偏移", L"相对于整体大小。", Control::Slider, -0.3, 0.3, 0.005, L"0"},
+    {L"text", L"case", L"大小写", L"仅作用于拉丁字母。", Control::Choice, 0, 0, 0, L"none"},
+    // Offered only where the component lets a text hang (Parts).
+    {L"text", L"hang", L"行内对齐", L"悬挂时，该文字不参与各行之间的对齐，对齐以其余文字为准。", Control::Choice, 0, 0, 0, L"false"},
+    {L"shadow", L"opacity", L"不透明度", L"为 0 时不显示阴影。", Control::Slider, 0, 1, 0.01, L"0.3"},
+    {L"shadow", L"blur", L"模糊", L"相对于组件大小。", Control::Slider, 0, 0.5, 0.005, L"0.1"},
+    {L"shadow", L"x", L"水平偏移", L"相对于组件大小。", Control::Slider, -0.3, 0.3, 0.005, L"0"},
+    {L"shadow", L"y", L"垂直偏移", L"相对于组件大小。", Control::Slider, -0.3, 0.3, 0.005, L"0"},
     {L"shadow", L"color", L"颜色", L"", Control::Color, 0, 0, 0, L"#000000"},
-    {L"backdrop", L"opacity", L"浓度", L"在文字背后压暗画面；0 为不画。", Control::Slider, 0, 1, 0.01, L"0"},
+    {L"backdrop", L"opacity", L"不透明度", L"在文字下方加深背景以提高可读性；为 0 时不显示。", Control::Slider, 0, 1, 0.01, L"0"},
+    {L"backdrop", L"shape", L"形状", L"柔光向四周渐隐；圆角矩形是边缘清晰的底板。", Control::Choice, 0, 0, 0, L"glow"},
     {L"backdrop", L"color", L"颜色", L"", Control::Color, 0, 0, 0, L"#000000"},
-    {L"bar", L"length", L"长度", L"相对于整体大小。", Control::Slider, 0.5, 20, 0.1, L"6"},
-    {L"bar", L"thickness", L"粗细", L"相对于整体大小。", Control::Slider, 0.02, 0.5, 0.005, L"0.12"},
-    {L"bar", L"radius", L"圆角", L"0 为直角，0.5 为两端全圆。", Control::Slider, 0, 0.5, 0.01, L"0.5"},
-    {L"bar", L"space", L"前方留白", L"与前一段的距离，相对于整体大小。", Control::Slider, 0, 2, 0.01, L"0"},
-    {L"bar", L"color", L"颜色", L"已走过的部分。", Control::Color, 0, 0, 0, L"#FFFFFF"},
+    // Offered only for a plate (the page hides them for a glow).
+    {L"backdrop", L"radius", L"圆角", L"相对于组件大小。", Control::Slider, 0, 2, 0.01, L"0.35"},
+    {L"backdrop", L"padding-x", L"水平内边距", L"文字到底板左右边缘的距离，相对于组件大小。", Control::Slider, 0, 3, 0.01, L"0.6"},
+    {L"backdrop", L"padding-y", L"垂直内边距", L"文字到底板上下边缘的距离，相对于组件大小。", Control::Slider, 0, 3, 0.01, L"0.4"},
+    {L"bar", L"length", L"长度", L"相对于组件大小。", Control::Slider, 0.5, 20, 0.1, L"6"},
+    {L"bar", L"thickness", L"粗细", L"相对于组件大小。", Control::Slider, 0.02, 0.5, 0.005, L"0.12"},
+    {L"bar", L"radius", L"圆角", L"0 为直角，0.5 为半圆形端点。", Control::Slider, 0, 0.5, 0.01, L"0.5"},
+    {L"bar", L"space", L"前间距", L"与前一段内容的间距，相对于组件大小。", Control::Slider, 0, 2, 0.01, L"0"},
+    {L"bar", L"color", L"颜色", L"已完成部分。", Control::Color, 0, 0, 0, L"#FFFFFF"},
     {L"bar", L"opacity", L"不透明度", L"", Control::Slider, 0, 1, 0.01, L"1"},
-    {L"bar", L"track", L"底色", L"还没走到的部分。", Control::Color, 0, 0, 0, L"#FFFFFF"},
-    {L"bar", L"track-opacity", L"底色浓度", L"0 为不画底。", Control::Slider, 0, 1, 0.01, L"0.25"},
+    {L"bar", L"track", L"轨道颜色", L"未完成部分。", Control::Color, 0, 0, 0, L"#FFFFFF"},
+    {L"bar", L"track-opacity", L"轨道不透明度", L"为 0 时不显示轨道。", Control::Slider, 0, 1, 0.01, L"0.25"},
+    {L"spectrum", L"mode", L"样式", L"柱形分别显示各频段；曲线连接各频段的顶端，填充曲线同时填充其下方的区域。", Control::Choice, 0, 0, 0, L"bars"},
+    {L"spectrum", L"direction", L"方向", L"频段自基线伸展的方向；双向时自中线向两侧伸展。", Control::Choice, 0, 0, 0, L"up"},
+    {L"spectrum", L"bass", L"低频位置", L"低频位于中间时，频谱左右对称。", Control::Choice, 0, 0, 0, L"left"},
+    {L"spectrum", L"length", L"宽度", L"相对于组件大小；超出屏幕宽度时，与屏幕同宽。", Control::Slider, 1, 80, 0.1, L"12"},
+    {L"spectrum", L"height", L"高度", L"频段可达到的最大高度，相对于组件大小。", Control::Slider, 0.1, 4, 0.01, L"1"},
+    {L"spectrum", L"bands", L"频段数量", L"", Control::Slider, 4, 128, 1, L"64"},
+    {L"spectrum", L"gap", L"间隔", L"相邻柱形之间的间隔，以每个频段所占宽度的比例计。", Control::Slider, 0, 0.9, 0.01, L"0.35"},
+    {L"spectrum", L"radius", L"圆角", L"0 为直角，0.5 为半圆形端点。", Control::Slider, 0, 0.5, 0.01, L"0.5"},
+    {L"spectrum", L"stroke", L"线宽", L"曲线的粗细，相对于组件大小。", Control::Slider, 0.01, 0.3, 0.005, L"0.06"},
+    {L"spectrum", L"floor", L"最小高度", L"无声音时各频段的高度，以频谱高度的比例计。", Control::Slider, 0, 0.5, 0.005, L"0.05"},
+    {L"spectrum", L"colors", L"颜色", L"渐变的各个颜色及其位置；只有一个颜色时为纯色。", Control::Colors, 0, 0, 0, L"#FFFFFF 0%"},
+    {L"spectrum", L"gradient", L"渐变方向", L"水平自左向右；垂直自基线向顶端；按高度时每个柱形取其高度对应的颜色。", Control::Choice, 0, 0, 0, L"horizontal"},
+    {L"spectrum", L"flow", L"颜色流动", L"颜色沿渐变方向往返一次所需的秒数；为 0 时不流动。", Control::Slider, 0, 30, 0.5, L"0"},
+    {L"spectrum", L"opacity", L"不透明度", L"", Control::Slider, 0, 1, 0.01, L"1"},
+    {L"spectrum", L"idle-opacity", L"无声音时的不透明度", L"相对于不透明度；为 0 时，无声音时不显示频谱。", Control::Slider, 0, 1, 0.01, L"1"},
+    {L"spectrum", L"peak", L"峰值标记", L"柱形上方短暂停留后回落的标记的不透明度；为 0 时不显示。", Control::Slider, 0, 1, 0.01, L"0"},
+    {L"spectrum", L"sensitivity", L"灵敏度", L"数值越大，较轻的声音也会使频段升得越高。", Control::Slider, 0.1, 5, 0.05, L"1"},
+    {L"spectrum", L"smoothing", L"平滑度", L"数值越大，频段的升降越平缓。", Control::Slider, 0, 0.95, 0.01, L"0.5"},
+    {L"spectrum", L"low", L"最低频率", L"以赫兹计。", Control::Slider, 20, 1000, 5, L"40"},
+    {L"spectrum", L"high", L"最高频率", L"以赫兹计。", Control::Slider, 1000, 20000, 100, L"16000"},
+    {L"spectrum", L"space", L"前间距", L"与前一段内容的间距，相对于组件大小。", Control::Slider, 0, 2, 0.01, L"0"},
 };
 
 std::vector<Option> OptionsOf(const std::wstring &attribute) {
@@ -439,9 +571,17 @@ std::vector<Option> OptionsOf(const std::wstring &attribute) {
                 {L"left", L"左侧居中"},    {L"center", L"居中"},        {L"right", L"右侧居中"},
                 {L"bottom-left", L"左下"}, {L"bottom", L"下方居中"},    {L"bottom-right", L"右下"}};
     if (attribute == L"align")
-        return {{L"auto", L"自动"}, {L"left", L"左"}, {L"center", L"中"}, {L"right", L"右"}};
+        return {{L"auto", L"自动"}, {L"left", L"左对齐"}, {L"center", L"居中"}, {L"right", L"右对齐"}};
     if (attribute == L"style") return {{L"normal", L"常规"}, {L"italic", L"斜体"}};
-    if (attribute == L"case") return {{L"none", L"原样"}, {L"upper", L"大写"}, {L"lower", L"小写"}};
+    if (attribute == L"case") return {{L"none", L"不转换"}, {L"upper", L"全部大写"}, {L"lower", L"全部小写"}};
+    if (attribute == L"hang") return {{L"true", L"悬挂"}, {L"false", L"参与对齐"}};
+    if (attribute == L"enter") return {{L"fade", L"淡入"}, {L"rise", L"上移淡入"}, {L"zoom", L"缩放淡入"}, {L"none", L"无"}};
+    if (attribute == L"figures") return {{L"proportional", L"比例"}, {L"tabular", L"等宽"}};
+    if (attribute == L"shape") return {{L"glow", L"柔光"}, {L"plate", L"圆角矩形"}};
+    if (attribute == L"mode") return {{L"bars", L"柱形"}, {L"line", L"曲线"}, {L"area", L"填充曲线"}};
+    if (attribute == L"direction") return {{L"up", L"向上"}, {L"down", L"向下"}, {L"both", L"双向"}};
+    if (attribute == L"bass") return {{L"left", L"左侧"}, {L"middle", L"中间"}, {L"right", L"右侧"}};
+    if (attribute == L"gradient") return {{L"horizontal", L"水平"}, {L"vertical", L"垂直"}, {L"level", L"按高度"}};
     return {};
 }
 
@@ -463,7 +603,8 @@ const xml::Element *ElementAt(const Skin &skin, const std::wstring &key) {
         if (step.empty()) return nullptr;
         const wchar_t kind = step[0];
         const wchar_t *name = kind == L'p' ? L"panel" : kind == L'l' ? L"line" : kind == L't' ? L"text"
-                            : kind == L'r' ? L"bar" : kind == L's' ? L"shadow" : kind == L'b' ? L"backdrop" : nullptr;
+                            : kind == L'r' ? L"bar" : kind == L'a' ? L"spectrum" : kind == L's' ? L"shadow"
+                            : kind == L'b' ? L"backdrop" : nullptr;
         if (!name) return nullptr;
         size_t wanted = 1;
         if (kind == L'b') {
@@ -517,6 +658,7 @@ bool KeyShape(const std::wstring &key, std::wstring *element, std::wstring *attr
     else if (steps.size() == 2 && steps[1] == L"b") *element = L"backdrop";
     else if (steps.size() == 3 && numbered(steps[1], L'l') && numbered(steps[2], L't')) *element = L"text";
     else if (steps.size() == 3 && numbered(steps[1], L'l') && numbered(steps[2], L'r')) *element = L"bar";
+    else if (steps.size() == 3 && numbered(steps[1], L'l') && numbered(steps[2], L'a')) *element = L"spectrum";
     else return false;
     const AttributeSpec *spec = SpecFor(*element, *attribute);
     return spec && spec->adjustable;
@@ -539,7 +681,68 @@ std::optional<data::Condition> ConditionOf(const xml::Element &e) {
     return c;
 }
 
+// A <spectrum>'s attributes, its settings and adjustments applied.
+void ReadSpectrum(Applied &a, Text *text) {
+    Spectrum &s = text->audio;
+    text->length = a.Number(L"length", 12.0f);
+    text->radius = a.Number(L"radius", 0.5f);
+    text->opacity = a.Number(L"opacity", 1.0f);
+    text->space = a.Number(L"space", 0.0f);
+    s.bands = (int)std::lround(a.Number(L"bands", (float)s.bands));
+    s.low = a.Number(L"low", s.low);
+    s.high = a.Number(L"high", s.high);
+    // The bands need some range to spread over: a high frequency at or below the low one goes an
+    // octave above it.
+    if (s.high < s.low * 1.5f) s.high = s.low * 2.0f;
+    s.sensitivity = a.Number(L"sensitivity", s.sensitivity);
+    s.smoothing = a.Number(L"smoothing", s.smoothing);
+    const std::wstring mode = a.String(L"mode", L"bars"), direction = a.String(L"direction", L"up");
+    const std::wstring bass = a.String(L"bass", L"left"), gradient = a.String(L"gradient", L"horizontal");
+    s.mode = mode == L"line" ? Mode::Line : mode == L"area" ? Mode::Area : Mode::Bars;
+    s.direction = direction == L"down" ? Direction::Down : direction == L"both" ? Direction::Both : Direction::Up;
+    s.bass = bass == L"right" ? Bass::Right : bass == L"middle" ? Bass::Middle : Bass::Left;
+    s.gradient = gradient == L"vertical" ? Gradient::Vertical : gradient == L"level" ? Gradient::Level : Gradient::Horizontal;
+    if (!ParseStops(a.String(L"colors", L"#FFFFFF 0%"), &s.stops)) s.stops = {{0.0f, 0xFFFFFFFF}};
+    s.flow = a.Number(L"flow", s.flow);
+    s.height = a.Number(L"height", s.height);
+    s.gap = a.Number(L"gap", s.gap);
+    s.floor = a.Number(L"floor", s.floor);
+    s.stroke = a.Number(L"stroke", s.stroke);
+    s.idleOpacity = a.Number(L"idle-opacity", s.idleOpacity);
+    s.peak = a.Number(L"peak", s.peak);
+}
+
 }  // namespace
+
+bool ParseStops(const std::wstring &text, std::vector<Stop> *out) {
+    if (text.empty() || text.size() > 200) return false;
+    std::vector<Stop> stops;
+    for (size_t i = 0; i <= text.size();) {
+        size_t end = text.find(L',', i);
+        if (end == std::wstring::npos) end = text.size();
+        // "#RRGGBB[AA] P%", spaces around it allowed
+        std::wstring item = text.substr(i, end - i);
+        i = end + 1;
+        const size_t first = item.find_first_not_of(L' '), last = item.find_last_not_of(L' ');
+        if (first == std::wstring::npos) return false;
+        item = item.substr(first, last - first + 1);
+        const size_t space = item.find(L' ');
+        if (space == std::wstring::npos || item.back() != L'%') return false;
+        Stop s;
+        double at = 0;
+        const std::wstring place = item.substr(item.find_first_not_of(L' ', space), std::wstring::npos);
+        if (!ParseRgba(item.substr(0, space), &s.color) || !ParseNumber(place.substr(0, place.size() - 1), &at) || at < 0 ||
+            at > 100 || (!stops.empty() && at / 100.0 < stops.back().at))
+            return false;
+        s.at = (float)(at / 100.0);
+        stops.push_back(s);
+        if (stops.size() > 8) return false;
+        if (end == text.size()) break;
+    }
+    if (stops.empty()) return false;
+    *out = std::move(stops);
+    return true;
+}
 
 const Setting *Skin::Find(const std::wstring &id) const {
     for (const Setting &s : settings)
@@ -548,7 +751,7 @@ const Setting *Skin::Find(const std::wstring &id) const {
 }
 
 bool IsSettingId(const std::wstring &id) {
-    if (id.empty() || id.size() > 32) return false;
+    if (id.empty() || id.size() > kMaxSettingId) return false;
     for (wchar_t c : id)
         if (!((c >= L'a' && c <= L'z') || (c >= L'0' && c <= L'9') || c == L'-')) return false;
     return true;
@@ -575,6 +778,7 @@ std::vector<data::Source> SourcesOf(const Skin &skin) {
         if (const std::wstring *v = e->Find(L"value"); v && (e->name == L"text" || e->name == L"bar")) names(*v);
         if (const auto c = ConditionOf(*e)) found.insert(data::Find(c->name)->source);
         if (e->name == L"panel" && e->Find(L"until")) found.insert(data::Source::Until);
+        if (e->name == L"spectrum") found.insert(data::Source::Audio);
         for (const xml::Element &c : e->children) pending.push_back(&c);
     }
     found.erase(data::Source::Clock);
@@ -596,6 +800,10 @@ bool IsValue(const Setting &setting, const std::wstring &value) {
     case SettingKind::Date: {
         data::Date d;
         return data::ParseDate(value, &d);
+    }
+    case SettingKind::Colors: {
+        std::vector<Stop> stops;
+        return ParseStops(value, &stops);
     }
     }
     return false;
@@ -633,25 +841,42 @@ std::vector<Part> Parts(const Skin &skin) {
         Part panel{pk, label ? *label : panelCount == 1 ? L"整体" : Format(L"面板 %zu", panels), {}};
         offer(panel, L"panel", pk);
         parts.push_back(std::move(panel));
-        size_t lines = 0, shadows = 0, texts = 0, bars = 0;
+        size_t lines = 0, shadows = 0, texts = 0, bars = 0, spectra = 0;
         for (const xml::Element &e : p.children) {
             if (e.name == L"line") {
                 const std::wstring lk = pk + L".l" + std::to_wstring(++lines);
-                size_t t = 0, r = 0;
+                size_t t = 0, r = 0, a = 0;
                 for (const xml::Element &x : e.children) {
-                    const bool isBar = x.name == L"bar";
+                    const bool isBar = x.name == L"bar", isSpectrum = x.name == L"spectrum";
                     const bool first = &x == &e.children.front();
-                    const std::wstring tk = lk + (isBar ? L".r" + std::to_wstring(++r) : L".t" + std::to_wstring(++t));
+                    const std::wstring tk = lk + (isSpectrum ? L".a" + std::to_wstring(++a)
+                                                  : isBar    ? L".r" + std::to_wstring(++r)
+                                                             : L".t" + std::to_wstring(++t));
                     const std::wstring *own = x.Find(L"label"), *value = x.Find(L"value");
                     const wchar_t *data = value ? DataLabel(*value) : nullptr;
-                    if (isBar) ++bars;
+                    if (isSpectrum) ++spectra;
+                    else if (isBar) ++bars;
                     else ++texts;
                     std::wstring called = own ? *own : data ? std::wstring(data) : L"";
-                    if (called.empty()) called = isBar ? Format(L"进度条 %zu", bars) : Format(L"文字 %zu", texts);
+                    if (called.empty())
+                        called = isSpectrum ? Format(L"频谱 %zu", spectra)
+                                 : isBar    ? Format(L"进度条 %zu", bars)
+                                            : Format(L"文字 %zu", texts);
                     Part text{tk, called, {}};
-                    offer(text, isBar ? L"bar" : L"text", tk);
+                    offer(text, isSpectrum ? L"spectrum" : isBar ? L"bar" : L"text", tk);
                     // The line's distance from the one above goes with its first text or bar.
                     if (lines > 1 && first) offer(text, L"line", lk);
+                    // Whether a text hangs beside the others (an AM/PM marker beside the numbers)
+                    // is a choice only where the component offers it, by writing `hang` on it.
+                    if (!x.Find(L"hang")) {
+                        auto &adj = text.adjustments;
+                        adj.erase(std::remove_if(adj.begin(), adj.end(),
+                                                 [](const Adjustment &a) {
+                                                     return a.key.size() > 5 &&
+                                                            a.key.compare(a.key.size() - 5, 5, L".hang") == 0;
+                                                 }),
+                                  adj.end());
+                    }
                     if (first) {  // and space before one only means something after another
                         auto &adj = text.adjustments;
                         adj.erase(std::remove_if(adj.begin(), adj.end(),
@@ -671,7 +896,7 @@ std::vector<Part> Parts(const Skin &skin) {
                 parts.push_back(std::move(shadow));
             } else if (e.name == L"backdrop") {
                 const std::wstring *own = e.Find(L"label");
-                Part backdrop{pk + L".b", own ? *own : L"暗晕", {}};
+                Part backdrop{pk + L".b", own ? *own : L"背景遮罩", {}};
                 offer(backdrop, L"backdrop", pk + L".b");
                 parts.push_back(std::move(backdrop));
             }
@@ -765,6 +990,11 @@ Resolved Resolve(const Skin &skin, const Values &values) {
                                                                                                            : Align::Auto;
         panel.when = ConditionOf(p);
         data::ParseDate(a.String(L"until"), &panel.until);
+        const std::wstring enter = a.String(L"enter", L"fade");
+        panel.enter = enter == L"rise" ? Enter::Rise : enter == L"zoom" ? Enter::Zoom : enter == L"none" ? Enter::None : Enter::Fade;
+        panel.enterDelay = a.Number(L"enter-delay", panel.enterDelay);
+        panel.enterDuration = a.Number(L"enter-duration", panel.enterDuration);
+        panel.opacity = a.Number(L"opacity", panel.opacity);
         size_t lines = 0, shadows = 0;
         for (const xml::Element &e : p.children) {
             const std::wstring key = e.name == L"line"     ? pk + L".l" + std::to_wstring(++lines)
@@ -775,13 +1005,23 @@ Resolved Resolve(const Skin &skin, const Values &values) {
                 Line line;
                 line.gap = c.Number(L"gap", line.gap);
                 line.when = ConditionOf(e);
-                size_t texts = 0, bars = 0;
+                line.shown = c.String(L"show", L"true") != L"false";
+                size_t texts = 0, bars = 0, spectra = 0;
                 for (const xml::Element &t : e.children) {
                     Text text;
                     text.bar = t.name == L"bar";
-                    text.name = text.bar ? L"r" + std::to_wstring(++bars) : L"t" + std::to_wstring(++texts);
+                    text.spectrum = t.name == L"spectrum";
+                    text.name = text.spectrum ? L"a" + std::to_wstring(++spectra)
+                                : text.bar    ? L"r" + std::to_wstring(++bars)
+                                              : L"t" + std::to_wstring(++texts);
                     Applied ta(skin, values, t, key + L"." + text.name);
                     text.when = ConditionOf(t);
+                    text.shown = ta.String(L"show", L"true") != L"false";
+                    if (text.spectrum) {
+                        ReadSpectrum(ta, &text);
+                        line.texts.push_back(std::move(text));
+                        continue;
+                    }
                     text.value = ta.String(L"value");
                     if (text.bar) {
                         text.length = ta.Number(L"length", text.length);
@@ -807,6 +1047,9 @@ Resolved Resolve(const Skin &skin, const Values &values) {
                     const std::wstring textCase = ta.String(L"case");
                     text.textCase = textCase == L"upper" ? Case::Upper : textCase == L"lower" ? Case::Lower : Case::None;
                     text.hang = ta.String(L"hang") == L"true";
+                    text.rise = ta.Number(L"rise", 0.0f);
+                    text.max = ta.Number(L"max", 0.0f);
+                    text.tabular = ta.String(L"figures") == L"tabular";
                     line.texts.push_back(std::move(text));
                 }
                 panel.lines.push_back(std::move(line));
@@ -821,6 +1064,10 @@ Resolved Resolve(const Skin &skin, const Values &values) {
             } else if (e.name == L"backdrop") {
                 panel.backdrop = c.Number(L"opacity", 0.0f);
                 panel.backdropColor = c.Color(L"color", panel.backdropColor);
+                panel.backdropShape = c.String(L"shape") == L"plate" ? Shape::Plate : Shape::Glow;
+                panel.backdropRadius = c.Number(L"radius", panel.backdropRadius);
+                panel.backdropPaddingX = c.Number(L"padding-x", panel.backdropPaddingX);
+                panel.backdropPaddingY = c.Number(L"padding-y", panel.backdropPaddingY);
             }
         }
         out.panels.push_back(std::move(panel));
@@ -828,6 +1075,16 @@ Resolved Resolve(const Skin &skin, const Values &values) {
     return out;
 }
 
+bool Listens(const Resolved &skin) {
+    for (const Panel &p : skin.panels)
+        for (const Line &l : p.lines)
+            for (const Text &t : l.texts)
+                if (t.spectrum) return true;
+    return false;
+}
+
+// The clock's XML may also be used under the MIT License, as in skills/animelogon-components/LICENSE,
+// like the other built-in components (components.cpp), so what is made from it need not use the MPL.
 std::string DefaultText() {
     return R"(<?xml version="1.0" encoding="utf-8"?>
 <!-- The clock that comes with AnimeLogon. Export it from the settings app to start a component of your own. -->
@@ -844,10 +1101,10 @@ std::string DefaultText() {
       <option value="bottom" label="下方居中"/>
       <option value="bottom-right" label="右下"/>
     </choice>
-    <number id="size" label="大小" detail="时间的字号，占屏幕高度的百分比。" default="10" min="5" max="20" step="0.5"/>
+    <number id="size" label="大小" detail="时间文字的字号，以屏幕高度的百分比计。" default="10" min="5" max="20" step="0.5"/>
     <font id="font" label="字体" detail="仅列出为所有用户安装的字体。" default=""/>
-    <color id="color" label="颜色" detail="也可以直接输入 #RRGGBB。" default="#FFFFFF"/>
-    <toggle id="shade" label="背景暗晕" detail="在时钟背后稍微压暗画面，亮色壁纸上也能看清。" default="on" on="0.22" off="0"/>
+    <color id="color" label="颜色" default="#FFFFFF"/>
+    <toggle id="shade" label="背景遮罩" detail="在时钟下方加深背景，提高在浅色壁纸上的可读性。" default="on" on="0.22" off="0"/>
   </settings>
   <panel anchor="$position" size="$size" margin="7">
     <line>
@@ -871,6 +1128,48 @@ const Skin &Default() {
         return s;
     }();
     return skin;
+}
+
+std::vector<AttributeInfo> Attributes() {
+    auto typeName = [](Type t) -> const wchar_t * {
+        switch (t) {
+        case Type::Label: return L"label";
+        case Type::Number: return L"number";
+        case Type::Count: return L"count";
+        case Type::Template: return L"template";
+        case Type::Font: return L"font";
+        case Type::Weight: return L"weight";
+        case Type::Color: return L"color";
+        case Type::Stops: return L"colors";
+        case Type::Condition: return L"condition";
+        case Type::Date: return L"date";
+        case Type::Fraction: return L"fraction";
+        default: return L"words";
+        }
+    };
+    std::vector<AttributeInfo> out;
+    for (const wchar_t *element : {L"panel", L"line", L"text", L"bar", L"spectrum", L"shadow", L"backdrop"}) {
+        const SpecList list = SpecsOf(element);
+        for (size_t i = 0; i < list.size; ++i) {
+            const AttributeSpec &spec = list.begin[i];
+            AttributeInfo a;
+            a.element = element;
+            a.name = spec.name;
+            a.type = typeName(spec.type);
+            if (spec.type == Type::Number || spec.type == Type::Count) a.min = spec.min, a.max = spec.max;
+            const WordList words = WordsOf(spec.type);
+            for (size_t w = 0; w < words.size; ++w) a.words.push_back(words.begin[w]);
+            if (spec.type == Type::Weight)
+                for (const auto &n : kWeights) a.words.push_back(n.name);
+            a.adjustable = spec.adjustable;
+            // What Resolve uses when the attribute is not written is what the settings app offers
+            // as its value then; a line's `show`, which it does not offer, is drawn.
+            if (const Offer *offer = OfferFor(element, spec.name)) a.fallback = offer->fallback;
+            else if (spec.type == Type::Bool) a.fallback = L"true";
+            out.push_back(std::move(a));
+        }
+    }
+    return out;
 }
 
 }  // namespace animelogon::skin

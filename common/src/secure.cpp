@@ -358,11 +358,19 @@ bool DirectoryHeld(const std::wstring &dir, std::wstring *why) {
 
 }  // namespace
 
+// In a sandbox (paths.h) the window's own copy stands in for the machine's data, which only
+// administrators can change; the copy is the person's own, so it is taken as it is.
+static bool InSandbox(const std::wstring &path) {
+    const std::wstring &root = paths::Sandbox();
+    return !root.empty() && paths::IsWithin(path, root);
+}
+
 bool IsTrustedDirectory(const std::wstring &dir, std::wstring *why) {
     if (!paths::IsPlainAbsolute(dir)) {
         *why = L"is not a plain absolute path";
         return false;
     }
+    if (InSandbox(dir)) return true;
     const std::wstring root = paths::DataDir();
     if (!paths::IsWithin(dir, root)) return DirectoryHeld(dir, why);
     // Inside the data directory every directory above counts too: any of them could
@@ -380,6 +388,12 @@ bool IsTrustedDirectory(const std::wstring &dir, std::wstring *why) {
 bool IsTrusted(const std::wstring &file, std::wstring *why) {
     if (!paths::IsPlainAbsolute(file)) {
         *why = L"is not a plain absolute path";
+        return false;
+    }
+    if (InSandbox(file)) {
+        const DWORD a = GetFileAttributesW(file.c_str());
+        if (a != INVALID_FILE_ATTRIBUTES && !(a & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT))) return true;
+        *why = a == INVALID_FILE_ATTRIBUTES ? L"does not exist" : L"is not a plain file";
         return false;
     }
     std::wstring w;

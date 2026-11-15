@@ -6,7 +6,7 @@ CMakeUserPresets.json
 # The settings page's npm packages, which the build installs.
 /app/web/node_modules/
 
-# Media never enters this repository.
+# Media never enters this repository, except the two kinds listed at the end of this block.
 *.mp4
 *.mkv
 *.mov
@@ -22,6 +22,9 @@ CMakeUserPresets.json
 *.bmp
 *.gif
 *.webp
+# The bundled wallpaper install.exe carries, and the pictures the READMEs show.
+!/res/wallpapers/*.mp4
+!/res/readme/*.png
 
 # Editors and OS
 .vscode/

@@ -4,7 +4,9 @@
 
 #include <cstring>
 
+#include "animelogon/i18n.h"
 #include "animelogon/background.h"
+#include "animelogon/others.h"
 #include "animelogon/paths.h"
 #include "animelogon/secure.h"
 #include "animelogon/settings.h"
@@ -20,6 +22,15 @@ TEST(ParseIntRejectsGarbage) {
     CHECK(!ParseInt(L"4x", &v));
     CHECK(!ParseInt(L"", &v));
     CHECK(!ParseInt(L"99999999999999999999", &v));
+}
+
+// The settings app asks without administrator rights, whatever is installed here.
+TEST(OtherLogonProgramsAreFoundWithoutRights) {
+    const std::vector<others::Program> found = others::Installed();
+    for (const others::Program &p : found) CHECK(!p.name.empty() && p.name.size() <= 80);
+    bool anyOn = false;
+    for (const others::Program &p : found) anyOn = anyOn || p.on;
+    CHECK(others::AnyOn() == anyOn);
 }
 
 TEST(HashKeyIsStable) {
@@ -38,6 +49,7 @@ TEST(SettingsRoundTrip) {
     s.audio.volume = 55;
     s.audio.videoTrack.enabled = false;
     s.audio.videoTrack.volume = 30;
+    s.audio.videoYields = false;
     std::vector<std::wstring> problems;
     const Settings t = ParseSettings(SerializeSettings(s), &problems);
     CHECK(problems.empty());
@@ -46,11 +58,14 @@ TEST(SettingsRoundTrip) {
     CHECK(t.screens.size() == 1 && t.screens.at(L"00000000000000aa") == L"fedcba9876543210");
     CHECK(t.audio.enabled && t.audio.device == s.audio.device && t.audio.volume == 55);
     CHECK(!t.audio.videoTrack.enabled && t.audio.videoTrack.volume == 30);
+    CHECK(!t.audio.videoYields);
 }
 
 TEST(SettingsDefaultsAreConservative) {
     const Settings s = ParseSettings(L"");
     CHECK(!s.audio.enabled);
+    // The video's sound gives way to other sound unless told otherwise.
+    CHECK(s.audio.videoYields);
     CHECK(s.monitorMode == MonitorMode::Duplicate);
     CHECK(s.theme == L"default" && s.screens.empty());
 }
@@ -223,6 +238,39 @@ TEST(RemoveTreeRemovesNested) {
     CHECK(secure::RemoveTree(dir) == ERROR_SUCCESS);  // already gone
 }
 
+TEST(LanguagesComeFromWindowsLocaleNames) {
+    using i18n::Lang;
+    Lang l = Lang::En;
+    CHECK(i18n::FromLocaleName(L"zh-CN", &l) && l == Lang::ZhHans);
+    CHECK(i18n::FromLocaleName(L"zh-SG", &l) && l == Lang::ZhHans);
+    CHECK(i18n::FromLocaleName(L"zh-TW", &l) && l == Lang::ZhHant);
+    CHECK(i18n::FromLocaleName(L"zh-HK", &l) && l == Lang::ZhHant);
+    CHECK(i18n::FromLocaleName(L"zh-Hant-MO", &l) && l == Lang::ZhHant);
+    CHECK(i18n::FromLocaleName(L"zh-Hans-HK", &l) && l == Lang::ZhHans);
+    CHECK(i18n::FromLocaleName(L"ja-JP", &l) && l == Lang::Ja);
+    CHECK(i18n::FromLocaleName(L"en-GB", &l) && l == Lang::En);
+    CHECK(!i18n::FromLocaleName(L"ko-KR", &l));
+    CHECK(!i18n::FromLocaleName(L"jam", &l));  // a language whose code merely starts the same
+    CHECK(i18n::FromTag(L"zh-hant", &l) && l == Lang::ZhHant && !i18n::FromTag(L"zh", &l));
+}
+
+TEST(StringsFallBackToSimplifiedChineseAndFillTheirPlaces) {
+    i18n::UseText(i18n::Lang::En, R"({"a": "One {n} of {total}", "esc": "q\"é\n"})",
+                  u8R"({"a": "第 {n} 个", "only.zh": "仅中文", "label.面板 {n}": "面板 {n}", "label.颜色": "颜色"})");
+    CHECK(i18n::Tr("a", {{L"n", L"2"}, {L"total", L"5"}}) == L"One 2 of 5");
+    CHECK(i18n::Tr("esc") == L"q\"é\n");
+    CHECK(i18n::Tr("only.zh") == L"仅中文");
+    CHECK(i18n::Tr("not.there") == L"not.there" && !i18n::Has("not.there"));
+    // A label the files carry, numbered or not; one they lack as written.
+    CHECK(i18n::Label(L"面板 3") == L"面板 3" && i18n::Label(L"颜色") == L"颜色");
+    CHECK(i18n::Label(L"Mine") == L"Mine");
+    i18n::UseText(i18n::Lang::En, R"({"label.面板 {n}": "Panel {n}"})", "{}");
+    CHECK(i18n::Label(L"面板 12") == L"Panel 12");
+    CHECK(!i18n::ParseTable("[]", [](void *, std::string_view, const std::wstring &) {}, nullptr));
+    CHECK(!i18n::ParseTable(R"({"a": 1})", [](void *, std::string_view, const std::wstring &) {}, nullptr));
+    i18n::Use(i18n::Lang::ZhHans);
+}
+
 int main(int argc, char **argv) {
     // --dump-background <file>: writes the PNG, for looking at it.
     if (argc == 3 && !std::strcmp(argv[1], "--dump-background")) {
@@ -233,5 +281,37 @@ int main(int argc, char **argv) {
         std::fclose(f);
         return 0;
     }
+    // The strings in the language the expectations are written in, whatever this machine shows.
+    i18n::Use(i18n::Lang::ZhHans);
     return check::RunAll();
+}
+
+TEST(SettingsKeepTheTrayAndTheRecentThemes) {
+    const Settings d = ParseSettings(L"theme = default\r\n");
+    CHECK(d.tray && d.trayRecent == kTrayRecent && d.recent.empty());
+    Settings s;
+    s.tray = false;
+    s.trayRecent = 8;
+    s.recent = {L"0123456789abcdef", L"default"};
+    std::vector<std::wstring> problems;
+    const Settings t = ParseSettings(SerializeSettings(s), &problems);
+    CHECK(problems.empty());
+    CHECK(!t.tray && t.trayRecent == 8 && t.recent == s.recent);
+    // What is not a theme's id is left out, the rest kept in order once; a count out of range
+    // keeps the default.
+    problems.clear();
+    const Settings u = ParseSettings(
+        L"theme = default\r\ntray_recent = 11\r\nrecent = 0123456789abcdef, ../x,default,0123456789abcdef\r\n", &problems);
+    CHECK(problems.size() == 2);
+    CHECK(u.trayRecent == kTrayRecent);
+    CHECK(u.recent == (std::vector<std::wstring>{L"0123456789abcdef", L"default"}));
+    std::wstring many = L"theme = default\r\nrecent = ";
+    for (int i = 1; i <= 12; ++i) {
+        wchar_t id[17];
+        swprintf_s(id, L"%016x", i);
+        many += (i > 1 ? L"," : L"") + std::wstring(id);
+    }
+    const Settings v = ParseSettings(many);
+    CHECK(v.recent.size() == kRecentMax && v.recent.front() == L"0000000000000001");
+    CHECK(ParseSettings(L"theme = default\r\nrecent = \r\n").recent.empty());
 }

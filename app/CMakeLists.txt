@@ -8,7 +8,10 @@ find_program(NODE_EXECUTABLE node REQUIRED)
 find_program(NPM_EXECUTABLE NAMES npm.cmd npm REQUIRED)
 set(APP_WEB_SRC ${CMAKE_CURRENT_SOURCE_DIR}/web)
 set(APP_WEB_DIR ${CMAKE_CURRENT_BINARY_DIR}/web)
-file(GLOB_RECURSE app_web_sources CONFIGURE_DEPENDS ${APP_WEB_SRC}/src/*.ts ${APP_WEB_SRC}/src/*.tsx)
+# The page's strings are res/locales/*.json, which it bundles.
+# So are the Steam Workshop's tags, steam/tags.json.
+file(GLOB_RECURSE app_web_sources CONFIGURE_DEPENDS ${APP_WEB_SRC}/src/*.ts ${APP_WEB_SRC}/src/*.tsx ${APP_WEB_SRC}/src/*.css
+     ${PROJECT_SOURCE_DIR}/res/locales/*.json ${PROJECT_SOURCE_DIR}/steam/tags.json)
 add_custom_command(OUTPUT ${APP_WEB_SRC}/node_modules/.package-lock.json
     # npm is a .cmd script: called through cmd so that the build step goes on after it.
     COMMAND cmd /c npm ci --ignore-scripts --no-audit --no-fund
@@ -16,9 +19,13 @@ add_custom_command(OUTPUT ${APP_WEB_SRC}/node_modules/.package-lock.json
     WORKING_DIRECTORY ${APP_WEB_SRC}
     COMMENT "Installing the settings page's packages"
     VERBATIM)
+# It also writes the licences of the npm packages that went into app.js, which install.exe installs
+# as licenses\npm.txt (installer/CMakeLists.txt).
+set(ANIMELOGON_NPM_NOTICES ${APP_WEB_DIR}/npm-licenses.txt PARENT_SCOPE)
 add_custom_command(OUTPUT ${APP_WEB_DIR}/index.html ${APP_WEB_DIR}/app.css ${APP_WEB_DIR}/app.js
+                          ${APP_WEB_DIR}/npm-licenses.txt
     COMMAND ${NODE_EXECUTABLE} build.mjs --out ${APP_WEB_DIR}
-    DEPENDS ${app_web_sources} ${APP_WEB_SRC}/build.mjs ${APP_WEB_SRC}/index.html ${APP_WEB_SRC}/app.css
+    DEPENDS ${app_web_sources} ${APP_WEB_SRC}/build.mjs ${APP_WEB_SRC}/index.html
             ${APP_WEB_SRC}/node_modules/.package-lock.json
     WORKING_DIRECTORY ${APP_WEB_SRC}
     COMMENT "Bundling the settings page"
@@ -29,16 +36,26 @@ set_source_files_properties(${CMAKE_CURRENT_BINARY_DIR}/web.rc PROPERTIES
     OBJECT_DEPENDS "${APP_WEB_DIR}/index.html;${APP_WEB_DIR}/app.css;${APP_WEB_DIR}/app.js")
 
 set(config_src ${PROJECT_SOURCE_DIR}/config/src)
-animelogon_add_executable(app WIN32
+animelogon_add_executable(app WIN32 LOCALES
     OUTPUT_NAME animelogon
     SOURCES
         src/main.cpp
         src/agent.cpp
+        src/arguments.cpp
+        src/frame.cpp
         src/host.cpp
+        src/host_steam.cpp
         src/library.cpp
+        src/livespectrum.cpp
         src/pictures.cpp
         src/json.cpp
         src/resources.cpp
+        src/steam_client.cpp
+        src/steam_library.cpp
+        src/steam_workshop.cpp
+        src/tray.cpp
+        src/traymenu.cpp
+        src/workshop.cpp
         ${CMAKE_CURRENT_BINARY_DIR}/web.rc
         ${config_src}/commit.cpp
         ${config_src}/store.cpp
@@ -49,10 +66,11 @@ animelogon_add_executable(app WIN32
         ${config_src}/transcode.cpp
         ${config_src}/devices.cpp
         ${config_src}/fonts.cpp
-    DESCRIPTION "AnimeLogon 设置"
-    LIBS animelogon_render animelogon_scene_preview webview2::loader mfplat mfreadwrite mfuuid mmdevapi ole32 shell32 shlwapi comdlg32
+    DESCRIPTION "AnimeLogon"
+    LIBS animelogon_render animelogon_scene_preview webview2::loader mfplat mfreadwrite mfuuid mmdevapi ole32 shell32 shlwapi comdlg32 secur32 advapi32
          dwmapi delayimp windowsapp)
-target_include_directories(app PRIVATE src ${config_src})
+# steam/src for the app id the Steam helper is started with (appid.h), the only file of it used here.
+target_include_directories(app PRIVATE src ${config_src} ${PROJECT_SOURCE_DIR}/steam/src)
 add_dependencies(app app_web)
 # The agent reads Windows' media controls through C++/WinRT, which needs C++20's <coroutine>:
 # under C++17 it falls back to <experimental/coroutine>, which newer MSVC refuses to compile.
