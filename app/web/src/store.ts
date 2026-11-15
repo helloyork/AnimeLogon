@@ -335,11 +335,16 @@ function receive(m: FromNative) {
 
 // The icon in the system tray asked for something that needs this window (app/src/tray.h): the
 // switch that turns AnimeLogon on and off, which needs an administrator, pointed out on the
-// settings page; or the lock-screen preview of what the main display shows.
+// settings page; or the lock-screen preview of what the main display shows. Or a theme package was
+// opened (a double click on an .altheme file), which is imported as from the library: the library.
 // While the setup wizard is up, the window coming forward is all: switching on is what it is for.
-function show(what: 'switch' | 'lock') {
+function show(what: 'switch' | 'lock' | 'library') {
   if (state.setup) return;
-  if (what === 'switch') {
+  if (what === 'library') {
+    // A theme left open under the settings is closed too, or the library's tab would show its page.
+    if (state.view === 'theme') leaveTheme();
+    setState({ tab: 'mine', lock: null, hover: null });
+  } else if (what === 'switch') {
     setState({ tab: 'settings', lock: null, hover: null, reveal: { what } });
   } else if (what === 'lock' && state.lib) {
     const theme = state.lib.settings.monitorMode === 'per-monitor' ? screenTheme(mainMonitor().key) : state.lib.current;

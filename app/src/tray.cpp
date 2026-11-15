@@ -403,8 +403,6 @@ void Tray::Warn(const std::wstring &title, const std::wstring &text) {
 
 std::wstring WindowTitle() { return paths::Sandbox().empty() ? std::wstring(L"AnimeLogon") : paths::SandboxTitle(); }
 
-bool IsShowTarget(std::wstring_view what) { return what.empty() || what == L"switch" || what == L"lock"; }
-
 HWND FindAppWindow() { return FindWindowW(kAppClass, WindowTitle().c_str()); }
 HWND FindTrayWindow() { return FindWindowW(kTrayClass, WindowTitle().c_str()); }
 
@@ -414,6 +412,16 @@ bool AskApp(HWND app, const std::wstring &what) {
     // The person just clicked: the app may take the foreground from whoever has it.
     AllowSetForegroundWindow(pid);
     COPYDATASTRUCT cd{kAskShow, (DWORD)(what.size() * sizeof(wchar_t)), const_cast<wchar_t *>(what.c_str())};
+    DWORD_PTR answer = 0;
+    return SendMessageTimeoutW(app, WM_COPYDATA, 0, reinterpret_cast<LPARAM>(&cd), SMTO_ABORTIFHUNG, 3000, &answer) && answer;
+}
+
+bool AskAppToOpen(HWND app, const std::wstring &path) {
+    DWORD pid = 0;
+    GetWindowThreadProcessId(app, &pid);
+    // The person just opened a file: the app may come forward over whoever has the foreground.
+    AllowSetForegroundWindow(pid);
+    COPYDATASTRUCT cd{kAskOpen, (DWORD)(path.size() * sizeof(wchar_t)), const_cast<wchar_t *>(path.c_str())};
     DWORD_PTR answer = 0;
     return SendMessageTimeoutW(app, WM_COPYDATA, 0, reinterpret_cast<LPARAM>(&cd), SMTO_ABORTIFHUNG, 3000, &answer) && answer;
 }

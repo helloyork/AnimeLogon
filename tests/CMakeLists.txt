@@ -121,3 +121,8 @@ endif()
 # drawing it with the logon screen's renderer; and the logon screen listening to the output device,
 # where the machine has one.
 target_sources(animelogon_tests PRIVATE spectrum_tests.cpp)
+
+# What the installer registers so that .altheme files open in AnimeLogon, against a registry in
+# memory, and the settings app's reading of its command line.
+target_sources(animelogon_tests PRIVATE assoc_tests.cpp ${PROJECT_SOURCE_DIR}/installer/src/assoc.cpp
+                                        ${PROJECT_SOURCE_DIR}/app/src/arguments.cpp)

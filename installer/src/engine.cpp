@@ -32,6 +32,7 @@
 #include "animelogon/version.h"
 #include "animelogon/wallpaper.h"
 
+#include "assoc.h"
 #include "payload.h"
 #include "restart.h"
 
@@ -645,6 +646,15 @@ Report Install(const std::wstring &targetDir, const InstallOptions &options) {
         e = i18n::SetMachineChoice(options.language);
         if (e != ERROR_SUCCESS) ALOG(L"install: language not recorded (%lu)", e);
     }
+    // Theme packages open in the settings app, which imports them (assoc.h). Without it they are
+    // still imported from the library, so a failure is logged and the install goes on.
+    {
+        const std::unique_ptr<assoc::Classes> classes = assoc::MachineClasses();
+        e = assoc::Register(*classes, targetDir, Tr("install.file_type"));
+        if (e != ERROR_SUCCESS) ALOG(L"install: .altheme files not registered (%lu)", e);
+        else if (!assoc::IsDefault(*classes)) ALOG(L"install: another program opens .altheme files; AnimeLogon is offered under Open with");
+        assoc::Notify();
+    }
 
     // From here on the service is this install's: each failure below removes it and undoes what
     // was done to Windows, rather than starting it again.
@@ -766,6 +776,9 @@ Report Uninstall(bool keepData, const Progress &progress) {
     if (e != ERROR_SUCCESS && e != ERROR_FILE_NOT_FOUND) problem("uninstall.problem.entry", e);
     e = RemoveRunEntry();
     if (e != ERROR_SUCCESS) problem("uninstall.problem.run", e);
+    e = assoc::Unregister(*assoc::MachineClasses());
+    if (e != ERROR_SUCCESS) problem("uninstall.problem.file_type", e);
+    assoc::Notify();
 
     // Only the service can write these back, so before it goes.
     at(0.30, "uninstall.step.service");

@@ -1,6 +1,6 @@
 # "install" is a reserved CMake target name, hence OUTPUT_NAME. Media Foundation is loaded
 # at run time (engine.cpp), so that Windows N gets a message instead of a loader error.
-set(installer_ui src/ui.cpp src/wizards.cpp src/engine.cpp src/payload.cpp src/restart.cpp)
+set(installer_ui src/ui.cpp src/wizards.cpp src/engine.cpp src/payload.cpp src/restart.cpp src/assoc.cpp)
 set(installer_libs mfuuid ole32 oleaut32 shell32 comctl32 d2d1 dwrite dwmapi)
 
 # --- What install.exe installs ------------------------------------------------------------------

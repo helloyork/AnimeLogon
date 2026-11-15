@@ -41,6 +41,7 @@ animelogon_add_executable(app WIN32 LOCALES
     SOURCES
         src/main.cpp
         src/agent.cpp
+        src/arguments.cpp
         src/frame.cpp
         src/host.cpp
         src/host_steam.cpp

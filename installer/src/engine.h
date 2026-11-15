@@ -65,18 +65,19 @@ struct InstallOptions {
 // program files to `targetDir`, which must lie inside Program Files -- a file still in use elsewhere
 // is moved aside and deleted at the next restart -- and deletes config.exe there (the settings app
 // of earlier versions), bakes the background, writes default settings (the default theme) unless
-// settings.ini already names a theme, registers the uninstall entry, installs the service, switches
-// off other programs that draw the logon screen (others.h) and only then applies the Windows
-// lock-screen changes; a failure there undoes them (with `setupInApp`, neither of those last two:
-// see InstallOptions). Ends with the shortcuts, the Run entry that
-// shows the icon at sign-in and the icon itself for whoever is signed in here (needs COM), and says
+// settings.ini already names a theme, registers the uninstall entry and .altheme files (assoc.h),
+// installs the service, switches off other programs that draw the logon screen (others.h) and only
+// then applies the Windows lock-screen changes; a failure there undoes them (with `setupInApp`,
+// neither of those last two: see InstallOptions). Ends with the shortcuts, the Run entry that shows
+// the icon at sign-in and the icon itself for whoever is signed in here (needs COM), and says
 // when the settings app will not find the WebView2 runtime.
 Report Install(const std::wstring &targetDir, const InstallOptions &options = {});
 
-// Closes AnimeLogon's windows on this desktop, removes the shortcuts, the Run entry and the
-// uninstall entry, stops and removes the service, restores the Windows lock screen, and deletes the
-// installed files (at the next restart if in use). `keepData` leaves the themes, their wallpapers
-// and components, and settings.ini in place; otherwise all of %ProgramData%\AnimeLogon goes.
+// Closes AnimeLogon's windows on this desktop, removes the shortcuts, the Run entry, the
+// uninstall entry and what registered .altheme files (assoc.h), stops and removes the service,
+// restores the Windows lock screen, and deletes the installed files (at the next restart if in
+// use). `keepData` leaves the themes, their wallpapers and components, and settings.ini in place;
+// otherwise all of %ProgramData%\AnimeLogon goes.
 Report Uninstall(bool keepData, const Progress &progress = {});
 
 }  // namespace engine
