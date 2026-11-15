@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "animelogon/settings.h"
+#include "soundyield.h"
 
 class AudioSystem {
 public:
@@ -33,7 +34,8 @@ public:
     // file's own length. Before the
     // output is open it is only remembered, and starts once it is from where the picture is then
     // (Tick). While other programs make sound and the settings say video_audio_yield, it plays
-    // muted, and comes back once they have been quiet for a few seconds.
+    // muted, and comes back once they have been quiet for a few seconds; a program that only
+    // repeats it, listening to the output, does not count (soundyield.h).
     bool PlayVideoTrack(const std::wstring &wavPath, double position, float fadeInSeconds, double loopSeconds);
     void FadeOut(float seconds);
     void Pause();
@@ -75,8 +77,9 @@ private:
     float wantFade_ = 0.0f;
     bool wantPlay_ = false;
     bool paused_ = false;  // a track that starts now starts paused
-    // Other programs' sound on the device (video_audio_yield), watched by the opening thread.
+    // Other programs' sound on the device (video_audio_yield), watched by the opening thread, and
+    // when the track gives way to it (soundyield.h).
     std::shared_ptr<Watch> watch_;
-    bool yielding_ = false;        // the track is muted for them
-    ULONGLONG othersHeardAt_ = 0;  // when they were last heard
+    soundyield::Rule yield_;
+    uint64_t looksTaken_ = 0;  // the watch's looks seen so far
 };

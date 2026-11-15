@@ -30,6 +30,9 @@ target_sources(animelogon_tests PRIVATE display_tests.cpp)
 # Giving way to Windows: the watchdog's rule, the launcher's reading of exit codes and of "Switch
 # user", a pen or a touch waking the screen, and the parked overlay's planning (header-only).
 target_sources(animelogon_tests PRIVATE runtime_tests.cpp)
+# The wallpaper's sound track giving way to other programs' sound, and not to one that only repeats
+# it (header-only).
+target_sources(animelogon_tests PRIVATE soundyield_tests.cpp)
 # Which of the other displays get a still after a wake, what each is cut from, and the blur.
 target_sources(animelogon_tests PRIVATE stills_tests.cpp ${PROJECT_SOURCE_DIR}/overlay/src/stills.cpp)
 target_include_directories(animelogon_tests PRIVATE ${PROJECT_SOURCE_DIR}/overlay/src)
