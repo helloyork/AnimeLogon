@@ -1,5 +1,5 @@
-// What the lab's DevTools scripts (.lab/app/e2e.mjs and its checks) read and call on the page:
-// the state as globals and the actions a person would take. Nothing in the page uses these.
+// What end-to-end test scripts driving the page through DevTools read and call on it: the state
+// as globals and the actions a person would take. Nothing in the page uses these.
 import { liftFor, pv } from './preview';
 import { send } from './native';
 import { applyFlow, apply, deleteFlow, getState, leaveTheme, openDialog, openTheme, select, setState, setTab, type Tab } from './store';

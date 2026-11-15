@@ -171,6 +171,6 @@ TEST(WinlogonShutdownRequestsAreShutdownsRestartsAndPowerOffs) {
     CHECK(IsShutdownRequest(EWX_SHUTDOWN));
     CHECK(IsShutdownRequest(EWX_REBOOT));
     CHECK(IsShutdownRequest(EWX_POWEROFF));
-    // A restart asked for from a live logon screen (Shittim Logon's lab, 2026-09-12): 0x20007.
+    // The flags Windows passes for a restart asked for from a live logon screen: 0x20007.
     CHECK(IsShutdownRequest(0x20007));
 }

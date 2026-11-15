@@ -88,7 +88,7 @@ programs.
 |---|---|
 | Component (`.xml`, root element `<component>`) | What a theme draws over its wallpaper: clocks, dates, battery, now playing, countdowns and audio spectra. See [Component format](skills/animelogon-components/reference/component-format.md) and [Component attributes](skills/animelogon-components/reference/attributes.md). |
 | Theme (`theme.xml`) and theme package (`.altheme`) | A theme is a wallpaper and up to 8 components. A theme package is an uncompressed zip file that carries a theme with its wallpaper and component files. See [Themes and theme packages](skills/animelogon-components/reference/theme-package.md). |
-| Scene wallpaper (`.alscene`) | Not imported by the current version. See [tools/SCENES.md](tools/SCENES.md) (Chinese). |
+| Scene wallpaper (`.alscene`) | Not imported by the current version. |
 
 Each format is at version `format="1"`. AnimeLogon refuses elements and attributes it does not
 recognize, so a file that uses something added in a later version cannot be imported by an

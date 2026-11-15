@@ -70,7 +70,7 @@ AnimeLogon 在系统托盘中显示一个图标。单击图标打开设置；右
 |---|---|
 | 组件（`.xml`，根元素 `<component>`） | 主题中绘制在壁纸之上的内容，如时钟、日期、电量、正在播放、倒计时和音频频谱。见[组件格式](skills/animelogon-components/reference/component-format.md)和[组件属性](skills/animelogon-components/reference/attributes.md)（英文）。 |
 | 主题（`theme.xml`）与主题包（`.altheme`） | 主题由一个壁纸和最多 8 个组件组成。主题包是不压缩的 zip 文件，包含主题及其壁纸和组件文件。见[主题与主题包](skills/animelogon-components/reference/theme-package.md)（英文）。 |
-| 场景壁纸（`.alscene`） | 当前版本不导入。见 [tools/SCENES.md](tools/SCENES.md)。 |
+| 场景壁纸（`.alscene`） | 当前版本不导入。 |
 
 以上格式的版本均为 `format="1"`。AnimeLogon 拒绝无法识别的元素和属性，因此使用了较新版本所增加内容的文件，无法在较早的版本中导入。
 
