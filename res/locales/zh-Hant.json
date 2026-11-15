@@ -763,6 +763,8 @@
   "settings.sound.video": "影片聲音",
   "settings.sound.video.detail": "播放影片桌布的音軌。",
   "settings.sound.video_volume": "影片音量",
+  "settings.sound.video_yield": "其他聲音播放時靜音",
+  "settings.sound.video_yield.detail": "其他應用程式正在播放聲音時，影片聲音保持靜音；其他聲音停止後恢復。",
   "settings.sound.volume": "總音量",
   "settings.system": "系統",
   "settings.title": "設定",

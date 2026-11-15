@@ -802,6 +802,8 @@ bool Library::SetGlobal(const std::wstring &key, const std::wstring &value) {
         ok = flag(&set_.audio.videoTrack.enabled);
     } else if (key == L"audio.videoVolume") {
         ok = percent(&set_.audio.videoTrack.volume);
+    } else if (key == L"audio.videoYield") {
+        ok = flag(&set_.audio.videoYields);
     }
     if (ok && pictures) sharedVersion_ = ++version_;
     return ok;
@@ -882,6 +884,7 @@ void Library::WriteLibrary(json::Writer &w) const {
     w.Key(L"audio").BeginObject();
     w.Member(L"enabled", set_.audio.enabled).Member(L"device", set_.audio.device).Member(L"volume", set_.audio.volume);
     w.Member(L"video", set_.audio.videoTrack.enabled).Member(L"videoVolume", set_.audio.videoTrack.volume);
+    w.Member(L"videoYield", set_.audio.videoYields);
     w.EndObject();
     w.EndObject();
 

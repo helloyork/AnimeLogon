@@ -13,6 +13,7 @@
 
 #include <wtsapi32.h>
 
+#include <algorithm>
 #include <atomic>
 #include <map>
 #include <memory>
@@ -92,7 +93,7 @@ struct Overlay {
     wake::Intent intent;
     bool woke = false;
     bool keyhookOn = false;
-    ULONGLONG fadeStart = 0;
+    double fadeStart = 0.0;  // when it was woken, in PreciseSeconds()
     bool displayOn = true;
     ULONGLONG displayOffAt = 0;
     DWORD displayOffInput = 0;
@@ -117,13 +118,27 @@ std::atomic<ULONGLONG> g_heartbeat{0};
 
 void Beat() { g_heartbeat.store(GetTickCount64()); }
 
+// Seconds on the performance counter, the clock the transitions are timed by. GetTickCount64
+// moves in steps of 15.6 ms: timed by it, a transition stood still for two frames in three on a
+// 180 Hz display and then jumped, which reads as a very low frame rate once the picture moves.
+double PreciseSeconds() {
+    static const double frequency = [] {
+        LARGE_INTEGER f{};
+        QueryPerformanceFrequency(&f);
+        return (double)f.QuadPart;
+    }();
+    LARGE_INTEGER c{};
+    QueryPerformanceCounter(&c);
+    return (double)c.QuadPart / frequency;
+}
+
 bool g_still = false;
 
 // `how` says what woke it, for the log; which key is never recorded.
 void Wake(const wchar_t *how) {
     if (g_overlay.woke || g_still) return;
     g_overlay.woke = true;
-    g_overlay.fadeStart = GetTickCount64();
+    g_overlay.fadeStart = PreciseSeconds();
     // A click wakes too; after any wake no further key is withheld.
     keyhook::State().armed.store(false);
     ALOG(L"wake: %s -- fading out", how);
@@ -134,12 +149,12 @@ float WakeSeconds(const plan::Plan &plan) {
     return plan.wake == animelogon::WakeStyle::Cut ? 0.0f : plan.wakeSeconds;
 }
 
-// How far it has gone: 0 at the wake, 1 once it is over. The screen's own transition and the
-// other displays' stills (otherdisplays.h) both go by this.
-float WakeProgress(const plan::Plan &plan, ULONGLONG now) {
+// How far it has gone at `at` (PreciseSeconds()): 0 at the wake, 1 once it is over. The screen's
+// own transition and the other displays' stills (otherdisplays.h) both go by this.
+float WakeProgress(const plan::Plan &plan, double at) {
     if (!g_overlay.woke) return 0.0f;
     const float seconds = WakeSeconds(plan);
-    return seconds > 0.0f ? std::min(1.0f, (float)(now - g_overlay.fadeStart) / 1000.0f / seconds) : 1.0f;
+    return seconds > 0.0f ? std::clamp((float)(at - g_overlay.fadeStart) / seconds, 0.0f, 1.0f) : 1.0f;
 }
 
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
@@ -331,7 +346,7 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
     g_overlay.inputWindow = nullptr;
     g_overlay.woke = false;
     g_overlay.keyhookOn = false;
-    g_overlay.fadeStart = 0;
+    g_overlay.fadeStart = 0.0;
     g_overlay.displayOn = true;
     g_overlay.displayOffAt = 0;
     g_overlay.displayOffInput = 0;
@@ -630,7 +645,10 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
         AudioSystem::RememberConsoleDefault();
         const plan::Wallpaper &first = targets.front().wallpaper;
         if ((first.source == plan::Source::Video || (first.source == plan::Source::Scene && !scenes.Static(first.id))) && !first.audioPath.empty()) {
-            audio.PlayVideoTrack(first.audioPath, 0.0, kFadeSeconds);
+            // Looped at the video's own length, so that sound and picture stay together.
+            const auto player = players.find(first.id);
+            const double loop = player != players.end() ? player->second->durationSeconds() : 0.0;
+            audio.PlayVideoTrack(first.audioPath, 0.0, kFadeSeconds, loop);
             track = first.id;
         }
     }
@@ -725,6 +743,7 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
     // --- frame loop --------------------------------------------------------------------
     HANDLE timer = CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
     const ULONGLONG start = GetTickCount64();
+    const double entranceStart = PreciseSeconds();  // what the components' entrances count from
     bool componentsFading = withComponents;
     // The video's clock stands still while the panel is dark or the machine sleeps.
     const ULONGLONG clockStart = screen::AwakeMs();
@@ -736,6 +755,11 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
     double firstT = -1.0, lastT = 0.0;
     ULONGLONG lastExitCheck = 0;
     ULONGLONG lastKeepTop = 0;
+    // How the wake transition went, for the log: the frames drawn, how many of them moved it on,
+    // and the longest wait between two of them.
+    int wakeFrames = 0, wakeSteps = 0;
+    float wakeK = 0.0f, wakeDrawnK = -1.0f;
+    double wakeDrawnAt = 0.0, wakeGap = 0.0;
 
     while (!done) {
         double period = 1.0 / 30.0;
@@ -765,6 +789,11 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
         }
 
         const ULONGLONG now = GetTickCount64();
+        // The moment the picture drawn on this turn is first seen: the compositor's next frame.
+        // Transitions are drawn for that moment, so a movement steps on by one whole frame each
+        // time whatever the timer's own jitter.
+        double ahead = 0.0;
+        const double shownAt = PreciseSeconds() + (!emergency && presenter.SecondsToNextComposition(&ahead) ? ahead : 0.0);
 
         if (inputsink::Drain(g_overlay.inputWindow, g_overlay.intent) || g_overlay.intent.requested()) Wake(L"a press seen by raw input");
 
@@ -789,7 +818,11 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
             }
         }
 
-        audio.Tick();
+        // The video's own clock, standing still while the panel is dark. A sound track that starts
+        // late -- an output device that appears seconds into the boot screen -- starts from here.
+        const ULONGLONG dark = draw ? darkMs : darkMs + (screen::AwakeMs() - darkSince);
+        const double pictureClock = (double)(screen::AwakeMs() - clockStart - dark) / 1000.0;
+        audio.Tick(pictureClock);
         if (!emergency && feed.Poll(&snapshot) && withComponents) layer.SetData(snapshot);
         const bool componentsChanged = withComponents && !emergency && layer.Tick();
         // The spectra take the latest sound once a tick while the screen is lit; until the device
@@ -821,17 +854,15 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
             listened = layer.Moving();
         }
 
-        double t = 0.0;
-        if (!audio.TrackClock(&t)) {
-            const ULONGLONG dark = draw ? darkMs : darkMs + (screen::AwakeMs() - darkSince);
-            t = (double)(screen::AwakeMs() - clockStart - dark) / 1000.0;
-        }
+        // Once its sound track plays, the video follows the track's clock instead.
+        double t = pictureClock;
+        audio.TrackClock(&t);
 
         // Woken: the screen gives way to the sign-in screen as the primary display's theme says
         // (plan.h): fading, growing as it fades, sliding up off the display, or at once.
         float opacity = 1.0f, leaveScale = 1.0f, leaveRise = 0.0f;
         if (g_overlay.woke) {
-            const float k = WakeProgress(plan, now);
+            const float k = wakeK = WakeProgress(plan, shownAt);
             const float c = std::min(k, 1.0f), smooth = c * c * (3.0f - 2.0f * c);
             switch (plan.wake) {
             case animelogon::WakeStyle::Zoom:
@@ -849,7 +880,7 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
             }
             presenter.SetLeave(leaveScale, leaveRise);
         }
-        if (!opt.windowed) g_otherDisplays.Live(g_overlay.woke, WakeProgress(plan, now));
+        if (!opt.windowed) g_otherDisplays.Live(g_overlay.woke, WakeProgress(plan, shownAt));
 
         // A video that stopped decoding is replaced before this tick's picture is composed, so
         // the built-in wallpaper is drawn in its place at once.
@@ -881,7 +912,7 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
             if (componentsFading) {
                 // Each panel comes in as its component says (enter, enter-delay, enter-duration),
                 // counted from the first tick with the wallpaper up.
-                layer.SetEntrance((float)(now - start) / 1000.0f);
+                layer.SetEntrance((float)(shownAt - entranceStart));
                 componentsFading = layer.Entering();
                 presenter.SetComponentOpacity(1.0f);
             }
@@ -896,6 +927,14 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
             if (fresh) {
                 if (presenter.Render(pictures, 0.0f, opacity)) {
                     rendered(pictures);
+                    if (g_overlay.woke) {
+                        const double at = PreciseSeconds();
+                        ++wakeFrames;
+                        if (wakeK != wakeDrawnK) ++wakeSteps;
+                        if (wakeDrawnAt > 0.0) wakeGap = std::max(wakeGap, at - wakeDrawnAt);
+                        wakeDrawnK = wakeK;
+                        wakeDrawnAt = at;
+                    }
                 } else if (presenter.DeviceLost()) {
                     if (staticAfterReset()) continue;
                     ALOG(L"overlay: the graphics device was lost -- exiting so a fresh one starts");
@@ -957,6 +996,9 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
              shownFrames, lastT - firstT, (shownFrames - 1) / (lastT - firstT), videoFps,
              presenter.CompositionRate());
     }
+    if (wakeFrames > 1)
+        ALOG(L"wake: %s over %.2f s -- %d frames drawn, %d of them moved it on, longest gap %.1f ms",
+             animelogon::ToString(plan.wake), WakeSeconds(plan), wakeFrames, wakeSteps, wakeGap * 1000.0);
 
     // --- tear the appearance down ------------------------------------------------------
     scenes.End();
@@ -972,7 +1014,7 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
     capture.Stop();
     audio.FadeOut(0.2f);
     for (int i = 0; i < 12; ++i) {
-        audio.Tick();
+        audio.Tick(0.0);  // fading out: nothing is waiting to start
         Sleep(16);
     }
     // Closing a video waits for its decoding thread, and a decoder that stopped handing out frames

@@ -763,6 +763,8 @@
   "settings.sound.video": "動画のサウンド",
   "settings.sound.video.detail": "動画の壁紙の音声トラックを再生します。",
   "settings.sound.video_volume": "動画の音量",
+  "settings.sound.video_yield": "他のサウンドの再生中はミュート",
+  "settings.sound.video_yield.detail": "他のアプリがサウンドを再生している間は動画のサウンドをミュートし、停止すると再開します。",
   "settings.sound.volume": "全体の音量",
   "settings.system": "システム",
   "settings.title": "設定",

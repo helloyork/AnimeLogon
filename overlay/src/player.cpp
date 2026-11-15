@@ -4,6 +4,8 @@
 #include <mferror.h>
 #include <propvarutil.h>
 
+#include <cmath>
+
 #include "animelogon/log.h"
 #include "animelogon/text.h"
 #include "nv12.h"
@@ -201,8 +203,15 @@ bool VideoPlayer::Open(const std::wstring &path, ID3D11Device *device, IMFDXGIDe
         ALOG(L"video: cannot create frame textures for %ux%u", allocW_, allocH_);
         return false;
     }
-    ALOG(L"video: %s, %dx%d (%ux%u allocated), %.3f fps, %s decoding", path_.c_str(), displayW_, displayH_, allocW_,
-         allocH_, 1.0 / frameSeconds_, hardware_ ? L"hardware" : L"software");
+    duration_ = 0.0;
+    PROPVARIANT length;
+    PropVariantInit(&length);
+    if (SUCCEEDED(reader_->GetPresentationAttribute((DWORD)MF_SOURCE_READER_MEDIASOURCE, MF_PD_DURATION, &length)) &&
+        length.vt == VT_UI8)
+        duration_ = (double)length.uhVal.QuadPart / 1e7;
+    PropVariantClear(&length);
+    ALOG(L"video: %s, %dx%d (%ux%u allocated), %.3f fps, %.3f s, %s decoding", path_.c_str(), displayW_, displayH_,
+         allocW_, allocH_, 1.0 / frameSeconds_, duration_, hardware_ ? L"hardware" : L"software");
     stop_ = false;
     failed_ = false;
     failure_.clear();
@@ -292,7 +301,13 @@ void VideoPlayer::Decode() {
                 break;
             }
             // Loop: the next pass continues the timeline rather than restarting it.
-            if (loopLength <= 0.0) loopLength = (double)(last - first) / 1e7 + frameSeconds_;
+            if (loopLength <= 0.0) {
+                loopLength = (double)(last - first) / 1e7 + frameSeconds_;
+                // Its sound track loops at the length the file gives; a picture that loops at
+                // another drifts from it a little every time round.
+                if (duration_ > 0.0 && std::fabs(loopLength - duration_) > 0.001)
+                    ALOG(L"video: one loop of the frames is %.3f s, the file says %.3f s", loopLength, duration_);
+            }
             loopBase += loopLength;
             PROPVARIANT start;
             InitPropVariantFromInt64(0, &start);

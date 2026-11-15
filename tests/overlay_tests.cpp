@@ -20,6 +20,7 @@
 #include "layout.h"
 #include "picture.h"
 #include "plan.h"
+#include "soundloop.h"
 
 using namespace animelogon;
 
@@ -480,4 +481,15 @@ TEST(PlanCarriesTheThemesBlur) {
     shown[0].source = plan::Source::Video;
     shown[0].id = L"1111111111111111";
     CHECK(plan::ShowBuiltInInstead(&shown, L"1111111111111111").size() == 1 && shown[0].blur == 2.5f);
+}
+
+TEST(SoundTrackLoopsAtTheVideosLength) {
+    // A track 32 ms longer than its 12 s video -- the AAC lead-in and padding -- is cut to it.
+    CHECK(soundloop::LoopFrames(577536, 12.0, 48000) == 576000);
+    // One shorter is filled out with silence to it.
+    CHECK(soundloop::LoopFrames(575000, 12.0, 48000) == 576000);
+    // Without the video's length, or with one too far off to be the same recording, the file's
+    // own length stands.
+    CHECK(soundloop::LoopFrames(577536, 0.0, 48000) == 577536);
+    CHECK(soundloop::LoopFrames(577536, 30.0, 48000) == 577536);
 }

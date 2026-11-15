@@ -209,7 +209,12 @@ export function SettingsPage() {
                 {() => <Switch label={t('settings.sound.video')} checked={set.audio.video} onChange={v => global('audio.video', v)} />}
               </Row>
               {set.audio.video && (
-                <Row sub title={t('settings.sound.video_volume')}>{id => <Volume labelledBy={id} value={set.audio.videoVolume} onDone={v => global('audio.videoVolume', v)} />}</Row>
+                <>
+                  <Row sub title={t('settings.sound.video_volume')}>{id => <Volume labelledBy={id} value={set.audio.videoVolume} onDone={v => global('audio.videoVolume', v)} />}</Row>
+                  <Row sub title={t('settings.sound.video_yield')} description={t('settings.sound.video_yield.detail')}>
+                    {() => <Switch label={t('settings.sound.video_yield')} checked={set.audio.videoYield} onChange={v => global('audio.videoYield', v)} />}
+                  </Row>
+                </>
               )}
             </>
           )}

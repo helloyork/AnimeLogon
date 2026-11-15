@@ -49,6 +49,7 @@ TEST(SettingsRoundTrip) {
     s.audio.volume = 55;
     s.audio.videoTrack.enabled = false;
     s.audio.videoTrack.volume = 30;
+    s.audio.videoYields = false;
     std::vector<std::wstring> problems;
     const Settings t = ParseSettings(SerializeSettings(s), &problems);
     CHECK(problems.empty());
@@ -57,11 +58,14 @@ TEST(SettingsRoundTrip) {
     CHECK(t.screens.size() == 1 && t.screens.at(L"00000000000000aa") == L"fedcba9876543210");
     CHECK(t.audio.enabled && t.audio.device == s.audio.device && t.audio.volume == 55);
     CHECK(!t.audio.videoTrack.enabled && t.audio.videoTrack.volume == 30);
+    CHECK(!t.audio.videoYields);
 }
 
 TEST(SettingsDefaultsAreConservative) {
     const Settings s = ParseSettings(L"");
     CHECK(!s.audio.enabled);
+    // The video's sound gives way to other sound unless told otherwise.
+    CHECK(s.audio.videoYields);
     CHECK(s.monitorMode == MonitorMode::Duplicate);
     CHECK(s.theme == L"default" && s.screens.empty());
 }
