@@ -132,13 +132,20 @@ Result StageImage(const image::Picture &p, const std::wstring &dir, const std::w
     return r;
 }
 
-Result StageVideo(const std::wstring &source, const std::wstring &dir, const std::wstring &name,
+Result StageVideo(const transcode::Source &source, const std::wstring &dir, const std::wstring &name,
                   const std::atomic<bool> &cancel, const Progress &progress) {
     const transcode::Result t = transcode::Run(source, dir, name, cancel, progress);
     Result r;
     r.ok = t.ok;
     r.error = t.ok ? L"" : (t.error.empty() ? animelogon::i18n::Tr("transcode.error.failed") : t.error);
     return r;
+}
+
+Result StageVideo(const std::wstring &path, const std::wstring &dir, const std::wstring &name,
+                  const std::atomic<bool> &cancel, const Progress &progress) {
+    transcode::Source source;
+    source.path = path;
+    return StageVideo(source, dir, name, cancel, progress);
 }
 
 // The picture or video at `source` as a wallpaper in `dir`; `picture` says which it turned out
@@ -305,18 +312,20 @@ Result Package(const std::wstring &source, const std::wstring &dir, const std::a
             package::Reader sceneReader;
             if (!reader.Read(*wallpaper,package::kMaxPictureBytes,&bytes,&why) || !sceneReader.OpenBytes(std::move(bytes),&why)) return Error(animelogon::i18n::Tr("package.error.scene", {{L"why", why}}));
             r = SceneWallpaper(sceneReader,wallpaperDir,t.name,cancel,progress);
+        } else if (t.wallpaper == L"wallpaper.mp4" && reader.File() != INVALID_HANDLE_VALUE) {
+            // Entries are stored (package.h), so the video is read where it lies in the package,
+            // which stays open, and unwritable, until it is transcoded: no copy of a video of up to
+            // 1 GB is written out and read back first.
+            transcode::Source video;
+            video.path = source;
+            video.file = reader.File();
+            video.offset = wallpaper->offset;
+            video.size = wallpaper->size;
+            video.name = L"wallpaper.mp4";
+            r = StageVideo(video, wallpaperDir, t.name, cancel, progress);
         } else if (t.wallpaper == L"wallpaper.mp4") {
-            // Media Foundation reads from a file. It goes beside the staging, not into it, and
-            // is gone once the video is transcoded.
-            const std::wstring scratch = dir + L"-source";
-            const std::wstring copy = scratch + L"\\wallpaper.mp4";
-            if (!paths::CreateDirectories(scratch) || !reader.Extract(*wallpaper, copy, &why)) {
-                ALOG(L"import: %s %s", source.c_str(), why.c_str());
-                secure::RemoveTree(scratch);
-                return Error(animelogon::i18n::Tr("package.error.video"));
-            }
-            r = StageVideo(copy, wallpaperDir, t.name, cancel, progress);
-            secure::RemoveTree(scratch);
+            ALOG(L"import: %s cannot be read in place", source.c_str());
+            return Error(animelogon::i18n::Tr("package.error.video"));
         } else {
             image::Picture p;
             const bool read = reader.Read(*wallpaper, package::kMaxPictureBytes, &bytes, &why);
