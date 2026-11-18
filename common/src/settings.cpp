@@ -254,6 +254,8 @@ int FrameRateNow(const RenderSettings &render, bool onBattery, bool energySaver)
     if (energySaver) return render.fpsOnSaver;
     return onBattery ? render.fpsOnBattery : render.fps;
 }
+bool ParseRenderFps(std::wstring_view text, int *fps) { return ParseFrameRate(text, fps); }
+std::wstring RenderFpsText(int fps) { return FrameRateText(fps); }
 
 const wchar_t *ToString(RotationOrder order) { return kRotationOrders[(int)order]; }
 

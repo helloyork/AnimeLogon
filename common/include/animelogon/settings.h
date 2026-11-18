@@ -107,6 +107,9 @@ struct RenderSettings {
 };
 // The cap that applies in the given power state.
 int FrameRateNow(const RenderSettings &render, bool onBattery, bool energySaver);
+// A frame rate cap as settings.ini writes it (a number, `display` or `still`), and back.
+bool ParseRenderFps(std::wstring_view text, int *fps);
+std::wstring RenderFpsText(int fps);
 // `rotation_minutes`, between kRotationMinutesMin and Max. Every move to a theme not shown lately
 // has Windows prepare its sign-in picture again, so the shortest interval is a few minutes.
 constexpr int kRotationMinutes = 30, kRotationMinutesMin = 5, kRotationMinutesMax = 1440;

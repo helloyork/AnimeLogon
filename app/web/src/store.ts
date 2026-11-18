@@ -54,7 +54,7 @@ export interface State {
 }
 
 let state: State = {
-  env: { on: false, installed: false, setupPending: false, others: [], version: '', user: '', accountPicture: false, lang: '', langChoice: '', library: { dir: '', away: false }, wallpaperEngine: false, steam: false, importable: { video: [], picture: [], package: [] }, monitors: [], fonts: [], devices: [] },
+  env: { on: false, installed: false, setupPending: false, others: [], version: '', scenes: false, user: '', accountPicture: false, lang: '', langChoice: '', library: { dir: '', away: false }, wallpaperEngine: false, steam: false, importable: { video: [], picture: [], package: [] }, monitors: [], fonts: [], devices: [] },
   lib: null,
   open: null,
   clock: '',

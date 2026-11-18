@@ -487,9 +487,31 @@ TEST(AppLibrarySharedSettings) {
     CHECK(!l.SetGlobal(L"components", L"maybe"));
     CHECK(!l.SetGlobal(L"screen.00000000000000aa", L"cccccccccccccccc"));
     CHECK(!l.SetGlobal(L"theme", kThemeU));  // not one of the shared settings
+    // How scenes are drawn: each value as settings.ini writes it, anything else refused.
+    CHECK(l.SetGlobal(L"render.quality", L"highest") && l.settings().render.quality == RenderQuality::Highest);
+    CHECK(!l.SetGlobal(L"render.quality", L"ultra"));
+    CHECK(l.SetGlobal(L"render.fps", L"display") && l.settings().render.fps == kFpsDisplay);
+    CHECK(l.SetGlobal(L"render.fpsBattery", L"24") && l.settings().render.fpsOnBattery == 24);
+    CHECK(l.SetGlobal(L"render.fpsSaver", L"still") && l.settings().render.fpsOnSaver == kFpsStill);
+    CHECK(!l.SetGlobal(L"render.fps", L"10") && !l.SetGlobal(L"render.fps", L"fast"));
+    CHECK(l.SetGlobal(L"render.videoMemory", L"1024") && l.settings().render.videoMemory == 1024);
+    CHECK(l.SetGlobal(L"render.videoMemory", L"auto") && l.settings().render.videoMemory == 0);
+    CHECK(!l.SetGlobal(L"render.videoMemory", L"64"));
+    CHECK(l.SetGlobal(L"render.particles", L"40") && l.settings().render.particles == 40);
+    CHECK(!l.SetGlobal(L"render.particles", L"5"));
+    json::Writer library;
+    library.BeginObject();
+    l.WriteLibrary(library);
+    library.EndObject();
+    json::Value v;
+    CHECK(json::Parse(library.text(), &v));
+    const json::Value &render = v[L"settings"][L"render"];
+    CHECK(render[L"quality"].Str() == L"highest" && render[L"fps"].Str() == L"display" && render[L"fpsBattery"].Str() == L"24");
+    CHECK(render[L"fpsSaver"].Str() == L"still" && render[L"videoMemory"].Num() == 0 && render[L"particles"].Num() == 40);
     CHECK(l.Save() && s.writes == 1);
     CHECK(s.written.find(L"clock_hours = 12") != std::wstring::npos);
     CHECK(s.written.find(L"audio_volume = 35") != std::wstring::npos);
+    CHECK(s.written.find(L"render_quality = highest\r\nrender_fps = display\r\nrender_fps_battery = 24\r\n") != std::wstring::npos);
 }
 
 TEST(AppLibraryFindsWhatOnlyOneThemeUses) {

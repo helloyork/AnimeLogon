@@ -800,6 +800,24 @@ bool Library::SetGlobal(const std::wstring &key, const std::wstring &value) {
         double v = 0;
         if ((ok = Number(value, &v) && v == std::floor(v) && v >= kTrayRecentMin && v <= kTrayRecentMax))
             set_.trayRecent = (int)v;
+    } else if (key == L"render.quality") {
+        ok = Parse(value, &set_.render.quality);
+        pictures = true;
+    } else if (key == L"render.fps") {
+        ok = ParseRenderFps(value, &set_.render.fps);
+    } else if (key == L"render.fpsBattery") {
+        ok = ParseRenderFps(value, &set_.render.fpsOnBattery);
+    } else if (key == L"render.fpsSaver") {
+        ok = ParseRenderFps(value, &set_.render.fpsOnSaver);
+    } else if (key == L"render.videoMemory") {
+        double v = 0;
+        if (value == L"auto") set_.render.videoMemory = 0, ok = true;
+        else if ((ok = Number(value, &v) && v == std::floor(v) && v >= kVideoMemoryMin && v <= kVideoMemoryMax))
+            set_.render.videoMemory = (int)v;
+    } else if (key == L"render.particles") {
+        double v = 0;
+        if ((ok = Number(value, &v) && v == std::floor(v) && v >= kParticlesMin && v <= kParticlesMax))
+            set_.render.particles = (int)v;
     } else if (key == L"audio.enabled") {
         ok = flag(&set_.audio.enabled);
     } else if (key == L"audio.device") {
@@ -917,6 +935,12 @@ void Library::WriteLibrary(json::Writer &w) const {
     w.Member(L"otherDisplays", ToString(set_.otherDisplays));
     w.Member(L"media", set_.media);
     w.Member(L"tray", set_.tray).Member(L"trayRecent", set_.trayRecent);
+    // How scenes are drawn: frame rates as settings.ini writes them, video memory in MB (0 for auto).
+    w.Key(L"render").BeginObject();
+    w.Member(L"quality", ToString(set_.render.quality)).Member(L"fps", RenderFpsText(set_.render.fps));
+    w.Member(L"fpsBattery", RenderFpsText(set_.render.fpsOnBattery)).Member(L"fpsSaver", RenderFpsText(set_.render.fpsOnSaver));
+    w.Member(L"videoMemory", set_.render.videoMemory).Member(L"particles", set_.render.particles);
+    w.EndObject();
     w.Key(L"rotation").BeginObject();
     w.Member(L"on", set_.rotation).Member(L"trigger", ToString(set_.rotationTrigger));
     w.Member(L"minutes", set_.rotationMinutes).Member(L"order", ToString(set_.rotationOrder));
@@ -1019,7 +1043,7 @@ void Library::WriteOpen(json::Writer &w) const {
             w.BeginObject().Member(L"id",s.id).Member(L"kind",KindName(s.kind)).Member(L"label",i18n::Label(s.label));
             w.Member(L"detail",i18n::Label(s.detail)).Member(L"value",scenegraph::ValueOf(doc,o.wallpaperValues,s.id));
             w.Member(L"modified",o.wallpaperValues.count(s.id)>0).Member(L"min",s.min).Member(L"max",s.max).Member(L"step",s.step);
-            w.Member(L"group",setting.group).Member(L"shown",scenegraph::Shown(doc,o.wallpaperValues,setting));
+            w.Member(L"group",i18n::Label(setting.group)).Member(L"shown",scenegraph::Shown(doc,o.wallpaperValues,setting));
             WriteOptions(w,s.options); w.EndObject();
         }
         // Format 2 has no per-layer adjustments: everything a user changes is a setting.

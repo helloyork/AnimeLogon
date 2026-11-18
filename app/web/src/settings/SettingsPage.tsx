@@ -58,8 +58,8 @@ function pointOut(what: string) {
   );
 }
 
-// A volume: moves freely, saved when let go.
-function Volume({ value, onDone, labelledBy }: { value: number; onDone: (v: number) => void; labelledBy: string }) {
+// A volume or another percentage: moves freely, saved when let go.
+function Volume({ value, onDone, labelledBy, min = 0 }: { value: number; onDone: (v: number) => void; labelledBy: string; min?: number }) {
   const [shown, setShown] = useState<number | null>(null);
   const done = () => {
     if (shown != null && shown !== value) onDone(shown);
@@ -67,9 +67,59 @@ function Volume({ value, onDone, labelledBy }: { value: number; onDone: (v: numb
   };
   return (
     <div className="range" aria-labelledby={labelledBy} role="group">
-      <Slider min={0} max={100} step={1} value={shown ?? value} onChange={setShown} onDone={done} />
+      <Slider min={min} max={100} step={1} value={shown ?? value} onChange={setShown} onDone={done} />
       <span className="value num">{shown ?? value}</span>
     </div>
+  );
+}
+
+// Frame rate caps the list offers, and the one in use when settings.ini says another.
+const RATES = ['still', '15', '24', '30', '45', '60', '90', '120', '144', '165', '240', 'display'];
+const rates = (current: string): Choice[] =>
+  (RATES.includes(current) ? RATES : [...RATES.slice(0, -1), current, 'display'].sort((a, b) => order(a) - order(b))).map(v => ({
+    value: v,
+    label: v === 'still' ? t('settings.render.fps.still') : v === 'display' ? t('settings.render.fps.display') : t('settings.render.fps.n', { n: v }),
+  }));
+const order = (v: string) => (v === 'still' ? -1 : v === 'display' ? 1e9 : Number(v));
+const MEMORY = [0, 256, 512, 1024, 2048, 4096, 8192];
+const memories = (current: number): Choice[] =>
+  (MEMORY.includes(current) ? MEMORY : [...MEMORY, current].sort((a, b) => a - b)).map(v => ({
+    value: v ? String(v) : 'auto',
+    label: v ? t('settings.render.video_memory.n', { n: v }) : t('settings.render.video_memory.auto'),
+  }));
+
+// How scenes are drawn: what the person trades between looks, power and memory. Only scenes use
+// these, so they are shown when this build takes scenes.
+function Performance() {
+  const r = useStore().lib!.settings.render;
+  return (
+    <Group title={t('settings.performance')}>
+      <Row title={t('settings.render.quality')} description={t(`settings.render.quality.${r.quality}.detail` as Key)}>
+        {() => (
+          <Select label={t('settings.render.quality')} value={r.quality} onChange={v => global('render.quality', v)}
+            options={choices([['auto', 'settings.render.quality.auto'], ['highest', 'settings.render.quality.highest'], ['high', 'settings.render.quality.high'],
+              ['medium', 'settings.render.quality.medium'], ['low', 'settings.render.quality.low']])} />
+        )}
+      </Row>
+      <Row title={t('settings.render.fps')} description={t('settings.render.fps.detail')}>
+        {() => <Select label={t('settings.render.fps')} value={r.fps} onChange={v => global('render.fps', v)} options={rates(r.fps)} />}
+      </Row>
+      <Row title={t('settings.render.fps_battery')}>
+        {() => <Select label={t('settings.render.fps_battery')} value={r.fpsBattery} onChange={v => global('render.fpsBattery', v)} options={rates(r.fpsBattery)} />}
+      </Row>
+      <Row title={t('settings.render.fps_saver')} description={t('settings.render.fps_saver.detail')}>
+        {() => <Select label={t('settings.render.fps_saver')} value={r.fpsSaver} onChange={v => global('render.fpsSaver', v)} options={rates(r.fpsSaver)} />}
+      </Row>
+      <Row title={t('settings.render.video_memory')} description={t('settings.render.video_memory.detail')}>
+        {() => (
+          <Select label={t('settings.render.video_memory')} value={r.videoMemory ? String(r.videoMemory) : 'auto'}
+            onChange={v => global('render.videoMemory', v)} options={memories(r.videoMemory)} />
+        )}
+      </Row>
+      <Row title={t('settings.render.particles')} description={t('settings.render.particles.detail')}>
+        {id => <Volume labelledBy={id} min={10} value={r.particles} onDone={v => global('render.particles', v)} />}
+      </Row>
+    </Group>
   );
 }
 
@@ -222,6 +272,8 @@ export function SettingsPage() {
             </>
           )}
         </Group>
+
+        {s.env.scenes && <Performance />}
 
         <Group title={t('settings.tray')}>
           <Row title={t('settings.tray.show')} description={t('settings.tray.show.detail')}>

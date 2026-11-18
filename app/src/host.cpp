@@ -826,6 +826,9 @@ void Host::SendEnvironment() {
             w.BeginObject().Member(L"name", p.name).Member(L"on", p.on).EndObject();
     w.EndArray();
     w.Member(L"version", L"" ANIMELOGON_VERSION);
+    // Whether this build takes scenes (D64 keeps them out of the released app for now): the settings
+    // that only scenes use are shown when it does.
+    w.Member(L"scenes", staging::kTakesScenes);
     // The language the page is shown in, and whether the person chose it or it follows Windows.
     w.Member(L"lang", i18n::Tag(i18n::Current())).Member(L"langChoice", i18n::UserChoice());
     // Who the sign-in screen would greet, for the lock-screen preview.

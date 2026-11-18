@@ -20,6 +20,7 @@ export interface Environment {
   // Other programs that draw the logon screen; switching AnimeLogon on switches them off.
   others: { name: string; on: boolean }[];
   version: string;     // this program's version, as its version resource gives it
+  scenes: boolean;     // this build takes scene wallpapers, so the settings only they use are shown
   user: string;        // the name Windows' sign-in screen greets this person by
   accountPicture: boolean;  // they have an account picture, served as `account`
   // Where the themes, wallpapers and components are (common/include/animelogon/library.h); `away` when
@@ -52,6 +53,9 @@ export interface Settings {
   media: boolean;
   tray: boolean;       // the icon in the system tray (app/src/tray.h)
   trayRecent: number;  // how many recently used themes its menu offers
+  // How scenes are drawn (settings.ini render_*): frame rates as a number, `display` or `still`;
+  // video memory in MB, 0 for automatic; particles in percent.
+  render: { quality: 'auto' | 'highest' | 'high' | 'medium' | 'low'; fps: string; fpsBattery: string; fpsSaver: string; videoMemory: number; particles: number };
   rotation: Rotation;
   clock: { hours: 'auto' | '12' | '24'; ampm: boolean; date: 'weekday' | 'long' | 'none'; language: string };
   audio: { enabled: boolean; device: string; volume: number; video: boolean; videoVolume: number; videoYield: boolean };
@@ -140,6 +144,8 @@ export interface Setting {
   max: number;
   step: number;
   options: Option[];
+  group?: string;     // a scene setting's group in the settings, as the scene names it
+  shown?: boolean;    // false: another of the scene's settings hides it for now
 }
 
 // One value of one part: p1.anchor, p1.l1.t1.size…

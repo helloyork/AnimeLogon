@@ -24,7 +24,7 @@ import { wallpaperUrl } from '../native';
 import { clearValues, edit, liveSet, pv, setValue, setValues, subscribePreview } from '../preview';
 import { t as tr } from '../i18n';
 import { getState, instOf, openDialog, select, setState, useStore } from '../store';
-import type { Instance, Part, SceneControls } from '../types';
+import type { Instance, Part, SceneControls, Setting } from '../types';
 import { Button, Crumbs, cx, IconButton, ResetButton, Switch } from '../ui/controls';
 import { useDraft } from './draft';
 import { AdjustmentField, ChoiceField, NumberField, SettingField, ToggleField, type View } from './fields';
@@ -139,6 +139,21 @@ const describe = (i: Instance) =>
 // The list names each component; it says more only of one whose file is missing.
 const brief = (i: Instance) => (i.missing ? tr('inspector.missing') : '');
 
+// A scene's settings under the headings of its own groups, leaving out those another setting hides.
+function sceneFields(settings: Setting[]) {
+  const out: ReactNode[] = [];
+  let group = '';
+  for (const st of settings) {
+    if (st.shown === false) continue;
+    if ((st.group ?? '') !== group) {
+      group = st.group ?? '';
+      if (group) out.push(<div key={'group:' + st.id} className="pgroup t-group">{group}</div>);
+    }
+    out.push(<SettingField key={st.id} instId="wallpaper" setting={st} onReset={() => clearValues('wallpaper', [st.id])} />);
+  }
+  return out;
+}
+
 function Overview() {
   const s = useStore();
   const sections = useSections('overview', ['wallpaper', 'components', 'wake']);
@@ -176,7 +191,7 @@ function Overview() {
               value={String(t.blur)} modified={t.blurModified} view={{ factor: 1, digits: 1, unit: () => tr('unit.screen_height') }}
               write={(v, gesture) => edit('blur', { value: v, ...(gesture ? { gesture } : {}) })}
               onReset={() => edit('blur', { value: t.ownBlur })} />
-            {scene && scene.settings.map(st => <SettingField key={st.id} instId="wallpaper" setting={st} onReset={() => clearValues('wallpaper', [st.id])} />)}
+            {scene && sceneFields(scene.settings)}
           </div>
         )}
         {scene && scene.static && <p className="inote">{tr('inspector.scene_static')}</p>}
