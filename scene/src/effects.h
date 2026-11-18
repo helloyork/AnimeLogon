@@ -9,31 +9,10 @@
 #include <string>
 #include <vector>
 #include "animelogon/scenegraph.h"
+#include "contract.h"
 
 namespace animelogon::scene {
 
-// What an author's shader can read (D51). A layer shader draws from nothing but these numbers; an
-// effect shader also reads `source`, the node's picture so far within its box (premultiplied), and
-// `mask`, the effect's mask over the box (white everywhere when the effect has none).
-constexpr char kShaderHeader[] = R"(
-cbuffer Scene : register(b0) {
-    float time; float2 resolution; float day;
-    float battery; float progress; float playing; float wake;
-    float4 audio;
-    float month; float3 reserved;
-    float4 param[16];
-};
-Texture2D<float4> source : register(t0);
-Texture2D<float4> mask : register(t1);
-SamplerState linearClamp : register(s0);
-)";
-struct ShaderConstants {
-    float time = 0, resolution[2]{}, day = 0;
-    float battery = -1, progress = -1, playing = 0, wake = 0;
-    float audio[4]{};
-    float month = 1, reserved[3]{};
-    float param[16][4]{};
-};
 // The constants for an author's shader: the inputs at `time`, a `width` x `height` target and the
 // slots in `values` whose names are "<prefix>0".."<prefix>15".
 ShaderConstants ShaderInputs(const scenegraph::Inputs &data, double time, int width, int height,

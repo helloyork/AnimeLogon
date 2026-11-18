@@ -247,6 +247,9 @@ Result Scene(const std::wstring &source, const std::wstring &dir, const std::ato
     if (!kTakesScenes) {
         Result r; r.error = animelogon::i18n::Tr("scene_import.unsupported"); return r;
     }
+    return SceneForAuthors(source,dir,cancel,progress);
+}
+Result SceneForAuthors(const std::wstring &source, const std::wstring &dir, const std::atomic<bool> &cancel, const Progress &progress) {
     package::Reader reader; std::wstring why;
     if (!reader.Open(source,&why)) return Error(reader.Compressed() ? animelogon::i18n::Tr("scene_import.compressed") : why);
     const auto r = SceneWallpaper(reader,dir+L"\\wallpaper",L"",cancel,progress);

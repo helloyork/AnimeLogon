@@ -1,4 +1,5 @@
-// Uses the settings app's sandboxed scene renderer, without a window or elevation.
+// Draws a scene with the settings app's sandboxed scene renderer, without a window or elevation:
+// an author's package folder (scene.xml and its files), an .alscene, or an imported scene's folder.
 #include <windows.h>
 #include <fcntl.h>
 #include <io.h>
@@ -8,6 +9,7 @@
 #include <filesystem>
 #include "animelogon/bitmap.h"
 #include "animelogon/image.h"
+#include "animelogon/package.h"
 #include "animelogon/scenepreview.h"
 #include "animelogon/secure.h"
 #include "animelogon/text.h"
@@ -26,7 +28,7 @@ int Refused(const std::wstring &why) { std::fwprintf(stderr,L"refused: %s\n",why
 int wmain(int argc,wchar_t **argv) {
     _setmode(_fileno(stdout),_O_U8TEXT); _setmode(_fileno(stderr),_O_U8TEXT);
     if (argc < 3) {
-        std::fwprintf(stderr,L"usage: scene_preview <scene.alscene|normalized directory> <out.png|frames directory>\n"
+        std::fwprintf(stderr,L"usage: scene_preview <package folder|scene.alscene|imported folder> <out.png|frames directory>\n"
             L"       [--width N] [--height N] [--frames N] [--fps N] [--time seconds]\n"
             L"       [--day fraction] [--battery fraction|-1] [--progress fraction] [--state 0|1|2]\n"
             L"       [--wake fraction] [--month 1-12] [key=value ...]\n");
@@ -58,9 +60,19 @@ int wmain(int argc,wchar_t **argv) {
     CoInitializeEx(nullptr,COINIT_MULTITHREADED);
     std::wstring directory=std::filesystem::absolute(argv[1]).wstring(), scratch,why;
     struct Cleanup { std::wstring &dir; ~Cleanup() { if (!dir.empty()) secure::RemoveTree(dir); CoUninitialize(); } } cleanup{scratch};
-    if (std::filesystem::path(directory).extension() == L".alscene") {
+    const bool packageFolder=std::filesystem::exists(directory+L"\\scene.xml") && !std::filesystem::exists(directory+L"\\wallpaper.ini");
+    if (packageFolder || std::filesystem::path(directory).extension() == L".alscene") {
         scratch=staging::NewImportDir(); if (scratch.empty()) return Refused(L"no scratch directory");
-        std::atomic<bool> cancel{false}; const auto staged=staging::Scene(directory,scratch,cancel,{});
+        std::wstring source=directory;
+        if (packageFolder) {
+            // The folder as the .alscene it would be packed into.
+            std::vector<package::Item> items; std::error_code ec;
+            for (auto it=std::filesystem::recursive_directory_iterator(directory,ec); !ec && it != std::filesystem::recursive_directory_iterator(); it.increment(ec))
+                if (it->is_regular_file()) items.push_back({ToUtf8(std::filesystem::relative(it->path(),directory,ec).generic_wstring()),it->path().wstring(),{}});
+            source=scratch+L"\\package.alscene";
+            if (!package::Write(items,source,&why)) return Refused(L"cannot pack the folder: "+why);
+        }
+        std::atomic<bool> cancel{false}; const auto staged=staging::SceneForAuthors(source,scratch,cancel,{});
         if (!staged.ok) return Refused(staged.error);
         directory=scratch+L"\\wallpaper";
     }

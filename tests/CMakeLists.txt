@@ -24,7 +24,7 @@ target_include_directories(animelogon_tests PRIVATE ${PROJECT_SOURCE_DIR}/scene/
 target_link_libraries(animelogon_tests PRIVATE directxtex)
 add_dependencies(animelogon_tests scene)
 # The scene importer and renderer that scene.exe runs, here on WARP, compared pixel by pixel.
-target_sources(animelogon_tests PRIVATE scene_render_tests.cpp ${PROJECT_SOURCE_DIR}/scene/src/renderer.cpp ${PROJECT_SOURCE_DIR}/scene/src/effects.cpp ${PROJECT_SOURCE_DIR}/scene/src/particles.cpp
+target_sources(animelogon_tests PRIVATE scene_render_tests.cpp ${PROJECT_SOURCE_DIR}/scene/src/renderer.cpp ${PROJECT_SOURCE_DIR}/scene/src/contract.cpp ${PROJECT_SOURCE_DIR}/scene/src/effects.cpp ${PROJECT_SOURCE_DIR}/scene/src/particles.cpp
                                         ${PROJECT_SOURCE_DIR}/scene/src/import.cpp ${PROJECT_SOURCE_DIR}/scene/src/lottie.cpp)
 target_include_directories(animelogon_tests PRIVATE
     ${PROJECT_SOURCE_DIR}/vendor/thorvg/src/common

@@ -40,11 +40,11 @@ jobs:
       - name: Configure
         run: cmake --preset x64
 
-      - name: Build the checker
-        run: cmake --build --preset x64-release --target component_check
+      - name: Build the checkers
+        run: cmake --build --preset x64-release --target component_check scene_check
 
-      - name: Check the component format's examples and reference
-        run: ctest --preset x64-release --tests-regex "^component_"
+      - name: Check the component and scene formats' examples and references
+        run: ctest --preset x64-release --tests-regex "^(component|scene)_"
 
   # ARM64 is cross-built on an x64 runner, so its tests are built but not run. Its programs go to
   # the x64 job, whose install.exe carries them as a release's does.

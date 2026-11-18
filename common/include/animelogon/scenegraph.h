@@ -189,6 +189,23 @@ std::vector<float> Components(const std::wstring &literal);
 // The names of the built-in effects, in documentation order.
 std::vector<std::wstring> EffectTypes();
 
+// What the reader takes, from the same tables it checks against, for the format's reference.
+struct AttributeInfo {
+    std::wstring element;  // "node" (every node), "layer", "fill", "particles", or "effect <type>"
+    std::wstring name;
+    std::wstring values;   // the values taken, in words
+    std::wstring fallback; // the value when the attribute is not written, empty for none
+    bool animated = false; // whether a motion can move it
+};
+std::vector<AttributeInfo> AttributeTable();
+struct DataInfo {
+    std::wstring name;
+    std::vector<std::wstring> words;  // a state's words; empty for a number
+};
+std::vector<DataInfo> DataNames();
+// Every particle preset's values: preset, attribute, value.
+std::vector<std::array<std::wstring, 3>> PresetValues();
+
 // --- Files ---------------------------------------------------------------------------------
 // A scene's files by name, as they travel to and from scene.exe in one envelope with bounded
 // counts, names and lengths and no pointers.

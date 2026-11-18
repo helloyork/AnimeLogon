@@ -5,12 +5,8 @@
 #include <memory>
 #include <string_view>
 #include "animelogon/scenehost.h"
+#include "contract.h"
 namespace animelogon::scene {
-// The shader contract (D51): ps_5_0 returning one float4 SV_Target, taking at most a float2
-// TEXCOORD0, and binding only the Scene constant block, the `source` and `mask` textures and the
-// linearClamp sampler. Compiling prepends the declarations an author's file relies on.
-bool CompileShader(std::string_view source, std::vector<uint8_t> *bytecode, std::wstring *why);
-bool CheckShader(const uint8_t *bytes, size_t size, std::wstring *why);
 
 class Renderer {
 public:

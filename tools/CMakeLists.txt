@@ -31,6 +31,24 @@ file(GLOB component_examples CONFIGURE_DEPENDS ${component_skill}/examples/*.xml
 add_test(NAME component_examples COMMAND component_check ${component_examples} ${component_skill}/examples/theme)
 add_test(NAME component_reference COMMAND component_check --check-reference ${component_skill}/reference/attributes.md)
 
+# Scenes checked by AnimeLogon's own reader and shader contract, and the scene attribute reference
+# written (skills/animelogon-scenes).
+add_executable(scene_check scene_check.cpp ${PROJECT_SOURCE_DIR}/scene/src/contract.cpp)
+target_include_directories(scene_check PRIVATE ${PROJECT_SOURCE_DIR}/scene/src)
+target_link_libraries(scene_check PRIVATE animelogon_common d3dcompiler)
+# The scene skill's examples are what AnimeLogon accepts, and its attribute reference is the one the
+# reader gives.
+set(scene_skill ${PROJECT_SOURCE_DIR}/skills/animelogon-scenes)
+file(GLOB scene_example_entries CONFIGURE_DEPENDS LIST_DIRECTORIES true ${scene_skill}/examples/*)
+set(scene_examples)
+foreach(entry IN LISTS scene_example_entries)
+    if(IS_DIRECTORY ${entry})
+        list(APPEND scene_examples ${entry})
+    endif()
+endforeach()
+add_test(NAME scene_examples COMMAND scene_check ${scene_examples})
+add_test(NAME scene_reference COMMAND scene_check --check-reference ${scene_skill}/reference/attributes.md)
+
 add_executable(theme_fixture theme_fixture.cpp)
 add_executable(scene_preview scene_preview.cpp
     ${PROJECT_SOURCE_DIR}/config/src/staging.cpp

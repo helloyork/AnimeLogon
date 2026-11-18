@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Snow falling on a winter evening: two layers of snow at different depths and sizes, a snowy
+     ground, and film grain over everything. The user picks how heavily it snows. -->
+<scene format="2" name="Snowfall" author="AnimeLogon" width="1920" height="1080" still="12">
+  <settings>
+    <choice id="snow" label="Snow" default="steady">
+      <option value="light" label="Light"/>
+      <option value="steady" label="Steady"/>
+      <option value="heavy" label="Heavy"/>
+    </choice>
+  </settings>
+  <camera>
+    <wave property="x" amplitude="12" period="30"/>
+  </camera>
+  <fill colors="#1B2638 0%, #4A5C78 70%, #8796AD 100%" depth="0"/>
+  <!-- Far snow: small and slow. -->
+  <particles preset="snow" size="4" speed="30" rate="30" depth="0.3" seed="1" when="$snow!=light"/>
+  <particles preset="snow" size="4" speed="30" rate="25" max="1400" depth="0.3" seed="2" when="$snow=heavy"/>
+  <!-- The ground. -->
+  <fill y="900" width="1920" height="180" colors="#C9D3E0 0%, #E8EEF5 100%" depth="0.5"/>
+  <!-- Near snow: larger, faster and swaying more. -->
+  <particles preset="snow" size="9" speed="70" sway="40" rate="12" depth="1" seed="3"/>
+  <fill colors="#00000000 0%, #00000000 100%" depth="0">
+    <effect type="grain" amount="0.06"/>
+  </fill>
+</scene>

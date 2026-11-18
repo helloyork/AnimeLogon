@@ -110,9 +110,9 @@ const PresetValue kPresetValues[] = {
     {L"fireflies", L"spread", L"360"}, {L"fireflies", L"drag", L"0.4"}, {L"fireflies", L"sway", L"30"}, {L"fireflies", L"twinkle", L"0.8"},
     {L"fireflies", L"size", L"9"}, {L"fireflies", L"color", L"#FFE680"}, {L"fireflies", L"fade", L"0.2"}, {L"fireflies", L"max", L"120"},
     {L"fireflies", L"blend", L"add"},
-    {L"stars", L"rate", L"30"}, {L"stars", L"lifetime", L"8"}, {L"stars", L"emit", L"area"}, {L"stars", L"speed", L"0"},
-    {L"stars", L"spread", L"0"}, {L"stars", L"twinkle", L"0.9"}, {L"stars", L"size", L"3"}, {L"stars", L"fade", L"0.3"},
-    {L"stars", L"max", L"400"}, {L"stars", L"blend", L"add"},
+    {L"stars", L"rate", L"60"}, {L"stars", L"lifetime", L"10"}, {L"stars", L"emit", L"area"}, {L"stars", L"speed", L"0"},
+    {L"stars", L"spread", L"0"}, {L"stars", L"twinkle", L"0.9"}, {L"stars", L"size", L"4"}, {L"stars", L"fade", L"0.3"},
+    {L"stars", L"max", L"800"}, {L"stars", L"blend", L"add"},
     {L"dust", L"rate", L"15"}, {L"dust", L"lifetime", L"10"}, {L"dust", L"emit", L"area"}, {L"dust", L"speed", L"6"},
     {L"dust", L"spread", L"360"}, {L"dust", L"sway", L"12"}, {L"dust", L"twinkle", L"0.3"}, {L"dust", L"size", L"3"},
     {L"dust", L"color", L"#FFF4E080"}, {L"dust", L"fade", L"0.25"}, {L"dust", L"max", L"300"}, {L"dust", L"blend", L"add"},
@@ -1276,6 +1276,62 @@ std::vector<float> Components(const std::wstring &s) {
 std::vector<std::wstring> EffectTypes() {
     std::vector<std::wstring> out;
     for (const auto &s : Effects()) out.push_back(s.type);
+    return out;
+}
+
+namespace {
+std::wstring Short(double v) { return Format(L"%g", v); }
+std::wstring WordList(const wchar_t *const *words) {
+    std::wstring s;
+    for (; words && *words; ++words) s += (s.empty() ? L"`" : L" `") + std::wstring(*words) + L"`";
+    return s;
+}
+std::wstring ValuesOf(const Prop &p, const std::wstring &element) {
+    switch (p.type) {
+    case Type::Number: return p.lo <= -kBig && p.hi >= kBig ? L"number" : L"number, " + Short(p.lo) + L" to " + Short(p.hi);
+    case Type::Integer: return L"whole number, " + Short(p.lo) + L" to " + Short(p.hi);
+    case Type::Bool: return L"`true` `false`";
+    case Type::Enum: return WordList(p.words);
+    case Type::Color: return L"colour, `#RRGGBB` or `#RRGGBBAA`";
+    case Type::Colors: return L"colour stops, such as `#000000 0%, #FFFFFF 100%`";
+    case Type::Pair: return L"two numbers, " + Short(p.lo) + L" to " + Short(p.hi);
+    case Type::Range: return L"seconds, `min-max` or one number";
+    case Type::Vector: return L"one to four numbers, or a colour";
+    case Type::Asset:
+        if (std::wstring(p.name) == L"mask") return L"a `<mask>` asset's id";
+        return element == L"particles" ? L"an `<image>` or `<frames>` asset's id"
+                                       : L"an `<image>`, `<frames>`, `<video>`, `<lottie>` or `kind=\"layer\"` `<shader>` asset's id";
+    }
+    return L"";
+}
+}  // namespace
+
+std::vector<AttributeInfo> AttributeTable() {
+    std::vector<AttributeInfo> out;
+    auto add = [&](const std::wstring &element, const Prop *begin, const Prop *end) {
+        for (const Prop *p = begin; p != end; ++p) out.push_back({element, p->name, ValuesOf(*p, element), p->fallback, p->animated});
+    };
+    add(L"node", std::begin(kCommon), std::end(kCommon));
+    add(L"layer", std::begin(kLayer), std::end(kLayer));
+    add(L"fill", std::begin(kFill), std::end(kFill));
+    add(L"particles", std::begin(kParticles), std::end(kParticles));
+    for (const auto &s : Effects()) add(L"effect " + std::wstring(s.type), s.props.data(), s.props.data() + s.props.size());
+    return out;
+}
+
+std::vector<DataInfo> DataNames() {
+    std::vector<DataInfo> out;
+    for (const auto &d : kData) {
+        DataInfo info{d.name, {}};
+        for (const wchar_t *const *w = d.words; w && *w; ++w) info.words.push_back(*w);
+        out.push_back(std::move(info));
+    }
+    return out;
+}
+
+std::vector<std::array<std::wstring, 3>> PresetValues() {
+    std::vector<std::array<std::wstring, 3>> out;
+    for (const auto &v : kPresetValues) out.push_back({v.preset, v.name, v.value});
     return out;
 }
 

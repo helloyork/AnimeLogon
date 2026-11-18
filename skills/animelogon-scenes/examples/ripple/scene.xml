@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- An effect shader: ripples spreading over a striped gradient, written by the author rather than
+     built in. The effect reads the node's picture as `source` and bends where it samples it.
+     The built-in `rings` effect does much the same; this shows how to write your own. -->
+<scene format="2" name="Ripple" author="AnimeLogon" width="1920" height="1080" still="2">
+  <settings>
+    <number id="strength" label="Ripple strength" min="0" max="0.03" step="0.002" default="0.012"/>
+  </settings>
+  <assets>
+    <shader id="ripple" kind="effect" file="ripple.hlsl"/>
+  </assets>
+  <fill colors="#10324F 0%, #2C6E8E 14%, #10324F 28%, #2C6E8E 42%, #10324F 57%, #2C6E8E 71%, #10324F 85%, #2C6E8E 100%">
+    <effect id="water" source="ripple">
+      <param slot="0" value="$strength"/>
+      <param slot="1" value="14 1.5"/>
+    </effect>
+    <effect type="grade" saturation="1.2"/>
+  </fill>
+</scene>

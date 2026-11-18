@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A night sky: a gradient the user can recolour, twinkling stars they can turn off or thin out,
+     and a camera that drifts slowly so the stars move a little against the sky. -->
+<scene format="2" name="Night sky" author="AnimeLogon" width="1920" height="1080" still="6">
+  <settings>
+    <group label="Sky">
+      <colors id="sky" label="Sky colours" default="#070B1E 0%, #1E2463 55%, #5A3F8C 100%"/>
+      <toggle id="stars" label="Stars" default="on"/>
+      <number id="count" label="Stars a second" min="10" max="80" step="10" default="60" when="$stars"/>
+    </group>
+  </settings>
+  <camera>
+    <wander property="x" amplitude="24" period="40"/>
+  </camera>
+  <fill colors="$sky" depth="0"/>
+  <particles id="stars" preset="stars" rate="$count" when="$stars" depth="0.15" seed="7"/>
+  <fill colors="#00000000 70%, #00000066 100%" depth="0"/>
+</scene>

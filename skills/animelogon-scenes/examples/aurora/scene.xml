@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- An aurora drawn by a layer shader over a night sky. The shader's parameter slots take the
+     user's colours and speed, and the brightness follows the music playing on the PC. -->
+<scene format="2" name="Aurora" author="AnimeLogon" width="1920" height="1080" still="8">
+  <settings>
+    <group label="Aurora">
+      <color id="low" label="Lower colour" default="#3CFFB0"/>
+      <color id="high" label="Upper colour" default="#8A5CFF"/>
+      <number id="speed" label="Speed" min="0.2" max="3" step="0.1" default="1"/>
+    </group>
+  </settings>
+  <assets>
+    <shader id="aurora" kind="layer" file="aurora.hlsl"/>
+  </assets>
+  <fill colors="#02040C 0%, #0A1430 70%, #142247 100%"/>
+  <particles preset="stars" rate="20" seed="5"/>
+  <layer id="lights" source="aurora" full="true" blend="add">
+    <param slot="0" value="$low"/>
+    <param slot="1" value="$speed"/>
+    <param slot="2" value="$high"/>
+    <param slot="3" value="0.8"/>
+    <drive property="param.3" by="audio.level" from="0.8" to="1.4"/>
+  </layer>
+</scene>
