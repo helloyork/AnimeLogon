@@ -34,6 +34,8 @@ private:
         bool failed = false, active = false, everReady = false;
         bool blocked = false;
         bool staticOnly = false;
+        // The quality, video memory and particle settings the renderer was started with.
+        int quality = -1, videoMemory = -1, particles = -1;
         // The video goes over whole: the renderer fits it into its node.
         animelogon::Scaling fit = animelogon::Scaling::Stretch;
     };

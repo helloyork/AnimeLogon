@@ -64,8 +64,10 @@ void Scenes::Prepare(Presenter &presenter, const plan::Plan &plan) {
     for (const auto &[id, size] : wanted) {
         auto [it, added] = entries_.try_emplace(id); auto &e = it->second;
         if (added) { e.id = wallpapers[id]->id; e.values = wallpapers[id]->values; e.failures = saved_[e.id]; e.blocked = savedBlocked_.count(e.id) != 0; }
-        if (e.host && e.width == size.first && e.height == size.second && !e.blocked) continue;
+        const bool sameSettings = e.quality == (int)render_.quality && e.videoMemory == render_.videoMemory && e.particles == render_.particles;
+        if (e.host && e.width == size.first && e.height == size.second && sameSettings && !e.blocked) continue;
         e.host.reset(); e.width = size.first; e.height = size.second;
+        e.quality = (int)render_.quality; e.videoMemory = render_.videoMemory; e.particles = render_.particles;
         // The import trial's verdict that the PC is too slow belongs to the automatic quality; a
         // quality the user fixed plays the scene and drops frames instead.
         e.staticOnly = wallpapers[id]->sceneFps == 0 && render_.quality == RenderQuality::Auto;
