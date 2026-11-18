@@ -25,6 +25,8 @@ constexpr const wchar_t *kScreenPrefix = L"screen.";
 constexpr const wchar_t *kThemePrefix = L"theme.";
 const wchar_t *const kComponentDisplays[] = {L"auto", L"primary", L"all"};
 const wchar_t *const kOtherDisplays[] = {L"blur", L"picture", L"black"};
+const wchar_t *const kRotationTriggers[] = {L"interval", L"lock"};
+const wchar_t *const kRotationOrders[] = {L"sequential", L"shuffle"};
 
 bool ParseBool(std::wstring_view v, bool *out) {
     if (EqualsNoCase(v, L"true") || v == L"1") return *out = true, true;
@@ -216,6 +218,22 @@ bool Parse(std::wstring_view text, OtherDisplays *out) {
     return false;
 }
 
+const wchar_t *ToString(RotationTrigger trigger) { return kRotationTriggers[(int)trigger]; }
+
+bool Parse(std::wstring_view text, RotationTrigger *out) {
+    for (size_t i = 0; i < ARRAYSIZE(kRotationTriggers); ++i)
+        if (EqualsNoCase(text, kRotationTriggers[i])) return *out = (RotationTrigger)i, true;
+    return false;
+}
+
+const wchar_t *ToString(RotationOrder order) { return kRotationOrders[(int)order]; }
+
+bool Parse(std::wstring_view text, RotationOrder *out) {
+    for (size_t i = 0; i < ARRAYSIZE(kRotationOrders); ++i)
+        if (EqualsNoCase(text, kRotationOrders[i])) return *out = (RotationOrder)i, true;
+    return false;
+}
+
 bool IsTypedValueText(std::wstring_view value) {
     if (value.size() > 128) return false;
     for (wchar_t c : value)
@@ -230,6 +248,31 @@ const ThemeOverrides &Settings::OverridesFor(const std::wstring &themeId) const 
 }
 
 namespace {
+
+// A comma-separated list of theme ids, kept in its order without repeats and cut at `max`. Ids that
+// are not themes' are left out, and make the value count as malformed.
+bool ParseThemeList(std::wstring_view value, size_t max, std::vector<std::wstring> *out) {
+    bool ok = true;
+    out->clear();
+    for (size_t at = 0; at <= value.size() && !value.empty();) {
+        size_t comma = value.find(L',', at);
+        if (comma == std::wstring_view::npos) comma = value.size();
+        const std::wstring id(Trim(value.substr(at, comma - at)));
+        at = comma + 1;
+        if (!IsThemeId(id)) {
+            ok = false;
+            continue;
+        }
+        if (out->size() < max && std::find(out->begin(), out->end(), id) == out->end()) out->push_back(id);
+    }
+    return ok;
+}
+
+std::wstring JoinThemeList(const std::vector<std::wstring> &ids, size_t max) {
+    std::wstring joined;
+    for (size_t i = 0; i < ids.size() && i < max; ++i) joined += (i ? L"," : L"") + ids[i];
+    return joined;
+}
 
 // Reads the text into `out`, reporting malformed lines; a key missing or malformed keeps its
 // default. `namesTheme` is set when a well-formed `theme` line was read.
@@ -295,20 +338,19 @@ void Read(const std::wstring &text, Settings *out, bool *namesTheme, std::vector
             ok = ParseInt(value, &n) && n >= kTrayRecentMin && n <= kTrayRecentMax;
             if (ok) s.trayRecent = (int)n;
         } else if (key == L"recent") {
-            // Ids that are not themes' are left out; the rest are kept in their order.
-            s.recent.clear();
-            for (size_t at = 0; at <= value.size() && !value.empty();) {
-                size_t comma = value.find(L',', at);
-                if (comma == std::wstring_view::npos) comma = value.size();
-                const std::wstring id(Trim(value.substr(at, comma - at)));
-                at = comma + 1;
-                if (!IsThemeId(id)) {
-                    ok = false;
-                    continue;
-                }
-                if (s.recent.size() < kRecentMax && std::find(s.recent.begin(), s.recent.end(), id) == s.recent.end())
-                    s.recent.push_back(id);
-            }
+            ok = ParseThemeList(value, kRecentMax, &s.recent);
+        } else if (key == L"rotation") {
+            ok = ParseBool(value, &s.rotation);
+        } else if (key == L"rotation_themes") {
+            ok = ParseThemeList(value, kRotationMax, &s.rotationThemes);
+        } else if (key == L"rotation_trigger") {
+            ok = Parse(value, &s.rotationTrigger);
+        } else if (key == L"rotation_minutes") {
+            long long n = 0;
+            ok = ParseInt(value, &n) && n >= kRotationMinutesMin && n <= kRotationMinutesMax;
+            if (ok) s.rotationMinutes = (int)n;
+        } else if (key == L"rotation_order") {
+            ok = Parse(value, &s.rotationOrder);
         } else if (key == L"clock_hours") {
             ok = Parse(std::wstring(value), &s.clock.hours);
         } else if (key == L"clock_ampm") {
@@ -386,9 +428,12 @@ std::wstring SerializeSettings(const Settings &s) {
     out += L"video_audio_yield = " + std::wstring(s.audio.videoYields ? L"true" : L"false") + L"\r\n";
     out += L"tray = " + std::wstring(s.tray ? L"true" : L"false") + L"\r\n";
     out += L"tray_recent = " + std::to_wstring(s.trayRecent) + L"\r\n";
-    std::wstring recent;
-    for (size_t i = 0; i < s.recent.size() && i < kRecentMax; ++i) recent += (i ? L"," : L"") + s.recent[i];
-    out += L"recent = " + recent + L"\r\n";
+    out += L"recent = " + JoinThemeList(s.recent, kRecentMax) + L"\r\n";
+    out += L"rotation = " + std::wstring(s.rotation ? L"true" : L"false") + L"\r\n";
+    out += L"rotation_themes = " + JoinThemeList(s.rotationThemes, kRotationMax) + L"\r\n";
+    out += L"rotation_trigger = " + std::wstring(ToString(s.rotationTrigger)) + L"\r\n";
+    out += L"rotation_minutes = " + std::to_wstring(s.rotationMinutes) + L"\r\n";
+    out += L"rotation_order = " + std::wstring(ToString(s.rotationOrder)) + L"\r\n";
     AppendOverrides(s, &out);
     return out;
 }

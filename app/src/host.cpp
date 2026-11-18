@@ -26,6 +26,7 @@
 #include "animelogon/machine.h"
 #include "animelogon/others.h"
 #include "animelogon/paths.h"
+#include "animelogon/rotation.h"
 #include "animelogon/secure.h"
 #include "animelogon/text.h"
 #include "animelogon/theme.h"
@@ -35,6 +36,7 @@
 #include "devices.h"
 #include "exporter.h"
 #include "fonts.h"
+#include "lockscreen.h"
 #include "resources.h"
 #include "tray.h"
 #include "traymenu.h"
@@ -503,6 +505,18 @@ LRESULT Host::Handle(UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         }
         spectra_.Idle();
+        // The logon screen moved on through the theme list: the library shows the theme it is at.
+        if (paths::Sandbox().empty()) {
+            WIN32_FILE_ATTRIBUTE_DATA a{};
+            const uint64_t stamp = GetFileAttributesExW(rotation::Path().c_str(), GetFileExInfoStandard, &a)
+                                       ? (((uint64_t)a.ftLastWriteTime.dwHighDateTime << 32) | a.ftLastWriteTime.dwLowDateTime) ^ a.nFileSizeLow
+                                       : 0;
+            if (stamp != rotationStamp_) {
+                const bool first = rotationStamp_ == 0;
+                rotationStamp_ = stamp;
+                if (!first) Reread();
+            }
+        }
         for (auto it=scenePreviews_.begin();it!=scenePreviews_.end();) {
             if (GetTickCount64()-it->second.used > 1500) it=scenePreviews_.erase(it); else ++it;
         }
@@ -2009,6 +2023,9 @@ void Host::Switch(bool on) {
     for (const others::Program &p : others::Installed())
         if (on && p.on) stopping += (stopping.empty() ? L"" : i18n::Tr("list.join")) + p.name;
     const int code = commit::RunElevated(hwnd_, on ? L"--switch-on" : L"--switch-off");
+    // The service puts back the lock screen picture of the person at the console as it goes; this
+    // window's person may be another (an administrator approving for them is not this person).
+    if (code == commit::kOk && !on && lockscreen::RestorePending()) lockscreen::Restore();
     if (code == commit::kOk && !on) Toast(i18n::Tr("msg.off"));
     else if (code == commit::kOk) Toast(stopping.empty() ? i18n::Tr("msg.on") : i18n::Tr("msg.on_others", {{L"names", stopping}}));
     else if (code == commit::kDeclined) Toast(i18n::Tr("msg.cancelled"));

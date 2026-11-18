@@ -678,8 +678,8 @@ Report Install(const std::wstring &targetDir, const InstallOptions &options) {
     if (e == ERROR_SUCCESS) e = SceneReadAccess(targetDir+L"\\scene.exe",false);
     if (e != ERROR_SUCCESS) return fail(WithError(Tr("install.error.scene_acl"),e));
 
-    // The sign-in background. One already in place is kept -- the overlay may have baked it
-    // from the video -- since every change costs one black credential screen.
+    // The still the logon screen covers itself with until the overlay has baked the theme's. One
+    // already in place is kept: the overlay may have baked it from the wallpaper.
     at(0.62, "install.step.background");
     const std::vector<uint8_t> png = background::Render();
     if (!secure::IsTrusted(paths::BackgroundPath(), &why)) {
@@ -776,7 +776,7 @@ Report Install(const std::wstring &targetDir, const InstallOptions &options) {
         r.switchedOff = switchedOff;
 
         at(0.88, "install.step.turn_on");
-        e = machine::TurnOn(LauncherPath(targetDir), paths::BackgroundPath());
+        e = machine::TurnOn(LauncherPath(targetDir));
         if (e != ERROR_SUCCESS) {
             // TurnOn has already put Windows' lock screen back; the service goes with it.
             machine::RemoveService();

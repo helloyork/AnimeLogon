@@ -73,6 +73,8 @@ private:
     // administrator, where the elevated helper starts without a prompt: true to import.
     bool ConfirmOpen(const std::vector<std::wstring> &files);
     void Reread();
+    // rotation.ini as last seen: the logon screen moving through the theme list rewrites it.
+    uint64_t rotationStamp_ = 0;
     void OnResource(ICoreWebView2WebResourceRequestedEventArgs *args);
 
     // --- the open theme

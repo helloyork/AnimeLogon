@@ -18,8 +18,10 @@
 #include "animelogon/monitors.h"
 #include "animelogon/paths.h"
 #include "animelogon/resolve.h"
+#include "animelogon/rotation.h"
 #include "animelogon/secure.h"
 #include "animelogon/settings.h"
+#include "animelogon/signin.h"
 #include "animelogon/text.h"
 #include "layout.h"
 #include "nv12.h"
@@ -201,6 +203,54 @@ bool Write(const std::wstring &path, const std::vector<uint8_t> &bytes) {
     return animelogon::secure::WriteBytes(path, bytes.data(), bytes.size()) == ERROR_SUCCESS;
 }
 
+// Whether signin.ini already hands the agent the picture with this key.
+bool HandedOver(const std::wstring &key) {
+    animelogon::signin::Want want;
+    std::wstring why;
+    return animelogon::signin::Load(&want, &why) && want.key == key && want.image == animelogon::signin::ImageFor(key) &&
+           animelogon::secure::IsTrusted(want.image, &why);
+}
+
+// The pictures the agent no longer needs: all but the newest kKeep, never the one handed over.
+void Prune(const std::wstring &keep) {
+    struct Found {
+        std::wstring path;
+        ULONGLONG written;
+    };
+    std::vector<Found> found;
+    WIN32_FIND_DATAW f{};
+    const std::wstring dir = animelogon::signin::Dir();
+    HANDLE h = FindFirstFileW((dir + L"\\*.png").c_str(), &f);
+    if (h == INVALID_HANDLE_VALUE) return;
+    do {
+        if (f.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) continue;
+        found.push_back({dir + L"\\" + f.cFileName, (ULONGLONG)f.ftLastWriteTime.dwHighDateTime << 32 | f.ftLastWriteTime.dwLowDateTime});
+    } while (FindNextFileW(h, &f));
+    FindClose(h);
+    std::sort(found.begin(), found.end(), [](const Found &a, const Found &b) { return a.written > b.written; });
+    for (size_t i = animelogon::signin::kKeep; i < found.size(); ++i)
+        if (_wcsicmp(found[i].path.c_str(), keep.c_str()) != 0) DeleteFileW(found[i].path.c_str());
+}
+
+// Hands the agent the picture: its own file, named by its key, then signin.ini naming it.
+bool HandOver(const std::wstring &key, const std::wstring &theme, const std::vector<uint8_t> &png) {
+    const std::wstring dir = animelogon::signin::Dir(), image = animelogon::signin::ImageFor(key);
+    std::wstring why;
+    DWORD e = ERROR_SUCCESS;
+    if (!animelogon::secure::IsTrustedDirectory(dir, &why)) e = animelogon::secure::SecureDirectory(dir);
+    if (e == ERROR_SUCCESS && !Write(image, png)) e = ERROR_WRITE_FAULT;
+    if (e == ERROR_SUCCESS) {
+        const std::string text = animelogon::signin::Serialize({key, theme, image});
+        e = animelogon::secure::WriteBytes(animelogon::signin::Path(), text.data(), text.size());
+    }
+    if (e != ERROR_SUCCESS) {
+        ALOG(L"bake: the sign-in picture could not be handed over (%lu)", e);
+        return false;
+    }
+    Prune(image);
+    return true;
+}
+
 }  // namespace
 
 bool FirstFrameOn(const std::wstring &video, const RECT &canvas, const RECT &rect, animelogon::Scaling fit,
@@ -214,7 +264,7 @@ bool FirstFrameOn(const std::wstring &video, const RECT &canvas, const RECT &rec
 
 bool Refresh(const std::wstring &preview) {
     std::wstring why;
-    const animelogon::Settings settings = animelogon::LoadSettings(false, &why);
+    const animelogon::Settings settings = animelogon::rotation::LoadShown(&why);
     const std::vector<animelogon::MonitorInfo> monitors = animelogon::EnumerateMonitors();
     // Every file the plan names was found administrators-only by LoadWallpaper.
     const plan::Plan plan = plan::Build(settings, monitors, animelogon::DiskStore());
@@ -253,7 +303,17 @@ bool Refresh(const std::wstring &preview) {
          : image ? animelogon::Format(L"%s|image %s|%s", kVersion, wallpaper.id.c_str(), placed.c_str())
                  : std::wstring(L"default")) +
         dimmed;
-    if (preview.empty() && key == ReadKey()) return false;
+    if (preview.empty() && key == ReadKey()) {
+        if (HandedOver(key)) return false;
+        // Baked before there was anything to hand the agent (or its picture went): the same bytes.
+        std::vector<uint8_t> baked;
+        if (!animelogon::secure::IsTrusted(animelogon::paths::BackgroundPath(), &why) ||
+            !animelogon::secure::ReadFileBytes(animelogon::paths::BackgroundPath(), &baked, 64 * 1024 * 1024))
+            return false;
+        if (!HandOver(key, primary.themeId, baked)) return false;
+        ALOG(L"bake: sign-in picture %s handed to the agent", key.c_str());
+        return true;
+    }
 
     std::vector<uint8_t> png;
     const float shrink = std::min(1.0f, (float)kMaxSide / (float)std::max(windowW, windowH));
@@ -318,6 +378,8 @@ bool Refresh(const std::wstring &preview) {
         ALOG(L"bake: the background could not be written");
         return false;
     }
+    // The key goes last: without it the next look bakes again.
+    if (!HandOver(key, primary.themeId, png)) return false;
     const std::string keyBytes = animelogon::ToUtf8(key);
     animelogon::secure::WriteBytes(KeyPath(), keyBytes.data(), keyBytes.size());
     ALOG(L"bake: sign-in background is now %s (%zu bytes)", key.c_str(), png.size());

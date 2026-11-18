@@ -26,8 +26,10 @@ struct Tracked {
     const wchar_t *tag;
 };
 
-const Tracked kTracked[] = {
-    {kPolicyKey, L"NoLockScreen", L"Personalization.NoLockScreen"},
+const Tracked kNoLockScreen = {kPolicyKey, L"NoLockScreen", L"Personalization.NoLockScreen"};
+// The sign-in background as AnimeLogon 1.0 set it, through the PersonalizationCSP policy. It is no
+// longer set (signin.h): an install that recorded these puts them back when it is next turned on.
+const Tracked kCspValues[] = {
     {kCspKey, L"LockScreenImagePath", L"PersonalizationCSP.LockScreenImagePath"},
     {kCspKey, L"LockScreenImageUrl", L"PersonalizationCSP.LockScreenImageUrl"},
     {kCspKey, L"LockScreenImageStatus", L"PersonalizationCSP.LockScreenImageStatus"},
@@ -103,10 +105,8 @@ struct TrackedKey {
     const wchar_t *tag;
 };
 
-const TrackedKey kTrackedKeys[] = {
-    {kPolicyKey, L"Personalization"},
-    {kCspKey, L"PersonalizationCSP"},
-};
+const TrackedKey kPolicyTrackedKey = {kPolicyKey, L"Personalization"};
+const TrackedKey kCspTrackedKey = {kCspKey, L"PersonalizationCSP"};
 
 // The original value is recorded once; later changes by AnimeLogon do not overwrite it.
 DWORD Remember(const Tracked &t) {
@@ -167,6 +167,16 @@ DWORD Restore(const Tracked &t) {
 // Removed only while it says 1, and recorded first.
 const Tracked kDisabledByPolicy = {kSystemPolicyKey, L"DisableLogonBackgroundImage",
                                    L"System.DisableLogonBackgroundImage"};
+
+// The PersonalizationCSP values AnimeLogon 1.0 recorded, put back; then the key, if it made it.
+DWORD RestoreCspValues() {
+    DWORD first = ERROR_SUCCESS;
+    for (const Tracked &t : kCspValues) {
+        const DWORD e = Restore(t);
+        if (e != ERROR_SUCCESS && first == ERROR_SUCCESS) first = e;
+    }
+    return first != ERROR_SUCCESS ? first : RestoreKey(kCspTrackedKey);
+}
 
 std::wstring LockScreenKey(const std::wstring &sid) {
     return std::wstring(kProtectedKey) + L"\\" + sid + L"\\AnyoneRead\\LockScreen";
@@ -235,13 +245,10 @@ private:
 
 }  // namespace
 
-DWORD ApplyWindowsLockScreen(const std::wstring &image) {
-    // Nothing changes until the originals are safely recorded.
-    DWORD e = ERROR_SUCCESS;
-    for (const TrackedKey &k : kTrackedKeys)
-        if (e == ERROR_SUCCESS) e = RememberKey(k);
-    for (const Tracked &t : kTracked)
-        if (e == ERROR_SUCCESS) e = Remember(t);
+DWORD ApplyWindowsLockScreen() {
+    // Nothing changes until the original is safely recorded.
+    DWORD e = RememberKey(kPolicyTrackedKey);
+    if (e == ERROR_SUCCESS) e = Remember(kNoLockScreen);
     if (e != ERROR_SUCCESS) return e;
     e = WriteDword(kPolicyKey, L"NoLockScreen", 1);
     if (e != ERROR_SUCCESS) return e;
@@ -252,30 +259,21 @@ DWORD ApplyWindowsLockScreen(const std::wstring &image) {
         if (e == ERROR_SUCCESS) e = DeleteValue(kDisabledByPolicy.key, kDisabledByPolicy.value);
         if (e != ERROR_SUCCESS) return e;
     }
-    // Every change to these values costs one black sign-in background, so an unchanged
-    // value is left alone.
-    DWORD status = 0;
-    if (AsString(ReadValue(kCspKey, L"LockScreenImagePath")) != image) e = WriteString(kCspKey, L"LockScreenImagePath", image);
-    if (e == ERROR_SUCCESS && AsString(ReadValue(kCspKey, L"LockScreenImageUrl")) != image)
-        e = WriteString(kCspKey, L"LockScreenImageUrl", image);
-    if (e == ERROR_SUCCESS && !(AsDword(ReadValue(kCspKey, L"LockScreenImageStatus"), &status) && status == 1))
-        e = WriteDword(kCspKey, L"LockScreenImageStatus", 1);
-    return e;
+    // A sign-in background named through PersonalizationCSP would cover each person's own lock
+    // screen picture, which is where AnimeLogon puts it now (signin.h); one AnimeLogon 1.0 named
+    // there goes, as it was before.
+    return RestoreCspValues();
 }
 
 DWORD RestoreWindowsLockScreen() {
     DWORD first = Restore(kDisabledByPolicy);
-    for (const Tracked &t : kTracked) {
-        const DWORD e = Restore(t);
-        if (e != ERROR_SUCCESS && first == ERROR_SUCCESS) first = e;
-    }
-    // The keys only once every value in them is back.
+    const DWORD e = Restore(kNoLockScreen);
+    if (e != ERROR_SUCCESS && first == ERROR_SUCCESS) first = e;
+    const DWORD csp = RestoreCspValues();
+    if (csp != ERROR_SUCCESS && first == ERROR_SUCCESS) first = csp;
+    // The key only once every value in it is back.
     if (first != ERROR_SUCCESS) return first;
-    for (const TrackedKey &k : kTrackedKeys) {
-        const DWORD e = RestoreKey(k);
-        if (e != ERROR_SUCCESS && first == ERROR_SUCCESS) first = e;
-    }
-    return first;
+    return RestoreKey(kPolicyTrackedKey);
 }
 
 bool WindowsLockScreenApplied() {
@@ -316,9 +314,11 @@ DWORD RestoreSignInBackground() {
 bool SignInBackgroundRestorePending() { return !RecordedSignInSids().empty(); }
 
 DWORD AskServiceToRestore() {
-    if (!SignInBackgroundRestorePending()) return ERROR_SUCCESS;
+    // Asked whether or not a setting is recorded: the person at the console may have a lock screen
+    // picture of AnimeLogon's to have back, which only the service can reach.
+    const bool pending = SignInBackgroundRestorePending();
     Service s(SERVICE_USER_DEFINED_CONTROL | SERVICE_START | SERVICE_QUERY_STATUS);
-    if (!s.get()) return s.error();
+    if (!s.get()) return pending ? s.error() : ERROR_SUCCESS;
     SERVICE_STATUS status{};
     if (QueryServiceStatus(s.get(), &status) && status.dwCurrentState == SERVICE_RUNNING) {
         if (!ControlService(s.get(), kServiceControlRestore, &status)) return GetLastError();
@@ -326,7 +326,7 @@ DWORD AskServiceToRestore() {
         const wchar_t *args[] = {paths::kServiceName, kServiceRestoreArg};
         if (!StartServiceW(s.get(), 2, args)) return GetLastError();
         // It restores and stops by itself.
-        for (int i = 0; i < 100; ++i) {
+        for (int i = 0; i < 250; ++i) {
             if (QueryServiceStatus(s.get(), &status) && status.dwCurrentState == SERVICE_STOPPED) break;
             Sleep(100);
         }
@@ -436,11 +436,11 @@ bool ServiceAutoStart() {
     return config->dwStartType == SERVICE_AUTO_START;
 }
 
-DWORD TurnOn(const std::wstring &launcherPath, const std::wstring &image) {
+DWORD TurnOn(const std::wstring &launcherPath) {
     // The service first: Windows' lock screen goes off only once something will cover it.
     DWORD e = ServiceState() == 0 ? InstallService(launcherPath) : ERROR_SUCCESS;
     if (e == ERROR_SUCCESS) e = SetServiceAutoStart(true);
-    if (e == ERROR_SUCCESS) e = ApplyWindowsLockScreen(image);
+    if (e == ERROR_SUCCESS) e = ApplyWindowsLockScreen();
     if (e == ERROR_SUCCESS) {
         ClearPausedMarker();
         e = StartLauncherService();

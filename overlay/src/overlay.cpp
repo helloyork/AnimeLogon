@@ -18,6 +18,7 @@
 #include <cstdlib>
 #include <map>
 #include <memory>
+#include <random>
 #include <set>
 #include <string>
 #include <thread>
@@ -29,6 +30,7 @@
 #include "animelogon/monitors.h"
 #include "animelogon/paths.h"
 #include "animelogon/resolve.h"
+#include "animelogon/rotation.h"
 #include "animelogon/secure.h"
 #include "animelogon/audiocapture.h"
 #include "animelogon/settings.h"
@@ -321,6 +323,51 @@ bool LoadStill(Presenter &presenter) {
     return presenter.LoadStill(path);
 }
 
+// The theme list the logon screen moves through (rotation.h): one look, from the parked wait while
+// the session at the console is in use. A move made here comes before the next logon screen, and
+// the bake that follows it gives the agent the new sign-in picture to set while the desktop is up.
+void TurnRotation() {
+    const animelogon::Settings settings = animelogon::LoadSettings(false);
+    if (!settings.rotation) return;
+    // Which listed themes are installed, looked at again once a minute or when settings.ini changes:
+    // reading every theme.xml at each look would be most of the work.
+    static std::vector<std::wstring> playable;
+    static parkedplan::Stamp playableFor;
+    static ULONGLONG playableAt = 0;
+    const parkedplan::Stamp stamp = parkedplan::StampOf(animelogon::paths::SettingsPath());
+    if (!playableAt || stamp != playableFor || GetTickCount64() - playableAt > 60000) {
+        playable = animelogon::rotation::Playable(settings, [](const std::wstring &id) {
+            if (id == L"default") return true;
+            animelogon::theme::Theme theme;
+            std::wstring why;
+            return animelogon::DiskStore().LoadTheme(id, &theme, &why);
+        });
+        playableFor = stamp;
+        playableAt = GetTickCount64();
+    }
+    animelogon::rotation::State state;
+    animelogon::rotation::Load(&state);
+    static std::mt19937 random{std::random_device{}()};
+    bool moved = false;
+    if (!animelogon::rotation::Advance(settings, playable, animelogon::rotation::Now(), &state, &moved,
+                                       [](size_t n) { return (size_t)(random() % n); }))
+        return;
+    const DWORD e = animelogon::rotation::Save(state);
+    if (e != ERROR_SUCCESS) ALOG(L"rotation: rotation.ini could not be written (%lu)", e);
+    else if (moved) ALOG(L"rotation: the logon screen now shows theme %s", animelogon::rotation::Shown(settings, state).c_str());
+}
+
+// What settings.ini and rotation.ini look like together: the theme shown changes with either.
+parkedplan::Stamp ShownStamp() {
+    const parkedplan::Stamp s = parkedplan::StampOf(animelogon::paths::SettingsPath());
+    const parkedplan::Stamp r = parkedplan::StampOf(animelogon::rotation::Path());
+    parkedplan::Stamp both;
+    both.exists = s.exists || r.exists;
+    both.written = s.written ^ (r.written * 0x9E3779B97F4A7C15ull);
+    both.bytes = s.bytes + (r.bytes << 32);
+    return both;
+}
+
 // The parked wait: return when a logon screen is the desktop on the glass, or the service is
 // stopping. `dismissed` is true after somebody has waved the video away; while it is, the wait
 // holds -- without re-covering the screen -- until the session is actually used (signed in and
@@ -352,9 +399,9 @@ bool WaitForLogonScreen(Presenter &presenter, Scenes &scenes, bool *dismissed) {
                      L"one is ready before the next lock");
                 return false;
             }
-            if (replan.Due(parkedplan::StampOf(animelogon::paths::SettingsPath()), displaylayout::Current(), planCheck)) {
+            if (replan.Due(ShownStamp(), displaylayout::Current(), planCheck)) {
                 const plan::Plan next =
-                    plan::Build(animelogon::LoadSettings(false), animelogon::EnumerateMonitors(), animelogon::DiskStore());
+                    plan::Build(animelogon::rotation::LoadShown(), animelogon::EnumerateMonitors(), animelogon::DiskStore());
                 const bool scene = std::any_of(next.displays.begin(), next.displays.end(),
                                                [](const plan::Display &d) { return d.wallpaper.source == plan::Source::Scene; });
                 if (scene || replan.Scene()) scenes.Prepare(presenter, next);
@@ -383,9 +430,11 @@ bool WaitForLogonScreen(Presenter &presenter, Scenes &scenes, bool *dismissed) {
             goingDown = false;
         }
 
-        // The background is only ever rewritten while somebody is using the session.
+        // The theme list moves, and the sign-in background is baked, only while somebody is using
+        // the session at the console.
         if (!secure && s.console && s.signedIn && !s.locked && !g_overlay.lockNotified &&
             GetTickCount64() - bakedAt > kBakeCheckMs) {
+            TurnRotation();
             bake::Refresh();
             LoadStill(presenter);
             bakedAt = GetTickCount64();
@@ -511,6 +560,9 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
     std::wstring why;
     animelogon::Settings settings = animelogon::LoadSettings(false, &why);
     if (!why.empty()) ALOG(L"settings: %s -- using defaults", why.c_str());
+    // A theme list that moves after each logon screen counts this one.
+    animelogon::rotation::NoteScreen(settings);
+    settings = animelogon::rotation::WithShown(std::move(settings));
 
     plan::Plan plan = plan::Build(settings, animelogon::EnumerateMonitors(), animelogon::DiskStore());
     // The displays the windows are made for, to notice a change that posts no WM_DISPLAYCHANGE.
@@ -957,7 +1009,7 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
         const ULONGLONG began = GetTickCount64();
         Beat();
         std::wstring why;
-        const animelogon::Settings fresh = animelogon::LoadSettings(false, &why);
+        const animelogon::Settings fresh = animelogon::rotation::LoadShown(&why);
         plan::Plan next = plan::Build(fresh, animelogon::EnumerateMonitors(), animelogon::DiskStore());
         madeFor = displaylayout::Current();
         if (next.displays.empty()) return Relaid::NoDisplays;

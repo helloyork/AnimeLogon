@@ -18,6 +18,7 @@
 #include "animelogon/version.h"
 
 #include "library.h"
+#include "lockscreen.h"
 #include "traymenu.h"
 
 using Microsoft::WRL::ComPtr;
@@ -451,6 +452,12 @@ int RunTray() {
         const std::wstring name = paths::Sandbox().empty() ? std::wstring(L"Local\\AnimeLogon.Tray") : paths::SandboxMutex() + L".Tray";
         if (only.Acquire(name) != instance::Result::AlreadyRunning) {
             if (paths::CreateDirectories(paths::UserDataDir())) log::Open(paths::UserDataDir() + L"\\tray.log");
+            // Switched off while this person was not signed in: their own lock screen picture comes
+            // back now (the service only reaches the person at the console).
+            if (paths::Sandbox().empty() && !machine::IsOn() && lockscreen::RestorePending()) {
+                ALOG(L"tray: AnimeLogon is off -- putting back this person's lock screen picture");
+                lockscreen::Restore();
+            }
             if (!LoadSettings(false).tray) {
                 ALOG(L"tray: settings.ini says tray = false");
             } else {

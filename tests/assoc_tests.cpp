@@ -233,6 +233,8 @@ TEST(AppTellsItsRolesApartAsBefore) {
     app::Arguments a;
     CHECK(Read({}, &a) == app::Role::App && a.open.empty() && !a.sandbox);
     CHECK(Read({L"--agent"}, &a) == app::Role::Agent);
+    CHECK(Read({L"--restore-lock-screen"}, &a) == app::Role::RestoreLockScreen);
+    CHECK(Read({L"--restore-lock-screen", L"--agent"}, &a) == app::Role::Helper);  // the helper refuses it
     CHECK(Read({L"--commit-package", L"D:\\x"}, &a) == app::Role::Helper);
     CHECK(Read({L"--switch-on"}, &a) == app::Role::Helper);
     CHECK(Read({L"--agent", L"--tray"}, &a) == app::Role::Helper);  // the helper refuses it

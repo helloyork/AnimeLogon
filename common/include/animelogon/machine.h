@@ -12,8 +12,9 @@ namespace animelogon::machine {
 // and put back exactly as it was by RestoreWindowsLockScreen.
 
 // Turns Windows' own lock screen off, so the credential screen (and the video over it)
-// comes up directly. Also sets the sign-in background to `image`, unless it already is.
-DWORD ApplyWindowsLockScreen(const std::wstring &image);
+// comes up directly. The sign-in background is each person's own lock screen picture, which
+// their agent sets (signin.h); a PersonalizationCSP picture AnimeLogon 1.0 set is put back.
+DWORD ApplyWindowsLockScreen();
 DWORD RestoreWindowsLockScreen();
 bool WindowsLockScreenApplied();
 
@@ -26,11 +27,12 @@ bool LogonBackgroundDisabledByPolicy();
 DWORD ShowSignInBackground();
 DWORD RestoreSignInBackground();
 bool SignInBackgroundRestorePending();
-// The service's control code for RestoreSignInBackground, and the start argument that runs
-// it once in a service that is not running.
+// The service's control code for putting the sign-in background back -- RestoreSignInBackground,
+// and the lock screen picture of the person at the console, which their own session puts back --
+// and the start argument that does it once in a service that is not running.
 constexpr DWORD kServiceControlRestore = 128;
 constexpr const wchar_t *kServiceRestoreArg = L"--restore";
-// Has the service put the sign-in background settings back; succeeds if nothing is pending.
+// Has the service put the sign-in background back; fails only while a recorded setting is left.
 DWORD AskServiceToRestore();
 
 // --- The service -------------------------------------------------------------------
@@ -44,10 +46,10 @@ DWORD SetServiceAutoStart(bool automatic);
 bool ServiceAutoStart();
 
 // --- The switch in the settings app ----------------------------------------------------
-// On: Windows' lock screen off, the background set, the service automatic and running,
+// On: Windows' lock screen off, the service automatic and running,
 // the paused marker gone, setup finished (below); if any step fails, it is all undone
 // again. Off: all of it undone, files and settings kept.
-DWORD TurnOn(const std::wstring &launcherPath, const std::wstring &image);
+DWORD TurnOn(const std::wstring &launcherPath);
 DWORD TurnOff();
 bool IsOn();
 

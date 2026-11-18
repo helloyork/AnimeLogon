@@ -8,7 +8,7 @@ import { UacShield } from '../icons';
 import { send, thumbUrl, wallpaperUrl } from '../native';
 import { edit } from '../preview';
 import { DisplaySketch } from '../displays';
-import { apply, closeDialog, importFlow, placeOf, screenTheme, themeOf, useStore, workshopFlow, type Dialog as DialogState } from '../store';
+import { addToRotation, apply, closeDialog, importFlow, placeOf, screenTheme, themeOf, useStore, workshopFlow, type Dialog as DialogState } from '../store';
 import { Button, cx, TextInput } from '../ui/controls';
 import { ImportDialog } from './Import';
 import { WorkshopDialog } from './Workshop';
@@ -66,6 +66,8 @@ function One({ d }: { d: DialogState }) {
       return <WallpaperDialog d={d} />;
     case 'addComponent':
       return <AddComponentDialog d={d} />;
+    case 'rotation':
+      return <RotationDialog d={d} />;
     case 'copyComponents':
       return <CopyComponentsDialog d={d} />;
     case 'workshop':
@@ -249,6 +251,58 @@ function AddComponentDialog({ d }: { d: Extract<DialogState, { kind: 'addCompone
           </button>
         </div>
         <p className="t-cap3">{tn('dialog.add.room', s.open?.room ?? 0)}</p>
+      </div>
+    </Frame>
+  );
+}
+
+// Themes added to the end of the rotation, chosen by their pictures, any number at once.
+function RotationDialog({ d }: { d: Extract<DialogState, { kind: 'rotation' }> }) {
+  const s = useStore();
+  const [chosen, setChosen] = useState<string[]>([]);
+  const r = s.lib!.settings.rotation;
+  const others = s.lib!.themes.filter(t => !r.themes.includes(t.id));
+  const picked = chosen.filter(id => others.some(t => t.id === id));
+  const all = others.length > 0 && picked.length === others.length;
+  const toggle = (id: string) => setChosen(c => (c.includes(id) ? c.filter(x => x !== id) : [...c, id]));
+  const run = () => {
+    if (!picked.length) return;
+    closeDialog(d.id);
+    // In the order they were chosen.
+    addToRotation(picked);
+  };
+  return (
+    <Frame d={d} title={tr('dialog.rotation.title')} wide actions={<>
+      <Button onClick={() => closeDialog(d.id)}>{tr('button.cancel')}</Button>
+      <Button variant="primary" disabled={!picked.length} onClick={run}>{tr('dialog.rotation.action')}</Button>
+    </>}>
+      <div className="dlg-stack">
+        <div className="dlg-text">
+          <p>{tr(others.length ? 'dialog.rotation.body' : 'dialog.rotation.all_in')}</p>
+        </div>
+        {others.length > 0 && (
+          <div className="pictures" role="listbox" aria-multiselectable="true" aria-label={tr('dialog.rotation.title')}>
+            {others.map(t => {
+              const on = picked.includes(t.id);
+              return (
+                <button key={t.id} type="button" className={cx('pick', on && 'on')} role="option" aria-selected={on} onClick={() => toggle(t.id)}>
+                  <span className="picbox">
+                    <img className="pic" src={thumbUrl(t.id, t.revision, 296, s.tick)} alt="" draggable={false} />
+                    <span className="tick" aria-hidden="true">{on && <Checkmark12Filled />}</span>
+                  </span>
+                  <span className="ellipsis">{t.name}</span>
+                  <span className="t-cap3 ellipsis">{t.summary}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+        {others.length > 0 && (
+          <div className="dlg-foot">
+            <span className="t-cap3">{picked.length ? tn('dialog.copy_components.picked', picked.length) : tr('dialog.copy_components.none')}</span>
+            <Button size="sm" onClick={() => setChosen(all ? [] : others.map(t => t.id))}>{tr(all ? 'we.pick_none' : 'we.pick_all')}</Button>
+          </div>
+        )}
       </div>
     </Frame>
   );

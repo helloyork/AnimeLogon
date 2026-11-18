@@ -52,8 +52,19 @@ export interface Settings {
   media: boolean;
   tray: boolean;       // the icon in the system tray (app/src/tray.h)
   trayRecent: number;  // how many recently used themes its menu offers
+  rotation: Rotation;
   clock: { hours: 'auto' | '12' | '24'; ampm: boolean; date: 'weekday' | 'long' | 'none'; language: string };
   audio: { enabled: boolean; device: string; volume: number; video: boolean; videoVolume: number; videoYield: boolean };
+}
+
+// The themes the lock screen moves through (common/include/animelogon/rotation.h).
+export interface Rotation {
+  on: boolean;
+  themes: string[];                 // installed themes, in their order
+  trigger: 'interval' | 'lock';     // every `minutes`, or after each lock
+  minutes: number;                  // 5 to 1440
+  order: 'sequential' | 'shuffle';
+  next: number;                     // when it moves on, in ms since 1970; 0 when it is not counting time
 }
 
 export type WallpaperKind = 'scene' | 'video' | 'image' | 'builtin' | 'none' | 'missing';

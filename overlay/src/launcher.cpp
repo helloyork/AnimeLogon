@@ -36,8 +36,15 @@ HANDLE g_goingDownEvent = nullptr;
 HANDLE g_dismissedEvent = nullptr;
 // Set by the service handler after a resume from sleep or hibernation, handled by Supervise.
 std::atomic<bool> g_resumed{false};
-// Set once the settings app or uninstaller has asked for the sign-in background setting back.
+// Set once the settings app or uninstaller has asked for the sign-in background back.
 std::atomic<bool> g_restored{false};
+// The handler's request to put it back, carried out by Supervise (which owns the agent), and its
+// answer. Manual reset.
+HANDLE g_restoreAsked = nullptr;
+HANDLE g_restoreDone = nullptr;
+// How long the handler waits for that, and how long the person's own restore is given.
+constexpr DWORD kRestoreWaitMs = 25000;
+constexpr DWORD kPersonRestoreMs = 15000;
 constexpr ULONGLONG kSignInCheckMs = 60000;
 // More time passed by the clock than the machine was awake: it slept or hibernated in between.
 constexpr ULONGLONG kAsleepMs = 5000;
@@ -97,6 +104,42 @@ DWORD FindWinlogon(DWORD session) {
     }
     CloseHandle(snap);
     return found;
+}
+
+// Puts back the lock screen picture of the person signed in at the console, which only they can
+// do: animelogon.exe --restore-lock-screen in their session (app/src/lockscreen.h), waited for.
+// Anyone else's comes back when they next sign in while AnimeLogon is off (the icon does it).
+void RestorePersonLockScreen() {
+    const DWORD session = WTSGetActiveConsoleSessionId();
+    HANDLE token = nullptr;
+    if (session == 0xFFFFFFFF || !WTSQueryUserToken(session, &token)) return;
+    LPVOID env = nullptr;
+    CreateEnvironmentBlock(&env, token, FALSE);
+    STARTUPINFOW si{};
+    si.cb = sizeof(si);
+    si.lpDesktop = const_cast<wchar_t *>(L"WinSta0\\Default");
+    std::wstring cmd = L"\"" + animelogon::paths::ModuleDir() + L"animelogon.exe\" --restore-lock-screen";
+    PROCESS_INFORMATION pi{};
+    if (CreateProcessAsUserW(token, nullptr, cmd.data(), nullptr, nullptr, FALSE,
+                             CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW, env, nullptr, &si, &pi)) {
+        CloseHandle(pi.hThread);
+        DWORD code = STILL_ACTIVE;
+        if (WaitForSingleObject(pi.hProcess, kPersonRestoreMs) == WAIT_OBJECT_0) GetExitCodeProcess(pi.hProcess, &code);
+        ALOG(L"launcher: the lock screen picture of the person in session %lu %s (%lu)", session,
+             code == 0 ? L"is put back" : code == STILL_ACTIVE ? L"was still being put back" : L"could not be put back", code);
+        CloseHandle(pi.hProcess);
+    } else {
+        ALOG(L"launcher: cannot start the lock screen picture's restore in session %lu (%lu)", session, GetLastError());
+    }
+    if (env) DestroyEnvironmentBlock(env);
+    CloseHandle(token);
+}
+
+// Everything the sign-in background took from Windows and from the person at the console.
+void RestoreSignIn() {
+    const DWORD e = animelogon::machine::RestoreSignInBackground();
+    ALOG(L"launcher: sign-in background setting restored (%lu)", e);
+    RestorePersonLockScreen();
 }
 
 // Somebody is signed in to `session`.
@@ -297,6 +340,14 @@ void Supervise() {
             spawnedAt = now;
             if (!child) nextTry = now + (backoff = backoff ? (backoff * 2 > 30000 ? 30000 : backoff * 2) : 2000);
         }
+        // Asked to put the sign-in background back: the agent goes first, or it would set its
+        // picture again.
+        if (g_restoreAsked && WaitForSingleObject(g_restoreAsked, 0) == WAIT_OBJECT_0) {
+            ResetEvent(g_restoreAsked);
+            live.Hold();
+            RestoreSignIn();
+            SetEvent(g_restoreDone);
+        }
         live.Tick(session);
         if (now - flushedAt >= 250) {
             winlogon.Flush();
@@ -341,8 +392,14 @@ DWORD WINAPI HandlerEx(DWORD control, DWORD eventType, LPVOID, LPVOID) {
         return NO_ERROR;
     case animelogon::machine::kServiceControlRestore: {
         g_restored = true;
-        const DWORD e = animelogon::machine::RestoreSignInBackground();
-        ALOG(L"launcher: sign-in background setting restored (%lu)", e);
+        if (!g_restoreAsked || !g_restoreDone) {
+            RestoreSignIn();
+            return NO_ERROR;
+        }
+        ResetEvent(g_restoreDone);
+        SetEvent(g_restoreAsked);
+        if (WaitForSingleObject(g_restoreDone, kRestoreWaitMs) != WAIT_OBJECT_0)
+            ALOG(L"launcher: the sign-in background was not put back within %lu s", kRestoreWaitMs / 1000);
         return NO_ERROR;
     }
     default:
@@ -356,14 +413,16 @@ void WINAPI ServiceMain(DWORD argc, LPWSTR *argv) {
     g_status.dwServiceType = SERVICE_WIN32_OWN_PROCESS;
     // Started only to put the sign-in background setting back, which needs SYSTEM.
     if (argc >= 2 && _wcsicmp(argv[1], animelogon::machine::kServiceRestoreArg) == 0) {
-        SetState(SERVICE_START_PENDING, 3000);
-        const DWORD e = animelogon::machine::RestoreSignInBackground();
-        ALOG(L"launcher: started to restore the sign-in background setting (%lu)", e);
+        SetState(SERVICE_START_PENDING, kPersonRestoreMs + 5000);
+        ALOG(L"launcher: started to restore the sign-in background");
+        RestoreSignIn();
         SetState(SERVICE_STOPPED);
         return;
     }
     SetState(SERVICE_START_PENDING, 3000);
     CreateEvents();
+    g_restoreAsked = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    g_restoreDone = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     SetState(SERVICE_RUNNING);
     Supervise();
     if (g_stopEvent) {
