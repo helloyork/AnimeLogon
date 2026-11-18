@@ -68,8 +68,8 @@ and the number of themes in its menu changed.
 - **The sign-in screen background is set by AnimeLogon.** The lock screen picture of each
   signed-in account is set to the current theme's picture, and Windows Spotlight is turned off for
   that account; a picture chosen in Windows Settings is replaced. Turning off **Enable AnimeLogon**,
-  or uninstalling, restores the picture and Windows Spotlight of the account signed in at the time;
-  after turning it off, other accounts are restored the next time they sign in.
+  or uninstalling, restores the picture and Windows Spotlight of every account: at once for accounts
+  that are signed in, and at the next sign-in for the others.
 - **Imported videos, pictures and themes are stored on drive C:.** The location cannot be changed.
 - **The system tray icon runs at sign-in.** The installer adds a startup entry for every account
   and uninstalling removes it. It can also be disabled under **Startup apps** in Task Manager.

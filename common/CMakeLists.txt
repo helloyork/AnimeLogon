@@ -12,6 +12,7 @@ add_library(animelogon_common STATIC
     src/instance.cpp
     src/library.cpp
     src/live.cpp
+    src/lockrestore.cpp
     src/log.cpp
     src/machine.cpp
     src/monitors.cpp

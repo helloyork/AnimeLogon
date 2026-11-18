@@ -21,6 +21,7 @@
 #include "animelogon/i18n.h"
 #include "animelogon/library.h"
 #include "animelogon/live.h"
+#include "animelogon/lockrestore.h"
 #include "animelogon/log.h"
 #include "animelogon/machine.h"
 #include "animelogon/others.h"
@@ -860,6 +861,13 @@ Report Uninstall(bool keepData, const Progress &progress) {
     at(0.30, "uninstall.step.service");
     const DWORD signIn = machine::AskServiceToRestore();
     if (signIn != ERROR_SUCCESS) problem("uninstall.problem.sign_in", signIn);
+    // The service put back the lock screen picture of everyone signed in; every other account that
+    // still has one of AnimeLogon's gets its own back at its next sign-in (lockrestore.h).
+    int unreachable = 0;
+    const int scheduled = lockrestore::ScheduleForAccounts(&unreachable);
+    if (scheduled || unreachable)
+        ALOG(L"uninstall: %d account(s) get their lock screen picture back at their next sign-in, %d could not be reached",
+             scheduled, unreachable);
 
     e = machine::RemoveService();
     if (e != ERROR_SUCCESS) problem("uninstall.problem.service", e);

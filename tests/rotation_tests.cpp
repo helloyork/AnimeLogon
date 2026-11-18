@@ -5,6 +5,7 @@
 #include <map>
 #include <set>
 
+#include "animelogon/lockrestore.h"
 #include "animelogon/paths.h"
 #include "animelogon/rotation.h"
 #include "animelogon/settings.h"
@@ -214,4 +215,21 @@ TEST(SignInHandOffIsCheckedAndNamedByKey) {
     CHECK(!signin::Parse("format=1\nimage=0123456789abcdef.png\n", &back));
     CHECK(!signin::Parse("format=1\nkey=k\nimage=0123456789abcdef.png\nurl=x\n", &back));
     CHECK(signin::Parse("format=1\nkey=k\nimage=0123456789abcdef.png\n", &back) && back.theme.empty());
+}
+
+TEST(LockScreenRestoreStepIsPlainAndShort) {
+    // The script every account still holding one of AnimeLogon's pictures runs once at sign-in.
+    const std::string script = animelogon::lockrestore::Script();
+    bool ascii = true;
+    for (unsigned char c : script) ascii = ascii && (c == '\n' || (c >= 0x20 && c < 0x7F));
+    CHECK(ascii);
+    CHECK(script.find("SetImageFileAsync") != std::string::npos);
+    CHECK(script.find("HKLM:\\SOFTWARE\\AnimeLogon") != std::string::npos);  // left alone when installed again
+    CHECK(script.find("Remove-Item -LiteralPath $PSCommandPath") != std::string::npos);
+    // RunOnce takes command lines up to 260 characters.
+    const std::wstring command = animelogon::lockrestore::CommandFor(
+        L"C:\\Users\\a-rather-long-account-name\\AppData\\Local\\AnimeLogon\\restore-lock-screen.ps1");
+    CHECK(command.size() < 260);
+    CHECK(command.find(L"powershell.exe\" -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File \"C:\\Users\\") !=
+          std::wstring::npos);
 }
