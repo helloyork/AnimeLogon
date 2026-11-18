@@ -78,6 +78,13 @@ std::vector<std::wstring> Playable(const Settings &settings, const std::function
 bool Advance(const Settings &settings, const std::vector<std::wstring> &playable, uint64_t now, State *state,
              bool *moved, const std::function<size_t(size_t)> &pick);
 
+// The themes that come after the one shown, in the order they will come, as far as that is known:
+// in the list's order, the rest of the list round to the one shown; shuffled, the rest of the round
+// under way, since each new round's order is drawn as it begins. Empty when the rotation is off or
+// has fewer than two themes.
+std::vector<std::wstring> Upcoming(const Settings &settings, const std::vector<std::wstring> &playable,
+                                   const State &state);
+
 // Notes in rotation.ini that a logon screen came up now, when the rotation moves on after each one.
 // From the overlay as it covers a logon screen; SYSTEM only.
 void NoteScreen(const Settings &settings);

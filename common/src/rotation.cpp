@@ -240,6 +240,27 @@ bool Advance(const Settings &settings, const std::vector<std::wstring> &playable
            state->since != old.since || state->screen != old.screen || state->bag != old.bag;
 }
 
+std::vector<std::wstring> Upcoming(const Settings &settings, const std::vector<std::wstring> &playable,
+                                   const State &state) {
+    std::vector<std::wstring> out;
+    if (!settings.rotation || playable.size() < 2) return out;
+    const std::wstring shown = Shown(settings, state);
+    if (settings.rotationOrder == RotationOrder::Sequential) {
+        // A theme shown that is not in the list gives way to the list's first at the next look.
+        const auto it = std::find(playable.begin(), playable.end(), shown);
+        const size_t from = it == playable.end() ? 0 : (size_t)(it - playable.begin()) + 1;
+        for (size_t i = 0; i < playable.size(); ++i) {
+            const std::wstring &id = playable[(from + i) % playable.size()];
+            if (id != shown) out.push_back(id);
+        }
+        return out;
+    }
+    // Next() takes the bag's themes in turn, passing over any no longer listed.
+    for (const std::wstring &id : state.bag)
+        if (id != shown && Contains(playable, id) && !Contains(out, id)) out.push_back(id);
+    return out;
+}
+
 void NoteScreen(const Settings &settings) {
     if (!settings.rotation || settings.rotationTrigger != RotationTrigger::Lock) return;
     State state;
