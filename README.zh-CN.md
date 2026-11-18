@@ -205,6 +205,8 @@ Mozilla Public License 2.0 © 2026 Nomen (helloyork)。详见 [LICENSE](LICENSE)
 
 `vendor/thorvg` 包含 ThorVG 1.1.2（MIT）和其内嵌 RapidJSON 的许可证，仅场景沙箱链接 ThorVG。来源与构建范围见 [SOURCE.md](vendor/thorvg/SOURCE.md)。
 
+`vendor/directxtex` 包含 DirectXTex（MIT）中把图片压缩成 BC7、BC4 的部分，导入场景时用它把场景里的图片转成显卡纹理。来源与构建范围见 [SOURCE.md](vendor/directxtex/SOURCE.md)。
+
 设置程序的界面打包了 React、Fluent UI 等 npm 包（MIT）。构建时会生成这些包的名称、版本和许可证文本。
 
 以上第三方许可证随程序安装在安装目录的 `licenses` 文件夹中，也可以在 AnimeLogon 的「设置」中打开「第三方声明」查看。

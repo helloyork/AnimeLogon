@@ -38,6 +38,7 @@ configure_file(res/version.h.in ${PROJECT_BINARY_DIR}/include/animelogon/version
 
 add_subdirectory(vendor/webview2)
 add_subdirectory(vendor/thorvg)
+add_subdirectory(vendor/directxtex)
 
 include(cmake/AnimeLogon.cmake)
 
