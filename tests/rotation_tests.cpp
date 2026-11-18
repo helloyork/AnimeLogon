@@ -200,6 +200,49 @@ TEST(RotationFollowsTheListAndTheHand) {
     CHECK(!rotation::Advance(s, s.rotationThemes, kT0 + 3000 * kMinute, &st, &moved, First));
 }
 
+TEST(RotationTellsWhatComesNext) {
+    using Ids = std::vector<std::wstring>;
+    Settings s = Rotating({kA, kB, kC, kD});
+    rotation::State st;
+    bool moved = false;
+    rotation::Advance(s, s.rotationThemes, kT0, &st, &moved, First);
+    CHECK(rotation::Upcoming(s, s.rotationThemes, st) == (Ids{kB, kC, kD}));
+    // Round the end of the list.
+    rotation::Advance(s, s.rotationThemes, kT0 + 20 * kMinute, &st, &moved, First);
+    rotation::Advance(s, s.rotationThemes, kT0 + 40 * kMinute, &st, &moved, First);
+    CHECK(st.current == kC && rotation::Upcoming(s, s.rotationThemes, st) == (Ids{kD, kA, kB}));
+    // A theme chosen by hand counts at once, before the logon screen has looked.
+    s.theme = kB;
+    CHECK(rotation::Upcoming(s, s.rotationThemes, st) == (Ids{kC, kD, kA}));
+    // Uninstalled themes are passed over; with one theme, or off, nothing comes next.
+    CHECK(rotation::Upcoming(s, {kA, kB, kD}, st) == (Ids{kD, kA}));
+    CHECK(rotation::Upcoming(s, {kB}, st).empty());
+    s.rotation = false;
+    CHECK(rotation::Upcoming(s, s.rotationThemes, st).empty());
+
+    // Shuffled: the rest of the round, which is exactly what Advance will show.
+    Settings r = Rotating({kA, kB, kC, kD}, RotationOrder::Shuffle);
+    rotation::State sh;
+    unsigned seed = 3;
+    auto pick = [&](size_t n) { seed = seed * 1103515245u + 12345u; return (size_t)(seed >> 8) % n; };
+    rotation::Advance(r, r.rotationThemes, kT0, &sh, &moved, pick);
+    CHECK(rotation::Upcoming(r, r.rotationThemes, sh).empty());  // no round drawn yet
+    rotation::Advance(r, r.rotationThemes, kT0 + 10 * kMinute, &sh, &moved, pick);
+    const Ids next = rotation::Upcoming(r, r.rotationThemes, sh);
+    CHECK(next.size() == 2);
+    uint64_t now = kT0 + 10 * kMinute;
+    for (const std::wstring &id : next) {
+        now += 10 * kMinute;
+        rotation::Advance(r, r.rotationThemes, now, &sh, &moved, pick);
+        CHECK(sh.current == id);
+    }
+    // A theme taken out of the list drops out of the round.
+    rotation::Advance(r, r.rotationThemes, now + 10 * kMinute, &sh, &moved, pick);
+    const Ids round = rotation::Upcoming(r, r.rotationThemes, sh);
+    CHECK(round.size() == 2);
+    CHECK(rotation::Upcoming(r, {sh.current, round[1]}, sh) == (Ids{round[1]}));
+}
+
 TEST(SignInHandOffIsCheckedAndNamedByKey) {
     const std::wstring key = L"2|0000000000000001|fill|0,0,1920,1080|1920x1080";
     const std::wstring image = signin::ImageFor(key);

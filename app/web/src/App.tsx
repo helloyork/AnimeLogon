@@ -103,11 +103,16 @@ function useBack() {
   }, []);
 }
 
+// The page under the app bar.
+function pageOf(s: ReturnType<typeof useStore>) {
+  if (s.tab === 'discover' && s.env.steam) return 'discover';
+  if (s.tab === 'settings') return 'settings';
+  return s.tab === 'mine' && s.view === 'theme' && !!s.open ? 'theme' : 'library';
+}
+
 function Page() {
-  const s = useStore();
-  const themePage = s.tab === 'mine' && s.view === 'theme' && !!s.open;
-  if (s.tab === 'discover' && s.env.steam) return <DiscoverPage />;
-  return s.tab === 'settings' ? <SettingsPage /> : themePage ? <EditorPage /> : <LibraryPage />;
+  const page = pageOf(useStore());
+  return page === 'discover' ? <DiscoverPage /> : page === 'settings' ? <SettingsPage /> : page === 'theme' ? <EditorPage /> : <LibraryPage />;
 }
 
 // An import or an export under way, with Cancel. An export does not say how far it is, so its bar
@@ -126,7 +131,10 @@ function BusyBar() {
   );
 }
 
+// Over the library, above the rotation's bar at the window's foot (48 px).
 function Toasts() {
+  const s = useStore();
+  const docked = !s.setup && !!s.lib && pageOf(s) === 'library';
   const toasterId = useId('toaster');
   const { dispatchToast } = useToastController(toasterId);
   useEffect(
@@ -141,5 +149,5 @@ function Toasts() {
       ),
     [dispatchToast],
   );
-  return <Toaster toasterId={toasterId} position="bottom" offset={{ vertical: 24 }} />;
+  return <Toaster toasterId={toasterId} position="bottom" offset={{ vertical: docked ? 72 : 24 }} />;
 }

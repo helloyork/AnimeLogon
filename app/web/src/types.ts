@@ -61,6 +61,7 @@ export interface Settings {
 export interface Rotation {
   on: boolean;
   themes: string[];                 // installed themes, in their order
+  upcoming: string[];               // the themes after the one in use, in the order they come, as far as known
   trigger: 'interval' | 'lock';     // every `minutes`, or after each lock
   minutes: number;                  // 5 to 1440
   order: 'sequential' | 'shuffle';

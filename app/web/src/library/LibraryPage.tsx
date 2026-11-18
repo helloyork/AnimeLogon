@@ -1,9 +1,11 @@
 // The theme library: the theme in use, large, then every theme. A click on a theme puts it in use.
-import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
+// The rotation's bar stays at the foot of the window, under the page that scrolls.
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { Menu, MenuDivider, MenuItem, MenuList, MenuPopover, MenuTrigger, useRestoreFocusTarget } from '@fluentui/react-components';
-import { Add16Regular, Dismiss12Regular, Edit16Regular, MoreHorizontal16Regular, Play16Regular, Warning16Regular } from '@fluentui/react-icons';
+import { Add16Regular, ChevronDown16Regular, ChevronUp16Regular, Dismiss12Regular, Edit16Regular, MoreHorizontal16Regular, Play16Regular, Warning16Regular } from '@fluentui/react-icons';
 import { UacShield } from '../icons';
 import { SceneFrames, WallpaperVideo } from '../media';
+import { ARRIVE, calm, LEAVE } from '../motion';
 import { layerUrl, send, thumbUrl } from '../native';
 import { motion } from '../preview';
 import {
@@ -51,58 +53,60 @@ export function LibraryPage() {
   const lib = s.lib!;
   const others = list(s.env.others.filter(o => o.on).map(o => o.name));
   return (
-    <main className="scroll">
-      <div className="page">
-        <div className="pagehead">
-          <h1 className="t-title">{tr('library.title')}</h1>
-          <div className="actions">
-            {/* Asks what to import first; the administrator's approval comes after that choice. The
-                focus comes back here when the question is closed. One import runs at a time: not
-                offered while one does (the busy bar is up). */}
-            <Button {...restoreFocus} disabled={!!s.busy} onClick={() => importFlow()}>{tr('library.import')}</Button>
-            <Button icon={<Add16Regular />} onClick={() => openDialog({ kind: 'newTheme' })}>{tr('library.new')}</Button>
+    <>
+      <main className="scroll">
+        <div className="page">
+          <div className="pagehead">
+            <h1 className="t-title">{tr('library.title')}</h1>
+            <div className="actions">
+              {/* Asks what to import first; the administrator's approval comes after that choice. The
+                  focus comes back here when the question is closed. One import runs at a time: not
+                  offered while one does (the busy bar is up). */}
+              <Button {...restoreFocus} disabled={!!s.busy} onClick={() => importFlow()}>{tr('library.import')}</Button>
+              <Button icon={<Add16Regular />} onClick={() => openDialog({ kind: 'newTheme' })}>{tr('library.new')}</Button>
+            </div>
           </div>
+          {!s.env.installed && (
+            <div className="notice" role="status">
+              <Warning16Regular />
+              <span>{tr('library.not_installed')}</span>
+            </div>
+          )}
+          {s.env.installed && !s.env.on && (
+            <div className="notice" role="status">
+              <Warning16Regular />
+              <span>{others ? tr('library.off_others', { names: others }) : tr('library.off')}</span>
+              <Button size="sm" shield onClick={switchOn}>{tr('library.turn_on')}</Button>
+            </div>
+          )}
+          {s.env.installed && s.env.on && others && (
+            <div className="notice" role="status">
+              <Warning16Regular />
+              <span>{tr('library.both_on', { names: others })}</span>
+              <Button size="sm" shield onClick={() => send('switch', { on: true })}>{tr('library.turn_off_others', { names: others })}</Button>
+            </div>
+          )}
+          {s.env.installed && s.env.library.away && (
+            <div className="notice" role="status">
+              <Warning16Regular />
+              <span>{tr('library.away', { dir: s.env.library.dir })}</span>
+            </div>
+          )}
+          {perMonitor() ? <Screens /> : <Current />}
+          {s.env.steam ? <WithWorkshop /> : (
+            <>
+              <div className="sechead">
+                <h2 className="t-h">{tr('library.mine')}</h2>
+              </div>
+              <div className="grid">
+                {lib.themes.map(t => <ThemeCard key={t.id} theme={t} />)}
+              </div>
+            </>
+          )}
         </div>
-        {!s.env.installed && (
-          <div className="notice" role="status">
-            <Warning16Regular />
-            <span>{tr('library.not_installed')}</span>
-          </div>
-        )}
-        {s.env.installed && !s.env.on && (
-          <div className="notice" role="status">
-            <Warning16Regular />
-            <span>{others ? tr('library.off_others', { names: others }) : tr('library.off')}</span>
-            <Button size="sm" shield onClick={switchOn}>{tr('library.turn_on')}</Button>
-          </div>
-        )}
-        {s.env.installed && s.env.on && others && (
-          <div className="notice" role="status">
-            <Warning16Regular />
-            <span>{tr('library.both_on', { names: others })}</span>
-            <Button size="sm" shield onClick={() => send('switch', { on: true })}>{tr('library.turn_off_others', { names: others })}</Button>
-          </div>
-        )}
-        {s.env.installed && s.env.library.away && (
-          <div className="notice" role="status">
-            <Warning16Regular />
-            <span>{tr('library.away', { dir: s.env.library.dir })}</span>
-          </div>
-        )}
-        {perMonitor() ? <Screens /> : <Current />}
-        <Rotation />
-        {s.env.steam ? <WithWorkshop /> : (
-          <>
-            <div className="sechead">
-              <h2 className="t-h">{tr('library.mine')}</h2>
-            </div>
-            <div className="grid">
-              {lib.themes.map(t => <ThemeCard key={t.id} theme={t} />)}
-            </div>
-          </>
-        )}
-      </div>
-    </main>
+      </main>
+      <RotationDock />
+    </>
   );
 }
 
@@ -229,36 +233,83 @@ function Screens() {
 
 // When the rotation moves on: every few minutes or hours, every day, or after each lock.
 const MINUTES = [5, 10, 15, 30, 60, 120, 180, 360, 720, 1440];
+const everyLabel = (m: number) =>
+  m === 1440 ? tr('library.rotation.every_day') : m % 60 === 0 ? tn('library.rotation.every_hours', m / 60) : tn('library.rotation.every_minutes', m);
 function whenChoices(r: RotationSettings): Choice[] {
-  const label = (m: number) =>
-    m === 1440 ? tr('library.rotation.every_day') : m % 60 === 0 ? tn('library.rotation.every_hours', m / 60) : tn('library.rotation.every_minutes', m);
   const minutes = MINUTES.includes(r.minutes) ? MINUTES : [...MINUTES, r.minutes].sort((a, b) => a - b);  // one set by hand
-  return [...minutes.map(m => ({ value: String(m), label: label(m) })), { value: 'lock', label: tr('library.rotation.every_lock') }];
+  return [...minutes.map(m => ({ value: String(m), label: everyLabel(m) })), { value: 'lock', label: tr('library.rotation.every_lock') }];
 }
 
-// What the rotation will do next, in a line.
+// What the rotation will do next, in a few words. Before the logon screen has counted any time
+// (just turned on), how often it moves on.
 function rotationStatus(r: RotationSettings, count: number, now: number) {
   if (count < 2) return tr('library.rotation.need_two');
-  if (!r.on) return tr('library.rotation.off');
+  if (!r.on) return tn('library.rotation.count', count);
   if (r.trigger === 'lock') return tr('library.rotation.next_lock');
-  if (!r.next) return tr('library.rotation.note');
+  if (!r.next) return everyLabel(r.minutes);
   const minutes = Math.ceil((r.next - now) / 60000);
   return minutes <= 1 ? tr('library.rotation.next_soon') : tn('library.rotation.next_in', minutes);
 }
 
-// The themes the lock screen moves through: a switch, the themes in their order (dragged to
-// reorder, the one shown marked), when it moves on and in which order. The theme in use is the
-// one it has got to (library.current).
-function Rotation() {
+// Whether the rotation's bar is open is kept for the next time the window opens; the page's own
+// storage may be missing or refused, and then it starts closed.
+const DOCK_KEY = 'library.rotation.open';
+let dockOpen: boolean | null = null;
+function wasOpen() {
+  if (dockOpen === null) {
+    try { dockOpen = localStorage.getItem(DOCK_KEY) === '1'; } catch { dockOpen = false; }
+  }
+  return dockOpen;
+}
+function keepOpen(open: boolean) {
+  dockOpen = open;
+  try { localStorage.setItem(DOCK_KEY, open ? '1' : '0'); } catch { /* kept until the window closes */ }
+}
+
+// The rotation, at the foot of the library. Closed, a status bar: the switch, when it moves on,
+// and the themes that come next in their order. Open, the list itself above that bar -- the
+// themes in their order, dragged to reorder, the one shown marked -- and the bar holds when it
+// moves on and in which order. The theme in use is the one it has got to (library.current).
+function RotationDock() {
   const s = useStore();
   const r = s.lib!.settings.rotation;
   const themes = r.themes.map(themeOf).filter((t): t is ThemeEntry => !!t);
+  const upcoming = r.upcoming.map(themeOf).filter((t): t is ThemeEntry => !!t);
+  const [open, setOpen] = useState(wasOpen);
   const [now, setNow] = useState(() => Date.now());
   const [dragging, setDragging] = useState<string | null>(null);
+  const body = useRef<HTMLDivElement>(null);
+  const want = useRef(open);
+  const fold = useRef<Animation | null>(null);
+  const arrived = useRef(false);
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 20000);
     return () => window.clearInterval(timer);
   }, []);
+  // Opening unfolds the list upwards; the window opening with the bar open does not.
+  useLayoutEffect(() => {
+    if (!arrived.current) { arrived.current = true; return; }
+    const el = body.current;
+    if (!open || !el || calm()) return;
+    const a = el.animate([{ height: '0px' }, { height: el.offsetHeight + 'px' }], { duration: 200, easing: ARRIVE });
+    fold.current = a;
+    a.onfinish = () => { if (fold.current === a) fold.current = null; };
+  }, [open]);
+  const toggle = () => {
+    const next = !want.current;
+    want.current = next;
+    keepOpen(next);
+    fold.current?.finish();
+    const el = body.current;
+    if (next || !el || calm()) return setOpen(next);
+    // Closing folds the list away first, then takes it out.
+    const a = el.animate([{ height: el.offsetHeight + 'px' }, { height: '0px' }], { duration: 150, easing: LEAVE });
+    fold.current = a;
+    a.onfinish = () => {
+      if (fold.current === a) fold.current = null;
+      if (!want.current) setOpen(false);
+    };
+  };
   const moveTo = (id: string, before: string | null) => {
     if (id === before) return;
     const ids = r.themes.filter(t => t !== id);
@@ -266,57 +317,90 @@ function Rotation() {
     ids.splice(at < 0 ? ids.length : at, 0, id);
     if (ids.join(',') !== r.themes.join(',')) setRotation(ids);
   };
+  const going = r.on && themes.length >= 2;
   return (
-    <section aria-labelledby="rotation-title">
-      <div className="sechead rothead">
-        <h2 className="t-h" id="rotation-title">{tr('library.rotation')}</h2>
-        <Switch checked={r.on} disabled={!r.on && themes.length < 2} labelledBy="rotation-title" onChange={on => global('rotation.on', on)} />
-      </div>
-      <div className={cx('rotation', !r.on && 'off')}>
-        {!themes.length && <p className="t-cap rotempty">{tr('library.rotation.empty')}</p>}
-        <div className="rotlist" role="list" aria-label={tr('library.rotation.list')}>
-          {themes.map((t, i) => (
-            <div key={t.id} role="listitem" className={cx('rotitem', r.on && t.id === s.lib!.current && 'now', dragging === t.id && 'dragging')}
-              draggable onDragStart={e => { setDragging(t.id); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', t.id); }}
-              onDragEnd={() => setDragging(null)}
-              onDragOver={e => { if (dragging) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; } }}
-              onDrop={e => { e.preventDefault(); if (dragging) moveTo(dragging, t.id); setDragging(null); }}>
-              <div className="thumb" style={shapeVars(t.id)}>
-                <img src={thumbUrl(t.id, t.revision, 296, s.tick)} alt="" draggable={false} />
-              </div>
-              <div className="rotmeta">
-                <span className="num t-cap3">{i + 1}</span>
-                <span className="ellipsis">{t.name}</span>
-                <IconButton size="xs" quiet className="rm" label={tr('library.rotation.remove_named', { name: t.name })} icon={<Dismiss12Regular />}
-                  onClick={() => removeFromRotation(t.id)} />
-              </div>
+    <section className={cx('rotdock', open && 'open', going && 'on')} aria-labelledby="rotdock-name">
+      {open && (
+        <div className="dockbody" id="rotdock-list" ref={body}>
+          <div className="dockin">
+            {!themes.length && <p className="t-cap rotempty">{tr('library.rotation.empty')}</p>}
+            <div className="rotlist" role="list" aria-label={tr('library.rotation.list')}>
+              {themes.map((t, i) => (
+                <div key={t.id} role="listitem" className={cx('rotitem', going && t.id === s.lib!.current && 'now', dragging === t.id && 'dragging')}
+                  draggable onDragStart={e => { setDragging(t.id); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', t.id); }}
+                  onDragEnd={() => setDragging(null)}
+                  onDragOver={e => { if (dragging) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; } }}
+                  onDrop={e => { e.preventDefault(); if (dragging) moveTo(dragging, t.id); setDragging(null); }}>
+                  <div className="thumb" style={shapeVars(t.id)}>
+                    <img src={thumbUrl(t.id, t.revision, 296, s.tick)} alt="" draggable={false} />
+                  </div>
+                  <div className="rotmeta">
+                    <span className="num t-cap3">{i + 1}</span>
+                    <span className="ellipsis">{t.name}</span>
+                    <IconButton size="xs" quiet className="rm" label={tr('library.rotation.remove_named', { name: t.name })} icon={<Dismiss12Regular />}
+                      onClick={() => removeFromRotation(t.id)} />
+                  </div>
+                </div>
+              ))}
+              <button type="button" className="rotadd" disabled={themes.length >= s.lib!.themes.length}
+                onDragOver={e => { if (dragging) e.preventDefault(); }} onDrop={e => { e.preventDefault(); if (dragging) moveTo(dragging, null); setDragging(null); }}
+                onClick={() => openDialog({ kind: 'rotation' })}>
+                <Add16Regular />
+                <span>{tr('library.rotation.add')}</span>
+              </button>
             </div>
-          ))}
-          <button type="button" className="rotadd" disabled={themes.length >= s.lib!.themes.length}
-            onDragOver={e => { if (dragging) e.preventDefault(); }} onDrop={e => { e.preventDefault(); if (dragging) moveTo(dragging, null); setDragging(null); }}
-            onClick={() => openDialog({ kind: 'rotation' })}>
-            <Add16Regular />
-            <span>{tr('library.rotation.add')}</span>
-          </button>
+          </div>
         </div>
-        <div className="rotctl">
-          <label className="rotfield">
-            <span className="t-cap">{tr('library.rotation.when')}</span>
-            <Select size="sm" label={tr('library.rotation.when')} options={whenChoices(r)} value={r.trigger === 'lock' ? 'lock' : String(r.minutes)}
-              onChange={v => {
-                if (v === 'lock') global('rotation.trigger', 'lock');
-                else {
-                  global('rotation.minutes', v);
-                  if (r.trigger !== 'interval') global('rotation.trigger', 'interval');
-                }
-              }} />
-          </label>
-          <label className="rotfield">
-            <span className="t-cap">{tr('library.rotation.order')}</span>
-            <Select size="sm" label={tr('library.rotation.order')} value={r.order} onChange={v => global('rotation.order', v)}
-              options={[{ value: 'sequential', label: tr('library.rotation.order.sequential') }, { value: 'shuffle', label: tr('library.rotation.order.shuffle') }]} />
-          </label>
-          <span className="t-cap3 rotstatus" role="status">{rotationStatus(r, themes.length, now)}</span>
+      )}
+      {/* A click on the bar where nothing in it can be pressed opens or closes it too. */}
+      <div className="dockbar" onClick={e => { if (!(e.target as Element).closest('button, input, .fui-Dropdown')) toggle(); }}>
+        <div className="dockin">
+          <h2 className="dockname" id="rotdock-name">{tr('library.rotation')}</h2>
+          <Switch checked={r.on} disabled={!r.on && themes.length < 2} labelledBy="rotdock-name" onChange={on => global('rotation.on', on)} />
+          <span className="t-cap dockstatus" role="status">{rotationStatus(r, themes.length, now)}</span>
+          {open ? (
+            <div className="rotctl">
+              <label className="rotfield">
+                <span className="t-cap">{tr('library.rotation.when')}</span>
+                <Select size="sm" label={tr('library.rotation.when')} options={whenChoices(r)} value={r.trigger === 'lock' ? 'lock' : String(r.minutes)}
+                  onChange={v => {
+                    if (v === 'lock') global('rotation.trigger', 'lock');
+                    else {
+                      global('rotation.minutes', v);
+                      if (r.trigger !== 'interval') global('rotation.trigger', 'interval');
+                    }
+                  }} />
+              </label>
+              <label className="rotfield">
+                <span className="t-cap">{tr('library.rotation.order')}</span>
+                <Select size="sm" label={tr('library.rotation.order')} value={r.order} onChange={v => global('rotation.order', v)}
+                  options={[{ value: 'sequential', label: tr('library.rotation.order.sequential') }, { value: 'shuffle', label: tr('library.rotation.order.shuffle') }]} />
+              </label>
+            </div>
+          ) : (
+            <div className="rotnext">
+              {going && (
+                <>
+                  <span className="t-cap3 lbl" id="rotdock-next">{tr('library.rotation.upcoming')}</span>
+                  <ol aria-labelledby="rotdock-next">
+                    {upcoming.map(t => (
+                      <li key={t.id}>
+                        <span className="mini" style={shapeVars(t.id)}><img src={thumbUrl(t.id, t.revision, 96, s.tick)} alt="" draggable={false} /></span>
+                        <span className="ellipsis">{t.name}</span>
+                      </li>
+                    ))}
+                    {/* Shuffled, each new round is drawn as it begins. */}
+                    {r.order === 'shuffle' && (
+                      <li className="more t-cap3">{upcoming.length ? tr('library.rotation.then_random') : tr('library.rotation.order.shuffle')}</li>
+                    )}
+                  </ol>
+                </>
+              )}
+            </div>
+          )}
+          <IconButton size="sm" className="dockfold" label={tr(open ? 'library.rotation.collapse' : 'library.rotation.expand')}
+            aria-expanded={open} aria-controls={open ? 'rotdock-list' : undefined}
+            icon={open ? <ChevronDown16Regular /> : <ChevronUp16Regular />} onClick={toggle} />
         </div>
       </div>
     </section>

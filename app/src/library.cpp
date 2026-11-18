@@ -920,9 +920,13 @@ void Library::WriteLibrary(json::Writer &w) const {
     w.Key(L"rotation").BeginObject();
     w.Member(L"on", set_.rotation).Member(L"trigger", ToString(set_.rotationTrigger));
     w.Member(L"minutes", set_.rotationMinutes).Member(L"order", ToString(set_.rotationOrder));
+    const std::vector<std::wstring> playable = rotation::Playable(set_, [&](const std::wstring &id) { return Entry(id) != nullptr; });
     w.Key(L"themes").BeginArray();
-    for (const std::wstring &id : set_.rotationThemes)
-        if (Entry(id)) w.String(id);
+    for (const std::wstring &id : playable) w.String(id);
+    w.EndArray();
+    // The themes that come after the one in use, in their order, as far as it is known.
+    w.Key(L"upcoming").BeginArray();
+    for (const std::wstring &id : rotation::Upcoming(set_, playable, rotation_)) w.String(id);
     w.EndArray();
     // When it moves on next, in milliseconds since 1970 (UTC), or 0 when it is not counting time.
     const uint64_t next = rotation::NextAt(set_, rotation_);

@@ -8,3 +8,5 @@ export const onCalmChange = (f: () => void) => reduce.addEventListener('change',
 // Fluent's curve for things arriving (tokens.curveDecelerateMax), spelled out: Element.animate
 // takes no CSS variables.
 export const ARRIVE = 'cubic-bezier(0, 0, 0, 1)';
+// And for things leaving (tokens.curveAccelerateMin).
+export const LEAVE = 'cubic-bezier(0.8, 0, 0.78, 1)';
