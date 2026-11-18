@@ -9,7 +9,7 @@
 #include "animelogon/paths.h"
 #include "animelogon/secure.h"
 #include "animelogon/text.h"
-#include "animelogon/scene.h"
+#include "animelogon/scenegraph.h"
 
 namespace animelogon {
 namespace {
@@ -68,14 +68,24 @@ bool LoadStored(const std::wstring &id, WallpaperInfo *info, std::wstring *why) 
         w.scenePath = WallpaperDir(id) + L"\\scene.xml";
         w.imagePath = WallpaperDir(id) + L"\\still.bmp";
         if (!TrustedPayload(w.scenePath, &w.bytes, why) || !TrustedPayload(w.imagePath, &w.bytes, why) ||
-            !secure::ReadFileBytes(w.scenePath, &raw, kMaxInfoBytes)) return false;
-        scene::Document d;
-        if (!scene::Parse(std::string_view((const char *)raw.data(), raw.size()), &d, why) ||
-            w.sceneVideo != (d.base.kind == scene::Kind::Video)) return *why = L"scene base and metadata disagree", false;
-        for (const auto &asset : scene::Assets(d, true)) {
-            std::wstring p = WallpaperDir(id) + L"\\" + asset;
-            std::replace(p.begin(), p.end(), L'/', L'\\');
-            if (!TrustedPayload(p, &w.bytes, why)) return false;
+            !secure::ReadFileBytes(w.scenePath, &raw, scenegraph::kMaxTextBytes)) return false;
+        const std::string_view text((const char *)raw.data(), raw.size());
+        if (scenegraph::FormatOf(text) == 1) {
+            // The first scene format is no longer played: its still picture is all that is shown.
+            w.sceneLegacy = true;
+            w.sceneVideo = w.hasAudio = false;
+        } else {
+            scenegraph::Document d;
+            if (!scenegraph::Parse(text, scenegraph::Mode::Stored, &d, why)) return false;
+            bool video = false;
+            for (const auto &a : d.assets) video = video || a.kind == scenegraph::AssetKind::Video;
+            if (w.sceneVideo != video) return *why = L"scene video and metadata disagree", false;
+            for (const auto &name : scenegraph::LibraryFiles(d)) {
+                if (name == L"video.mp4") continue;
+                std::wstring p = WallpaperDir(id) + L"\\" + name;
+                std::replace(p.begin(), p.end(), L'/', L'\\');
+                if (!TrustedPayload(p, &w.bytes, why)) return false;
+            }
         }
     }
     if (w.kind == WallpaperKind::Image) {

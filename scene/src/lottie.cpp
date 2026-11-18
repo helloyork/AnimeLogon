@@ -68,14 +68,6 @@ bool Check(const J &v, std::string_view key, unsigned depth, size_t *nodes, std:
     }
     return true;
 }
-bool Matches(Slot type, const std::wstring &text) {
-    const auto values = Components(text);
-    if (type == Slot::Color) return !text.empty() && text[0] == L'#' && values.size() == 4;
-    if (type == Slot::Scalar) return values.size() == 1;
-    if (type == Slot::Vector2) return values.size() == 2;
-    if (type == Slot::Vector3) return values.size() == 2 || values.size() == 3;
-    return false;
-}
 }
 struct Lottie::State {
     std::unique_ptr<tvg::SwCanvas> canvas;
@@ -85,15 +77,16 @@ struct Lottie::State {
     std::string applied;
     uint32_t slot = 0;
     int width = 0, height = 0;
+    float drawnFrame = -1;
     float sourceWidth = 0, sourceHeight = 0;
 };
 Lottie::Lottie() = default;
 Lottie::~Lottie() = default;
-bool Lottie::Open(const File &file, const Document &d, const Layer &layer, std::wstring *why) {
+bool Lottie::Open(const std::vector<uint8_t> &bytes, std::wstring *why) {
     static Engine engine;
     if (!engine.ready) return Fail(why,L"Lottie engine initialization failed");
     rapidjson::Document json;
-    json.Parse<rapidjson::kParseValidateEncodingFlag>((const char *)file.bytes.data(),file.bytes.size());
+    json.Parse<rapidjson::kParseValidateEncodingFlag>((const char *)bytes.data(),bytes.size());
     if (json.HasParseError() || !json.IsObject()) return Fail(why,L"invalid Lottie JSON");
     for (const char *field : {"w","h","fr","ip","op"})
         if (!json.HasMember(field) || !json[field].IsNumber()) return Fail(why,L"Lottie needs dimensions and a frame range");
@@ -102,63 +95,64 @@ bool Lottie::Open(const File &file, const Document &d, const Layer &layer, std::
         return Fail(why,L"invalid Lottie dimensions or frame range");
     auto s = std::make_unique<State>(); size_t nodes = 0;
     if (!Check(json,"",0,&nodes,&s->slots,why)) return false;
-    for (const auto &b : layer.slots) {
-        const auto it = s->slots.find(b.id);
-        if (it == s->slots.end() || !Matches(it->second,BindingText(d,{},b.value))) return Fail(why,L"unknown or incompatible Lottie slot binding");
-        if (!b.value.empty() && b.value[0] == L'$') {
-            const auto *control = d.controls.Find(b.value.substr(1));
-            for (const auto &option : control->options)
-                if (!Matches(it->second,option.value)) return Fail(why,L"Lottie slot choice has incompatible values");
-        }
-    }
     s->canvas.reset(tvg::SwCanvas::gen(tvg::EngineOption::None));
     s->animation.reset(tvg::LottieAnimation::gen());
-    if (!s->canvas || !s->animation || s->animation->picture()->load((const char *)file.bytes.data(),(uint32_t)file.bytes.size(),"lottie+json",nullptr,true) != tvg::Result::Success)
+    if (!s->canvas || !s->animation || s->animation->picture()->load((const char *)bytes.data(),(uint32_t)bytes.size(),"lottie+json",nullptr,true) != tvg::Result::Success)
         return Fail(why,L"Lottie could not be loaded");
     s->animation->picture()->size(&s->sourceWidth,&s->sourceHeight);
     if (!std::isfinite(s->animation->duration()) || s->animation->duration() <= 0 || s->animation->totalFrame() <= 0 ||
+        s->sourceWidth <= 0 || s->sourceHeight <= 0 ||
         s->canvas->add(s->animation->picture()) != tvg::Result::Success) return Fail(why,L"Lottie could not be prepared");
     s_ = std::move(s); return true;
 }
-bool Lottie::Draw(const Document &d, const Layer &layer, const Inputs &in, int width, int height, std::wstring *why) {
+bool Lottie::HasSlot(const std::wstring &id) const {
+    const auto it = s_->slots.find(id);
+    return it != s_->slots.end() && it->second != Slot::Unsupported;
+}
+bool Lottie::Draw(const std::map<std::wstring, std::array<float, 4>> &values, double time, int width, int height,
+                  bool *changed, std::wstring *why) {
     auto &s = *s_;
+    *changed = false;
     if (width != s.width || height != s.height) {
         s.pixels.assign((size_t)width*height,0);
         if (s.canvas->target(s.pixels.data(),width,width,height,tvg::ColorSpace::ARGB8888) != tvg::Result::Success) return Fail(why,L"Lottie target failed");
-        const float ratio = std::max(width/s.sourceWidth,height/s.sourceHeight);
-        const tvg::Matrix transform{ratio,0,(width-s.sourceWidth*ratio)/2,0,ratio,(height-s.sourceHeight*ratio)/2,0,0,1};
+        // The animation fills the box it is drawn in, as a picture given a width and a height does.
+        const tvg::Matrix transform{width/s.sourceWidth,0,0,0,height/s.sourceHeight,0,0,0,1};
         if (s.animation->picture()->transform(transform) != tvg::Result::Success) return Fail(why,L"Lottie transform failed");
-        s.width = width; s.height = height;
+        s.width = width; s.height = height; s.drawnFrame = -1;
     }
     rapidjson::StringBuffer buffer; rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
     writer.StartObject();
-    for (const auto &b : layer.slots) {
-        const auto text = BindingText(d,in.values,b.value); const auto type = s.slots.at(b.id);
-        if (!Matches(type,text)) return Fail(why,L"incompatible Lottie slot value");
-        auto values = Components(text);
-        const std::string id = ToUtf8(b.id); writer.Key(id.c_str()); writer.StartObject(); writer.Key("p"); writer.StartObject(); writer.Key("k");
-        if (type == Slot::Scalar) writer.Double(values[0]);
-        else {
-            if (type == Slot::Vector3 && values.size() == 2) values.push_back(0);
-            writer.StartArray(); for (float n : values) writer.Double(n); writer.EndArray();
-        }
+    for (const auto &[id, v] : values) {
+        const auto it = s.slots.find(id);
+        if (it == s.slots.end() || it->second == Slot::Unsupported) return Fail(why,L"unknown Lottie slot");
+        const std::string key = ToUtf8(id);
+        writer.Key(key.c_str()); writer.StartObject(); writer.Key("p"); writer.StartObject(); writer.Key("k");
+        const size_t n = it->second == Slot::Scalar ? 1 : it->second == Slot::Vector2 ? 2 : it->second == Slot::Vector3 ? 3 : 4;
+        if (n == 1) writer.Double(std::isfinite(v[0]) ? v[0] : 0);
+        else { writer.StartArray(); for (size_t i = 0; i < n; ++i) writer.Double(std::isfinite(v[i]) ? v[i] : 0); writer.EndArray(); }
         writer.EndObject(); writer.EndObject();
     }
     writer.EndObject(); const std::string slots(buffer.GetString(),buffer.GetSize());
-    if (!layer.slots.empty() && slots != s.applied) {
+    if (!values.empty() && slots != s.applied) {
         const uint32_t next = s.animation->gen(slots.c_str());
         if (!next) return Fail(why,L"Lottie slot override failed");
         if (s.slot) s.animation->del(s.slot);
         if (s.animation->apply(next) != tvg::Result::Success) return Fail(why,L"Lottie slot override failed");
-        s.slot = next; s.applied = slots;
+        s.slot = next; s.applied = slots; s.drawnFrame = -1;
     }
-    const float fraction = std::fmod(std::max(0.f,in.time),s.animation->duration())/s.animation->duration();
-    s.animation->frame(fraction*s.animation->totalFrame());
+    const double duration = s.animation->duration();
+    const double fraction = std::fmod(std::max(0.0,std::isfinite(time) ? time : 0.0),duration)/duration;
+    const float frame = std::floor((float)(fraction*s.animation->totalFrame()));
+    if (frame == s.drawnFrame) return true;
+    s.animation->frame(frame);
     if (s.canvas->update() != tvg::Result::Success || s.canvas->draw(true) != tvg::Result::Success || s.canvas->sync() != tvg::Result::Success)
         return Fail(why,L"Lottie frame rendering failed");
+    s.drawnFrame = frame; *changed = true;
     return true;
 }
 const uint8_t *Lottie::Pixels() const { return reinterpret_cast<const uint8_t *>(s_->pixels.data()); }
-float Lottie::Aspect() const { return s_->sourceWidth/s_->sourceHeight; }
+float Lottie::Width() const { return s_->sourceWidth; }
+float Lottie::Height() const { return s_->sourceHeight; }
 float Lottie::Duration() const { return s_->animation->duration(); }
 }

@@ -16,6 +16,7 @@
 #include "animelogon/scenehost.h"
 #include "animelogon/secure.h"
 #include "animelogon/text.h"
+#include "animelogon/texture.h"
 #include "animelogon/theme.h"
 #include "transcode.h"
 using Microsoft::WRL::ComPtr;
@@ -130,43 +131,51 @@ bool FirstFrame(const std::wstring &path, Picture *out) {
 }
 Result SceneWallpaper(package::Reader &reader, const std::wstring &dir, const std::wstring &name,
                       const std::atomic<bool> &cancel, const Progress &progress) {
-    scene::Files files; scene::Document d; std::wstring why;
+    namespace sg = scenegraph;
+    sg::Files files; sg::Document d; std::wstring why;
     const auto *xml = reader.Find("scene.xml");
-    scene::File manifest{L"scene.xml", {}};
-    if (!xml || !reader.Read(*xml, package::kMaxXmlBytes, &manifest.bytes, &why) ||
-        !scene::Parse(std::string_view((const char *)manifest.bytes.data(), manifest.bytes.size()), &d, &why))
+    sg::File manifest{L"scene.xml", {}};
+    if (!xml || !reader.Read(*xml, sg::kMaxTextBytes, &manifest.bytes, &why) ||
+        !sg::Parse(std::string_view((const char *)manifest.bytes.data(), manifest.bytes.size()), sg::Mode::Package, &d, &why))
         return Error(why.empty() ? animelogon::i18n::Tr("scene_import.no_xml") : why);
     files.push_back(std::move(manifest));
-    const auto names = scene::Assets(d, false);
+    // Every file the scene names, once: one picture may serve as two assets.
+    std::vector<std::wstring> names;
+    for (const auto &[file, stored] : sg::StoredNames(d))
+        if (std::find(names.begin(), names.end(), file) == names.end()) names.push_back(file);
     for (const auto &entry : reader.Entries())
         if (entry.name != "scene.xml" && entry.name != "preview.png" &&
             std::find(names.begin(),names.end(),FromUtf8(entry.name)) == names.end()) return Error(animelogon::i18n::Tr("scene_import.unused"));
+    const sg::Asset *video = nullptr;
+    for (const auto &a : d.assets) if (a.kind == sg::AssetKind::Video) video = &a;
     WallpaperInfo info; info.kind = WallpaperKind::Scene; info.name = name.empty() ? d.name : name;
     info.sourceName = d.name; SYSTEMTIME st{}; GetLocalTime(&st);
     info.importedAt = Format(L"%04u-%02u-%02uT%02u:%02u:%02u", st.wYear,st.wMonth,st.wDay,st.wHour,st.wMinute,st.wSecond);
     info.width = 1920; info.height = 1080;
     if (!paths::CreateDirectories(dir)) return Error(animelogon::i18n::Tr("error.temp_dir"));
     size_t total = files.front().bytes.size();
-    for (const auto &asset : names) {
-        const auto *entry = reader.Find(ToUtf8(asset));
-        if (!entry) return Error(animelogon::i18n::Tr("scene_import.missing", {{L"name", asset}}));
-        if (d.base.kind == scene::Kind::Video && asset == d.base.file) {
-            const std::wstring scratch = dir + L"-source", source = scratch + L"\\video.mp4";
+    for (const auto &file : names) {
+        const auto *entry = reader.Find(ToUtf8(file));
+        if (!entry) return Error(animelogon::i18n::Tr("scene_import.missing", {{L"name", file}}));
+        if (video && file == video->files.front()) {
+            const std::wstring scratch = dir + L"-source", source = scratch + L"\\" + file.substr(file.find_last_of(L'/') + 1);
             if (!paths::CreateDirectories(scratch) || !reader.Extract(*entry, source, &why)) {
                 secure::RemoveTree(scratch); return Error(animelogon::i18n::Tr("scene_import.video"));
             }
-            const auto video = transcode::Run(source, dir, info.name, cancel, progress); secure::RemoveTree(scratch);
-            if (!video.ok) return Error(video.error);
-            info.sceneVideo = true; info.hasAudio = video.info.hasAudio;
-            info.frameRateNum = video.info.frameRateNum; info.frameRateDen = video.info.frameRateDen; info.durationMs = video.info.durationMs;
+            const auto transcoded = transcode::Run(source, dir, info.name, cancel, progress); secure::RemoveTree(scratch);
+            if (!transcoded.ok) return Error(transcoded.error);
+            info.sceneVideo = true; info.hasAudio = transcoded.info.hasAudio;
+            info.frameRateNum = transcoded.info.frameRateNum; info.frameRateDen = transcoded.info.frameRateDen; info.durationMs = transcoded.info.durationMs;
             DeleteFileW((dir+L"\\wallpaper.ini").c_str());
             image::Picture poster;
             if (!FirstFrame(dir+L"\\video.mp4", &poster)) return Error(animelogon::i18n::Tr("scene_import.first_frame"));
-            files.push_back({L"images/video.bmp", bitmap::Build(poster.width,poster.height,poster.bgra.data(),poster.bgra.size())});
+            // scene.exe turns the first frame into a texture; the video itself never goes in.
+            files.push_back({L"poster.bmp", bitmap::Build(poster.width,poster.height,poster.bgra.data(),poster.bgra.size())});
         } else {
-            scene::File f{asset, {}};
-            const size_t limit = entry->extension == "hlsl" ? scene::kMaxShaderBytes : entry->extension == "json" ? scene::kMaxLottieBytes : package::kMaxPictureBytes;
-            if (!reader.Read(*entry,limit,&f.bytes,&why) || (total += f.bytes.size()) > scene::kMaxBundleBytes)
+            sg::File f{file, {}};
+            const size_t limit = entry->extension == "hlsl" ? sg::kMaxShaderBytes : entry->extension == "json" ? sg::kMaxLottieBytes :
+                entry->extension == "tex" ? sg::kMaxTextureBytes : package::kMaxPictureBytes;
+            if (!reader.Read(*entry,limit,&f.bytes,&why) || (total += f.bytes.size()) > sg::kMaxBundleBytes)
                 return Error(animelogon::i18n::Tr("scene_import.too_large"));
             files.push_back(std::move(f));
         }
@@ -177,15 +186,18 @@ Result SceneWallpaper(package::Reader &reader, const std::wstring &dir, const st
     const double posterScale = std::min({1.0,1920.0/trialWidth,1080.0/trialHeight});
     info.width = std::max(1,(int)std::lround(trialWidth*posterScale));
     info.height = std::max(1,(int)std::lround(trialHeight*posterScale));
-    if (!scene::Device(&device, &why) || !renderer.Start(device.Get(), files, trialWidth, trialHeight, true, &why)) return Error(why);
-    const ULONGLONG deadline = GetTickCount64()+30000;
+    // The still picture, the thumbnail and the sign-in background are the scene at the moment its
+    // author chose, with every setting at its default.
+    scene::Options options; options.importing = true; options.initial.data.time = d.still;
+    if (!scene::Device(&device, &why) || !renderer.Start(device.Get(), files, trialWidth, trialHeight, options, &why)) return Error(why);
+    const ULONGLONG deadline = GetTickCount64()+60000;
     while (!renderer.Ready() && GetTickCount64()<deadline && !cancel) {
         renderer.Poll(); if (renderer.Failed(&why)) return Error(why); Sleep(5);
     }
     if (cancel) return Error(animelogon::i18n::Tr("error.cancelled"));
     if (!renderer.Ready()) return Error(animelogon::i18n::Tr("scene_import.timeout"));
-    scene::Files normalized;
-    if (!renderer.Normalized(&normalized,&why)) return Error(why);
+    sg::Files library;
+    if (!renderer.Normalized(&library,&why)) return Error(why);
     scene::Tier tier;
     const float milliseconds = renderer.Milliseconds();
     if (!renderer.Profile(&tier) || !std::isfinite(milliseconds) || milliseconds < 0 || milliseconds > 10000) return Error(animelogon::i18n::Tr("scene_import.tier"));
@@ -196,8 +208,8 @@ Result SceneWallpaper(package::Reader &reader, const std::wstring &dir, const st
     if (trialWidth == info.width && trialHeight == info.height) still = renderer.Bitmap(&why);
     else {
         renderer.Stop();
-        scene::Tier poster{true,0,1};
-        if (!renderer.Start(device.Get(),normalized,info.width,info.height,false,&why,poster)) return Error(why);
+        scene::Options poster; poster.tier = {true,0,1}; poster.quality = RenderQuality::Highest; poster.initial.data.time = d.still;
+        if (!renderer.Start(device.Get(),library,info.width,info.height,poster,&why)) return Error(why);
         const ULONGLONG until = GetTickCount64()+30000;
         while (!renderer.Ready() && GetTickCount64()<until && !cancel) {
             renderer.Poll(); if (renderer.Failed(&why)) return Error(why); Sleep(5);
@@ -207,22 +219,28 @@ Result SceneWallpaper(package::Reader &reader, const std::wstring &dir, const st
         still = renderer.Bitmap(&why);
     }
     if (still.empty()) return Error(animelogon::i18n::Tr("scene_import.still"));
-    // Copy and recheck the child's envelope before making paths from it.
-    const auto *sceneXml = scene::Find(normalized,L"scene.xml"); scene::Document checked;
-    if (!sceneXml || !scene::Parse(std::string_view((const char *)sceneXml->bytes.data(),sceneXml->bytes.size()),&checked,&why))
+    // Copy and recheck the child's envelope before making paths from it: the names are the ones
+    // the stored scene derives from its asset ids, and every texture's header matches its length.
+    const auto *sceneXml = sg::Find(library,L"scene.xml"); sg::Document checked;
+    if (!sceneXml || !sg::Parse(std::string_view((const char *)sceneXml->bytes.data(),sceneXml->bytes.size()),sg::Mode::Stored,&checked,&why))
         return Error(animelogon::i18n::Tr("scene_import.invalid"));
-    auto expected = scene::Assets(checked,true);
-    if (checked.base.kind == scene::Kind::Video)
-        expected.erase(std::remove(expected.begin(),expected.end(),checked.base.file),expected.end());
+    auto expected = sg::LibraryFiles(checked);
+    expected.erase(std::remove(expected.begin(),expected.end(),std::wstring(L"video.mp4")),expected.end());
     expected.push_back(L"scene.xml");
-    if (normalized.size() != expected.size()) return Error(animelogon::i18n::Tr("scene_import.unexpected"));
-    for (const auto &f : normalized) {
+    if (library.size() != expected.size() || (video != nullptr) != info.sceneVideo) return Error(animelogon::i18n::Tr("scene_import.unexpected"));
+    for (const auto &f : library) {
         if (std::find(expected.begin(),expected.end(),f.name) == expected.end()) return Error(animelogon::i18n::Tr("scene_import.unexpected"));
+        const bool tex = f.name.size() > 4 && f.name.compare(f.name.size()-4,4,L".tex") == 0;
+        const bool dxbc = f.name.size() > 5 && f.name.compare(f.name.size()-5,5,L".dxbc") == 0;
+        if ((tex && !texture::Read(f.bytes.data(),f.bytes.size(),nullptr,nullptr,&why)) ||
+            (dxbc && (f.bytes.size() < 4 || memcmp(f.bytes.data(),"DXBC",4))))
+            return Error(animelogon::i18n::Tr("scene_import.unexpected"));
         std::wstring path = dir+L"\\"+f.name; std::replace(path.begin(),path.end(),L'/',L'\\');
         if (!paths::CreateDirectories(path.substr(0,path.find_last_of(L'\\'))) || !Write(path,f.bytes)) return Error(animelogon::i18n::Tr("error.temp_file"));
     }
     if (!Write(dir+L"\\still.bmp",still) || !Text(dir+L"\\wallpaper.ini",ToUtf8(SerializeWallpaperInfo(info)))) return Error(animelogon::i18n::Tr("scene_import.save_still"));
-    ALOG(L"import: scene trial p95 %.2f ms at %dx%d, %d fps, %.2f scale", milliseconds,trialWidth,trialHeight,tier.fps,tier.scale);
+    ALOG(L"import: scene trial p95 %.2f ms at %dx%d, %d fps, %.2f scale, %llu MB of textures", milliseconds,trialWidth,trialHeight,tier.fps,tier.scale,
+         (unsigned long long)(renderer.TextureBytes() >> 20));
     Result r; r.ok = true; r.name = info.name; if (progress) progress(1); return r;
 }
 Result Scene(const std::wstring &source, const std::wstring &dir, const std::atomic<bool> &cancel, const Progress &progress) {

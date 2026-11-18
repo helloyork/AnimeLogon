@@ -1038,6 +1038,7 @@
   "wallpaper.meta.none": "纯黑",
   "wallpaper.meta.scene": "场景 · {size}",
   "wallpaper.meta.still": " · 静止画面",
+  "wallpaper.meta.legacy": " · 旧版场景，不再播放动画",
   "wallpaper.meta.video": "视频 · {size} · {fps} fps · {length}",
   "wallpaper.missing": "壁纸缺失",
   "wallpaper.none": "无壁纸",

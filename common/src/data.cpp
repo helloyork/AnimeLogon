@@ -155,6 +155,7 @@ Battery ReadBattery() {
     if (!GetSystemPowerStatus(&s)) return b;
     // 128: there is no battery, so whatever ACLineStatus says, it runs on mains power.
     b.mains = s.ACLineStatus == 1 || s.BatteryFlag == 128;
+    b.saver = s.SystemStatusFlag == 1;
     if (s.BatteryFlag == 128 || s.BatteryFlag == 255) return b;
     if (s.BatteryLifePercent <= 100) b.percent = s.BatteryLifePercent;
     if (s.BatteryFlag & 8) b.state = BatteryState::Charging;

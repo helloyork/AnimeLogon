@@ -1,7 +1,7 @@
 #include "animelogon/resolve.h"
 
 #include "animelogon/components.h"
-#include "animelogon/scene.h"
+#include "animelogon/scenegraph.h"
 #include "animelogon/secure.h"
 
 namespace animelogon {
@@ -64,12 +64,12 @@ ResolvedTheme Themed(const Settings &s, std::wstring id, const ThemeStore &store
         }
         if (loaded) r.wallpaper = std::move(wallpaper);
     }
-    if (r.wallpaper && r.wallpaper->kind == WallpaperKind::Scene) {
-        std::vector<uint8_t> bytes; scene::Document doc;
-        if (secure::ReadFileBytes(r.wallpaper->scenePath,&bytes,64*1024) &&
-            scene::Parse(std::string_view((const char *)bytes.data(),bytes.size()),&doc,&why)) {
+    if (r.wallpaper && r.wallpaper->kind == WallpaperKind::Scene && !r.wallpaper->sceneLegacy) {
+        std::vector<uint8_t> bytes; scenegraph::Document doc;
+        if (secure::ReadFileBytes(r.wallpaper->scenePath,&bytes,scenegraph::kMaxTextBytes) &&
+            scenegraph::Parse(std::string_view((const char *)bytes.data(),bytes.size()),scenegraph::Mode::Stored,&doc,&why)) {
             for (const auto &[key,value] : overrides.wallpaperValues) {
-                if (scene::Accepts(doc,key,value)) r.wallpaperValues[key] = value;
+                if (scenegraph::Accepts(doc,key,value)) r.wallpaperValues[key] = value;
                 else Report(problems,L"theme."+id+L".wallpaper."+key+L": invalid scene value -- dropped");
             }
         }

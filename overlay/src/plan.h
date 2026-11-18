@@ -85,6 +85,8 @@ struct Plan {
     // anywhere takes all of them away together.
     animelogon::WakeStyle wake = animelogon::WakeStyle::Fade;
     float wakeSeconds = animelogon::kWakeSeconds;
+    // How scenes are drawn: quality, frame rate caps per power state, video memory.
+    animelogon::RenderSettings render;
     std::vector<std::wstring> problems;  // what ResolveTheme replaced or dropped, for the log
 };
 

@@ -285,11 +285,11 @@ bool Library::LoadSkin(const std::wstring &component, skin::Skin *out) const {
 }
 
 bool Library::Save() { return stores_.WriteSettings(SerializeSettings(set_)); }
-bool Library::LoadScene(const std::wstring &id, scene::Document *out) const {
+bool Library::LoadScene(const std::wstring &id, scenegraph::Document *out) const {
     WallpaperInfo info; std::vector<uint8_t> bytes;
     return stores_.Store().LoadWallpaper(Edited(id).wallpaper,&info,nullptr) && info.kind == WallpaperKind::Scene &&
-        secure::ReadFileBytes(info.scenePath,&bytes,64*1024) &&
-        scene::Parse(std::string_view((const char *)bytes.data(),bytes.size()),out,nullptr);
+        !info.sceneLegacy && secure::ReadFileBytes(info.scenePath,&bytes,scenegraph::kMaxTextBytes) &&
+        scenegraph::Parse(std::string_view((const char *)bytes.data(),bytes.size()),scenegraph::Mode::Stored,out,nullptr);
 }
 
 // --- the library -----------------------------------------------------------------------
@@ -443,16 +443,11 @@ void Library::Tidy() {
 bool Library::SetValue(const std::wstring &instance, const std::wstring &key, const std::wstring &value, int gesture) {
     if (open_.empty() || !IsTypedValueText(value)) return false;
     if (instance == L"wallpaper") {
-        scene::Document doc; if (!LoadScene(open_,&doc) || !scene::Accepts(doc,key,value)) return false;
+        scenegraph::Document doc; if (!LoadScene(open_,&doc) || !scenegraph::Accepts(doc,key,value)) return false;
         auto without = set_.OverridesFor(open_).wallpaperValues; without.erase(key);
-        const auto was = scene::Effective(doc,without,key);
+        const auto was = scenegraph::ValueOf(doc,without,key);
         Step(gesture); auto &values = Overrides().wallpaperValues;
         if (SameValue(was,value)) values.erase(key); else values[key] = value;
-        if (doc.controls.Find(key)) for (size_t n = 0; n < doc.layers.size(); ++n) {
-            const auto p = L"p"+std::to_wstring(n+1);
-            if (doc.layers[n].opacity == L"$"+key) values.erase(p+L".opacity");
-            if (doc.layers[n].when == L"$"+key) values.erase(p+L".visible");
-        }
         Tidy(); return true;
     }
     const theme::Theme edited = Edited(open_);
@@ -492,7 +487,7 @@ bool Library::SetValue(const std::wstring &instance, const std::wstring &key, co
 bool Library::ClearValues(const std::wstring &instance, const std::vector<std::wstring> &keys, int gesture) {
     if (open_.empty()) return false;
     if (instance == L"wallpaper") {
-        scene::Document doc; if (!LoadScene(open_,&doc)) return false;
+        scenegraph::Document doc; if (!LoadScene(open_,&doc)) return false;
         Step(gesture); for (const auto &key : keys) Overrides().wallpaperValues.erase(key);
         Tidy(); return true;
     }
@@ -878,7 +873,8 @@ std::wstring Library::WallpaperMeta(const std::wstring &ref) const {
     const std::wstring size = Format(L"%d×%d", w->width, w->height);
     if (w->kind == WallpaperKind::Image) return Tr("wallpaper.meta.image", {{L"size", size}});
     if (w->kind == WallpaperKind::Scene)
-        return Tr("wallpaper.meta.scene", {{L"size", size}}) + (w->sceneFps == 0 ? Tr("wallpaper.meta.still") : L"") +
+        return Tr("wallpaper.meta.scene", {{L"size", size}}) +
+               (w->sceneLegacy ? Tr("wallpaper.meta.legacy") : w->sceneFps == 0 ? Tr("wallpaper.meta.still") : L"") +
                (w->hasAudio ? Tr("wallpaper.meta.audio") : L"");
     const double fps = w->frameRateDen ? (double)w->frameRateNum / w->frameRateDen : 0.0;
     const long long seconds = (w->durationMs + 500) / 1000;
@@ -961,7 +957,8 @@ void Library::WriteLibrary(json::Writer &w) const {
         w.Member(L"brightness", Percents(edited.brightness)).Member(L"blur", Tenths(edited.blur));
         w.Member(L"wake", ToString(edited.wake)).Member(L"wakeSeconds", (double)edited.wakeSeconds);
         const auto *wallpaper=Wallpaper(edited.wallpaper);
-        w.Member(L"sceneStatic",wallpaper && wallpaper->kind == WallpaperKind::Scene && wallpaper->sceneFps == 0);
+        const bool tooSlow = wallpaper && wallpaper->sceneFps == 0 && set_.render.quality == RenderQuality::Auto;
+        w.Member(L"sceneStatic",wallpaper && wallpaper->kind == WallpaperKind::Scene && (tooSlow || wallpaper->sceneLegacy));
         w.Member(L"summary", summary.empty() ? i18n::Tr("theme.summary.none") : summary);
         w.Member(L"modifications", Modifications(e.id)).Key(L"revision").Int(Revision(e.id));
         w.EndObject();
@@ -1005,31 +1002,24 @@ void Library::WriteOpen(json::Writer &w) const {
     w.Member(L"ref", edited.wallpaper).Member(L"name", WallpaperName(edited.wallpaper));
     w.Member(L"kind", WallpaperKindName(*this, edited.wallpaper)).Member(L"meta", WallpaperMeta(edited.wallpaper));
     w.Member(L"modified", o.wallpaper.has_value()).Member(L"audio", wp && wp->hasAudio);
-    scene::Document doc;
+    scenegraph::Document doc;
     if (LoadScene(open_,&doc)) {
         w.Key(L"scene").BeginObject().Member(L"id",L"wallpaper").Member(L"label",i18n::Tr("inspector.wallpaper"));
-        w.Member(L"static",wp && wp->sceneFps == 0);
-        w.Member(L"panels",(int)doc.layers.size());
+        w.Member(L"static",wp && wp->sceneFps == 0 && set_.render.quality == RenderQuality::Auto);
+        w.Member(L"panels",0);
         w.Key(L"settings").BeginArray();
-        for (const auto &s : doc.controls.settings) {
+        for (const auto &setting : doc.settings) {
+            // Choosing a picture from the library comes with its own picker; until then it keeps its default.
+            if (setting.image) continue;
+            const skin::Setting &s = setting.base;
             w.BeginObject().Member(L"id",s.id).Member(L"kind",KindName(s.kind)).Member(L"label",i18n::Label(s.label));
-            w.Member(L"detail",i18n::Label(s.detail)).Member(L"value",scene::Effective(doc,o.wallpaperValues,s.id));
+            w.Member(L"detail",i18n::Label(s.detail)).Member(L"value",scenegraph::ValueOf(doc,o.wallpaperValues,s.id));
             w.Member(L"modified",o.wallpaperValues.count(s.id)>0).Member(L"min",s.min).Member(L"max",s.max).Member(L"step",s.step);
+            w.Member(L"group",setting.group).Member(L"shown",scenegraph::Shown(doc,o.wallpaperValues,setting));
             WriteOptions(w,s.options); w.EndObject();
         }
+        // Format 2 has no per-layer adjustments: everything a user changes is a setting.
         w.EndArray().Key(L"parts").BeginArray();
-        for (const auto &p : scene::Parts(doc)) {
-            bool modified = false; for (const auto &a : p.adjustments) modified |= o.wallpaperValues.count(a.key)>0;
-            w.BeginObject().Member(L"key",p.key).Member(L"label",i18n::Label(p.label)).Member(L"modified",modified);
-            w.Key(L"adjustments").BeginArray();
-            for (const auto &a : p.adjustments) {
-                w.BeginObject().Member(L"key",a.key).Member(L"label",i18n::Label(a.label)).Member(L"detail",i18n::Label(a.detail));
-                w.Member(L"control",ControlName(a.control)).Member(L"min",a.min).Member(L"max",a.max).Member(L"step",a.step);
-                w.Member(L"value",scene::Effective(doc,o.wallpaperValues,a.key)).Member(L"modified",o.wallpaperValues.count(a.key)>0);
-                WriteOptions(w,a.options); w.EndObject();
-            }
-            w.EndArray().EndObject();
-        }
         w.EndArray().EndObject();
     }
     w.EndObject();

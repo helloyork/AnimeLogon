@@ -29,6 +29,8 @@ struct Battery {
     // On mains power: plugged in, or a machine with no battery at all (which runs on nothing
     // else). False when running on the battery, and when Windows cannot tell.
     bool mains = false;
+    // Windows' energy saver (battery saver) is on, plugged in or not.
+    bool saver = false;
 };
 
 enum class MediaState { None, Playing, Paused };

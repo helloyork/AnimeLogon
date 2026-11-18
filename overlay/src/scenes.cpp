@@ -1,6 +1,7 @@
 #include "scenes.h"
 #include <algorithm>
 #include <set>
+#include "animelogon/data.h"
 #include "animelogon/log.h"
 #include "animelogon/paths.h"
 #include "animelogon/secure.h"
@@ -44,6 +45,7 @@ void Scenes::Prepare(Presenter &presenter, const plan::Plan &plan) {
             }
         }
     }
+    render_ = plan.render;
     std::map<std::wstring, std::pair<int,int>> wanted;
     std::map<std::wstring, const plan::Wallpaper *> wallpapers;
     for (const auto &d : plan.displays) if (d.wallpaper.source == plan::Source::Scene) {
@@ -63,8 +65,10 @@ void Scenes::Prepare(Presenter &presenter, const plan::Plan &plan) {
         auto [it, added] = entries_.try_emplace(id); auto &e = it->second;
         if (added) { e.id = wallpapers[id]->id; e.values = wallpapers[id]->values; e.failures = saved_[e.id]; e.blocked = savedBlocked_.count(e.id) != 0; }
         if (e.host && e.width == size.first && e.height == size.second && !e.blocked) continue;
-        e.host.reset(); e.width = size.first; e.height = size.second; e.fit = wallpapers[id]->fit;
-        e.staticOnly = wallpapers[id]->sceneFps == 0;
+        e.host.reset(); e.width = size.first; e.height = size.second;
+        // The import trial's verdict that the PC is too slow belongs to the automatic quality; a
+        // quality the user fixed plays the scene and drops frames instead.
+        e.staticOnly = wallpapers[id]->sceneFps == 0 && render_.quality == RenderQuality::Auto;
         if (e.staticOnly) {
             if (added) ALOG(L"scene: %s uses its static image because the import trial exceeded the frame budget at half resolution",e.id.c_str());
             continue;
@@ -74,20 +78,24 @@ void Scenes::Prepare(Presenter &presenter, const plan::Plan &plan) {
             continue;
         }
         if (e.blocked) continue;
-        scene::Files files; scene::Document document; std::wstring why;
+        scene::Files files; scenegraph::Document document; std::wstring why;
         auto host = std::make_unique<scene::Host>();
         const auto &w = *wallpapers[id];
-        scene::Tier tier{w.sceneTrialWidth > 0,w.sceneFps,w.sceneScale/100.f};
-        if (tier.calibrated) {
+        scene::Options options;
+        options.tier = {w.sceneTrialWidth > 0,w.sceneFps,w.sceneScale/100.f};
+        if (options.tier.calibrated) {
             const double ratio = std::sqrt((double)w.sceneTrialWidth*w.sceneTrialHeight/((double)e.width*e.height));
-            tier.scale = std::clamp((float)(tier.scale*ratio),.5f,1.f);
+            options.tier.scale = std::clamp((float)(options.tier.scale*ratio),.5f,1.f);
         }
+        options.quality = render_.quality; options.videoMemory = render_.videoMemory; options.particles = render_.particles;
+        // The user's values become the scene's defaults, so the renderer needs nothing else.
+        scenegraph::Document baked;
         if (scene::LoadFiles(wallpapers[id]->sceneDir,true,&files,&document,&why) &&
-            ([&] { const auto xml = scene::Normalize(scene::Bake(document,e.values,&why));
+            scenegraph::Bake(document,e.values,&baked,&why) &&
+            ([&] { const auto xml = scenegraph::Write(baked);
                 for (auto &f : files) if (f.name == L"scene.xml") f.bytes.assign(xml.begin(),xml.end());
-                return why.empty(); })() &&
-            host->Start(presenter.device(),files,e.width,e.height,false,&why,tier)) {
-            e.fit = document.base.fit;
+                return true; })() &&
+            host->Start(presenter.device(),files,e.width,e.height,options,&why)) {
             e.host = std::move(host); e.last = GetTickCount64(); e.everReady = false;
             e.failed = false;
         } else {
@@ -97,10 +105,14 @@ void Scenes::Prepare(Presenter &presenter, const plan::Plan &plan) {
     }
     Save();
 }
+void Scenes::Power(bool onBattery, bool saver) {
+    stillThisLock_ = FrameRateNow(render_, onBattery, saver) == kFpsStill;
+    if (stillThisLock_ && !entries_.empty()) ALOG(L"scene: the still picture for this lock, as the frame rate setting for this power state asks");
+}
 void Scenes::Begin() {
     live_ = true;
     for (auto &[id,e] : entries_) {
-        e.active = e.failures < 3 && !e.blocked && !e.staticOnly; e.fade = 0; e.last = GetTickCount64();
+        e.active = e.failures < 3 && !e.blocked && !e.staticOnly && !stillThisLock_; e.fade = 0; e.last = GetTickCount64();
         if (e.active && e.failed) { e.failed = false; Fail(e.id,L"renderer could not be prepared"); }
     }
 }
@@ -119,15 +131,18 @@ void Scenes::Fail(const std::wstring &id, const std::wstring &why) {
 }
 void Scenes::FailAll(const std::wstring &why) { for (const auto &[id,e] : entries_) Fail(e.id,why); }
 bool Scenes::Static(const std::wstring &id) const {
-    for (const auto &[key,e] : entries_) if (e.id == id && (e.staticOnly || e.failed || e.blocked || e.failures >= 3)) return true;
+    for (const auto &[key,e] : entries_) if (e.id == id && (e.staticOnly || e.failed || e.blocked || e.failures >= 3 || stillThisLock_)) return true;
     return false;
 }
-bool Scenes::Tick(const scene::Inputs &inputs, bool draw, float refresh) {
+bool Scenes::Tick(const scene::Inputs &inputs, bool draw, float refresh, int fps) {
     bool changed = false; const ULONGLONG now = GetTickCount64();
+    // Drawing faster than the display shows frames gains nothing.
+    const float rate = fps == kFpsStill ? 0.f : fps == kFpsDisplay ? refresh : std::min((float)fps, refresh);
+    const bool moving = draw && rate > 0;
     for (auto &[id,e] : entries_) {
         if (!e.host || e.failed) continue;
-        auto values = inputs; values.values = e.values;
-        e.host->SetRunning(live_ && e.active && draw,values,refresh);
+        // The values are already the scene's defaults (Bake), so none go with the inputs.
+        e.host->SetRunning(live_ && e.active && moving,inputs,rate > 0 ? rate : 1.f);
         if (e.host->Poll()) { e.last = now; changed = live_ || changed; }
         if (e.host->Ready()) {
             if (!e.everReady) ALOG(L"scene: %s ready, trial p95 %.2f ms",e.id.c_str(),e.host->Milliseconds());
@@ -135,11 +150,11 @@ bool Scenes::Tick(const scene::Inputs &inputs, bool draw, float refresh) {
             if (live_ && !e.fade) { e.fade = now; changed = true; }
         }
         std::wstring why;
-        if (live_ && e.active && (e.host->Failed(&why) || (draw && now-e.last > 2000))) {
+        if (live_ && e.active && (e.host->Failed(&why) || (moving && now-e.last > 2000))) {
             if (why.empty()) why = L"no new frame for two seconds";
             Fail(e.id,why); changed = true;
         }
-        if (!draw) e.last = now;
+        if (!moving) e.last = now;
         if (e.fade && now-e.fade < 400) changed = true;
     }
     return changed;

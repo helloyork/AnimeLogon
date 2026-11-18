@@ -288,3 +288,35 @@ TEST(SceneGraphKnowsWhenNothingMoves) {
     CHECK(sg::Moves(d));
     CHECK(sg::EffectTypes().size() == 17);
 }
+
+TEST(SceneGraphEnvelopesAreBoundedAndExact) {
+    const sg::Files files{{L"scene.xml", {'<', '/'}}, {L"textures/sky.tex", {1, 2, 3}}, {L"poster.bmp", {}}};
+    const auto packed = sg::Pack(files);
+    sg::Files back;
+    std::wstring why;
+    CHECK(!packed.empty() && sg::Unpack(packed.data(), packed.size(), &back, &why) && back.size() == 3 &&
+          back[1].name == L"textures/sky.tex" && back[1].bytes == files[1].bytes);
+    // Trailing bytes, a cut-off envelope, repeated names and names that climb out are refused.
+    auto longer = packed; longer.push_back(0);
+    CHECK(!sg::Unpack(longer.data(), longer.size(), &back, &why));
+    CHECK(!sg::Unpack(packed.data(), packed.size() - 1, &back, &why));
+    CHECK(sg::Pack({{L"a.png", {}}, {L"a.png", {}}}).empty());
+    CHECK(sg::Pack({{L"../a.png", {}}}).empty() && sg::Pack({{L"c:/a.png", {}}}).empty() && sg::Pack({{L"aux.png", {}}}).empty());
+}
+
+TEST(SceneGraphKnowsTheFirstFormatAndTheLibraryFiles) {
+    CHECK(sg::FormatOf("<scene format=\"1\" name=\"old\"><base shader=\"s.hlsl\"/></scene>") == 1);
+    CHECK(sg::FormatOf(Scene("<fill/>")) == 2 && sg::FormatOf("<theme/>") == 0 && sg::FormatOf("not xml") == 0);
+    // A scene exported from the library carries its textures as they are.
+    sg::Document d;
+    std::wstring why;
+    CHECK(Parses("<assets><image id=\"sky\" file=\"textures/sky.tex\"/><mask id=\"m\" file=\"textures/m.tex\"/></assets><fill/>", &why));
+    if (!why.empty()) std::wprintf(L"    %s\n", why.c_str());
+    CHECK(sg::Parse(Scene("<assets><image id=\"sky\" file=\"textures/sky.tex\"/><video id=\"clip\" file=\"video.mp4\"/>"
+                          "<lottie id=\"birds\" file=\"lottie/birds.json\"/><shader id=\"rays\" kind=\"layer\" file=\"shaders/rays.hlsl\"/></assets><fill/>"),
+                    sg::Mode::Stored, &d, &why));
+    if (!why.empty()) std::wprintf(L"    %s\n", why.c_str());
+    const std::vector<std::wstring> files{L"textures/sky.tex", L"textures/clip.tex", L"video.mp4", L"lottie/birds.json",
+                                          L"shaders/rays.hlsl", L"shaders/rays.dxbc"};
+    CHECK(sg::LibraryFiles(d) == files);
+}

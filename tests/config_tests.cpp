@@ -25,7 +25,8 @@
 #include "animelogon/text.h"
 #include "animelogon/theme.h"
 #include "animelogon/wallpaper.h"
-#include "animelogon/scene.h"
+#include "animelogon/scenegraph.h"
+#include "animelogon/texture.h"
 
 #include "commit.h"
 #include "exporter.h"
@@ -779,7 +780,8 @@ TEST(ImportTurnsAwayScenesWhileTheyAreNotTaken) {
         std::atomic<bool> cancel{false};
         std::vector<uint8_t> scene;
         CHECK(package::WriteToMemory(
-            {{"scene.xml", L"", Bytes("<scene format=\"1\" name=\"Sky\"><base shader=\"sky.hlsl\"/></scene>")},
+            {{"scene.xml", L"", Bytes("<scene format=\"2\" name=\"Sky\"><assets><shader id=\"sky\" kind=\"layer\" file=\"sky.hlsl\"/></assets>"
+                                      "<layer source=\"sky\" full=\"true\"/></scene>")},
              {"sky.hlsl", L"", Bytes("float4 main(float2 uv : TEXCOORD0) : SV_Target { return float4(uv, 1, 1); }")}},
             &scene, nullptr));
         const std::wstring alscene = scratch + L"\\sky.alscene";
@@ -913,12 +915,18 @@ TEST(SettingsAppWritesEveryGlobalKey) {
 TEST(CommitSceneRechecksEveryAssetAndWritesXmlAfresh) {
     const auto root = ScratchDir(), dir = ImportDir(root);
     const auto wallpaper = dir + L"\\wallpaper";
-    CHECK(paths::CreateDirectories(wallpaper+L"\\images"));
-    const std::string sceneXml = "<scene format=\"1\" name=\"still\"><image id=\"city\" src=\"images/city.bmp\"/><base image=\"city\"/></scene>";
+    CHECK(paths::CreateDirectories(wallpaper+L"\\textures"));
+    const std::string sceneXml = "<scene format=\"2\" name=\"still\"><assets><image id=\"city\" file=\"textures/city.tex\"/></assets>"
+                                 "<layer source=\"city\" full=\"true\"/></scene>";
     CHECK(WriteAll(wallpaper+L"\\scene.xml",sceneXml));
+    // A texture is checked by its header and length alone; its blocks are never decoded here.
+    texture::Info ti; ti.format = texture::Format::Bc7; ti.width = ti.height = ti.usedWidth = ti.usedHeight = 4;
+    ti.levels = 1; ti.premultiplied = true;
+    std::vector<uint8_t> tex = texture::Header(ti);
+    tex.resize(texture::Layout(ti).back().offset + texture::Layout(ti).back().bytes, 0x5A);
+    CHECK(WriteAll(wallpaper+L"\\textures\\city.tex",tex));
     const std::vector<uint8_t> pixels(2*2*4,255);
     const auto bmp = bitmap::Build(2,2,pixels.data(),pixels.size());
-    CHECK(WriteAll(wallpaper+L"\\images\\city.bmp",bmp));
     CHECK(WriteAll(wallpaper+L"\\still.bmp",bmp));
     WallpaperInfo info; info.kind = WallpaperKind::Scene; info.name = L"scene"; info.width = info.height = 2;
     CHECK(WriteAll(wallpaper+L"\\wallpaper.ini",ToUtf8(SerializeWallpaperInfo(info))));
@@ -927,18 +935,24 @@ TEST(CommitSceneRechecksEveryAssetAndWritesXmlAfresh) {
     scratch::PlainTarget target(root+L"\\store"); store::PackageResult r;
     CHECK(store::CommitPackage(target,dir,&r) == commit::kOk);
     const auto installed = store::In(target,WallpaperDir(r.wallpaperId));
-    scene::Document d; std::wstring why;
-    CHECK(scene::Parse(Text(ReadAll(installed+L"\\scene.xml")),&d,&why));
-    CHECK(Text(ReadAll(installed+L"\\scene.xml")) == scene::Normalize(d));
-    CHECK(ReadAll(installed+L"\\still.bmp") == bmp);
+    scenegraph::Document d; std::wstring why;
+    CHECK(scenegraph::Parse(Text(ReadAll(installed+L"\\scene.xml")),scenegraph::Mode::Stored,&d,&why));
+    CHECK(Text(ReadAll(installed+L"\\scene.xml")) == scenegraph::Write(d));
+    CHECK(ReadAll(installed+L"\\still.bmp") == bmp && ReadAll(installed+L"\\textures\\city.tex") == tex);
     store::PackageResult reused;
     CHECK(store::CommitPackage(target,dir,&reused) == commit::kOk && reused.wallpaperReused && reused.wallpaperId == r.wallpaperId);
-    CHECK(WriteAll(wallpaper+L"\\images\\unexpected.bmp",bmp));
+    CHECK(WriteAll(wallpaper+L"\\textures\\unexpected.tex",tex));
     CHECK(store::CommitPackage(target,dir) == commit::kFailed);
-    DeleteFileW((wallpaper+L"\\images\\unexpected.bmp").c_str());
-    CHECK(WriteAll(wallpaper+L"\\scene.xml","<scene format=\"1\" name=\"bad\"><base shader=\"../evil.hlsl\"/></scene>"));
+    DeleteFileW((wallpaper+L"\\textures\\unexpected.tex").c_str());
+    // Names the stored form does not derive from the asset ids, and a texture whose length does not
+    // match its header, are refused.
+    CHECK(WriteAll(wallpaper+L"\\scene.xml","<scene format=\"2\" name=\"bad\"><assets><image id=\"city\" file=\"../evil.tex\"/></assets></scene>"));
     CHECK(store::CommitPackage(target,dir) == commit::kFailed);
     CHECK(WriteAll(wallpaper+L"\\scene.xml",sceneXml));
+    std::vector<uint8_t> longer = tex; longer.push_back(0);
+    CHECK(WriteAll(wallpaper+L"\\textures\\city.tex",longer));
+    CHECK(store::CommitPackage(target,dir) == commit::kFailed);
+    CHECK(WriteAll(wallpaper+L"\\textures\\city.tex",tex));
     CHECK(WriteAll(wallpaper+L"\\still.bmp",std::string("BMbad")));
     CHECK(store::CommitPackage(target,dir) == commit::kFailed);
     secure::RemoveTree(root);

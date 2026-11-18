@@ -241,7 +241,8 @@ TEST(PackageNames) {
     CHECK(!package::Classify("components/sub/a.xml", nullptr));
     CHECK(!package::Classify("Theme.xml", nullptr));
     CHECK(!package::Classify("wallpaper.gif", nullptr));
-    CHECK(!package::Classify("wallpaper.jpeg", nullptr));
+    // A scene's own files may have any plain name; only a scene archive takes them.
+    CHECK(package::Classify("wallpaper.jpeg", &k) && k == package::Kind::Asset);
     CHECK(package::Classify("preview.jpg", &k) && k == package::Kind::Asset);
     CHECK(!package::Classify("theme.xml/", nullptr));
     CHECK(!package::Classify("", nullptr));

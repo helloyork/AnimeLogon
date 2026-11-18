@@ -186,4 +186,36 @@ std::vector<float> Components(const std::wstring &literal);
 // The names of the built-in effects, in documentation order.
 std::vector<std::wstring> EffectTypes();
 
+// --- Files ---------------------------------------------------------------------------------
+// A scene's files by name, as they travel to and from scene.exe in one envelope with bounded
+// counts, names and lengths and no pointers.
+constexpr size_t kMaxFiles = 4096;
+constexpr size_t kMaxBundleBytes = 640ull * 1024 * 1024;
+constexpr size_t kMaxTextureBytes = 512ull * 1024 * 1024;  // every texture together, in video memory
+constexpr size_t kMaxShaderBytes = 64 * 1024, kMaxCompiledBytes = 1024 * 1024, kMaxLottieBytes = 16 * 1024 * 1024;
+struct File {
+    std::wstring name;
+    std::vector<uint8_t> bytes;
+};
+using Files = std::vector<File>;
+const File *Find(const Files &files, std::wstring_view name);
+// Empty when the files do not fit an envelope.
+std::vector<uint8_t> Pack(const Files &files);
+bool Unpack(const uint8_t *bytes, size_t size, Files *files, std::wstring *why);
+
+// A file inside a package: up to four segments of letters, digits, '.', '_' and '-', none
+// starting with a dot and none a device name.
+bool IsPackagePath(std::wstring_view path);
+// The `format` a scene.xml declares: 2 for this one, 1 for the first scene format, 0 when the text
+// is not a scene at all.
+int FormatOf(std::string_view utf8);
+// Where a shader's compiled form is kept in the library, beside its source.
+std::wstring CompiledName(const Asset &asset);
+// Every file a stored scene keeps in the library besides scene.xml and still.bmp, in a stable
+// order: textures (a video's first frame is one), Lottie files, shader sources with their compiled
+// forms, and video.mp4.
+std::vector<std::wstring> LibraryFiles(const Document &stored);
+// A video's first frame, kept as a texture so the renderer knows its shape before frames arrive.
+std::wstring PosterName(const Asset &video);
+
 }  // namespace animelogon::scenegraph

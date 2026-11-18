@@ -51,7 +51,8 @@ namespace animelogon::package {
 
 constexpr uint64_t kMaxArchiveBytes = 1ull << 30;  // 1 GiB, the whole file
 constexpr size_t kMaxEntries = 16;
-constexpr size_t kMaxSceneEntries = 40;
+// A scene archive: scene.xml, a preview and its own files, frame sequences among them.
+constexpr size_t kMaxSceneEntries = 4096;
 constexpr size_t kMaxComponents = 8;
 constexpr uint32_t kMaxXmlBytes = 64 * 1024;
 constexpr uint32_t kMaxPreviewBytes = 16 * 1024 * 1024;

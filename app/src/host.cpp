@@ -956,7 +956,7 @@ void Host::RenderPreview(bool live) {
     if (library_.open().empty() || drawnW_ < 16 || drawnH_ < 16) return;
     theme::Theme t = library_.Edited(library_.open());
     // A video wallpaper plays in the page itself, under the components drawn here.
-    scene::Document sceneDoc;
+    scenegraph::Document sceneDoc;
     previewLayer_ = library_.LoadScene(library_.open(),&sceneDoc) || (previewMotion_ && IsVideo(library_, t.wallpaper));
     screens_ = Wall(drawnW_, drawnH_);
     // While the page may move things, the panels that hold a spectrum are left out of the picture
@@ -1013,36 +1013,30 @@ bool Host::SceneFrame(const std::wstring &id, UINT width, UINT height, double ti
     if (entry.signature != signature) {
         if (!library_.stores().Store().LoadWallpaper(signature,&entry.wallpaper,nullptr) || entry.wallpaper.kind != WallpaperKind::Scene) return false;
         entry.preview=std::make_unique<scene::Preview>(); entry.signature=signature;
-        entry.failed=!entry.preview->Open(entry.wallpaper,width,height,library_.settings().OverridesFor(id).wallpaperValues,&why);
+        entry.failed=!entry.preview->Open(entry.wallpaper,width,height,library_.settings().OverridesFor(id).wallpaperValues,&why,false,
+                                          library_.settings().render.quality);
         if (entry.failed) ALOG(L"preview: scene %s could not start (%s)",signature.c_str(),why.c_str());
     }
     const auto &wallpaper=entry.wallpaper;
-    if (entry.failed || wallpaper.sceneFps == 0) {
+    const bool tooSlow = wallpaper.sceneFps == 0 && library_.settings().render.quality == RenderQuality::Auto;
+    if (entry.failed || tooSlow || wallpaper.sceneLegacy) {
         Picture still; if (pictures_.Wallpaper(wallpaper.id,library_.Edited(id).fit,width,height,&still)) *bytes=Bmp(still);
         return !bytes->empty();
     }
-    scene::Inputs input; input.time=(float)time;
+    scene::Inputs input;
     entry.preview->SetValues(library_.settings().OverridesFor(id).wallpaperValues);
-    SYSTEMTIME local{}; GetLocalTime(&local);
-    input.day=(local.wHour*3600.f+local.wMinute*60.f+local.wSecond)/86400.f;
-    const auto battery=data::ReadBattery(); input.battery=battery.percent < 0 ? -1.f : battery.percent/100.f;
     bool mediaReady=false; data::Snapshot snapshot; snapshot.media=previewMedia_.Get(library_.settings().media,&mediaReady);
     if (!mediaReady) return false;
-    input.playing=(float)snapshot.media.state; data::Context context; context.snapshot=&snapshot;
-    FILETIME utc{}; GetSystemTimeAsFileTime(&utc); context.now=((uint64_t)utc.dwHighDateTime<<32)|utc.dwLowDateTime;
-    double progress=0; data::FractionOf(L"media.progress",context,&progress); input.progress=(float)progress;
+    snapshot.battery=data::ReadBattery();
+    FILETIME utc{}; GetSystemTimeAsFileTime(&utc);
+    scene::SetData(&input.data,snapshot,((uint64_t)utc.dwHighDateTime<<32)|utc.dwLowDateTime);
+    input.data.time=time;
     if (!entry.preview->Frame(input,motion,bytes,&why)) {
         if (entry.preview->Failed(&why)) { entry.failed=true; ALOG(L"preview: scene %s stopped (%s)",wallpaper.id.c_str(),why.c_str()); }
         return false;
     }
-    json::Writer w; w.BeginArray(); size_t n=0;
-    for (const auto &r : entry.preview->Bounds()) {
-        ++n; if (r[2] <= 0 || r[3] <= 0) continue;
-        w.BeginObject().Member(L"instance",L"wallpaper").Member(L"key",L"p"+std::to_wstring(n)).Member(L"screen",0);
-        w.Member(L"left",(double)r[0]*width).Member(L"top",(double)r[1]*height);
-        w.Member(L"right",(double)(r[0]+r[2])*width).Member(L"bottom",(double)(r[1]+r[3])*height).EndObject();
-    }
-    w.EndArray(); *bounds=w.text(); return true;
+    // A scene has no parts to drag: its settings are all the user changes.
+    *bounds=L"[]"; return true;
 }
 
 data::Snapshot Host::LockData(bool *ready) {

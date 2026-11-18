@@ -21,7 +21,6 @@ add_library(animelogon_common STATIC
     src/paths.cpp
     src/resolve.cpp
     src/rotation.cpp
-    src/scene.cpp
     src/scenegraph.cpp
     src/texture.cpp
     src/secure.cpp

@@ -1038,6 +1038,7 @@
   "wallpaper.meta.none": "Black",
   "wallpaper.meta.scene": "Scene · {size}",
   "wallpaper.meta.still": " · Still",
+  "wallpaper.meta.legacy": " · Old scene, no longer animated",
   "wallpaper.meta.video": "Video · {size} · {fps} fps · {length}",
   "wallpaper.missing": "Wallpaper missing",
   "wallpaper.none": "No wallpaper",

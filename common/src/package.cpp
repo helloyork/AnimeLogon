@@ -6,7 +6,7 @@
 #include "animelogon/image.h"
 #include "animelogon/text.h"
 #include "animelogon/theme.h"
-#include "animelogon/scene.h"
+#include "animelogon/scenegraph.h"
 
 namespace animelogon::package {
 
@@ -143,11 +143,15 @@ std::string_view ExtensionOf(std::string_view name) {
 uint64_t CapFor(Kind kind, std::string_view extension) {
     switch (kind) {
     case Kind::Theme:
-    case Kind::Scene:
     case Kind::Component: return kMaxXmlBytes;
+    case Kind::Scene: return scenegraph::kMaxTextBytes;
     case Kind::Preview: return kMaxPreviewBytes;
     case Kind::Wallpaper: return extension == "mp4" ? kMaxArchiveBytes : kMaxPictureBytes;
-    case Kind::Asset: return extension == "hlsl" ? scene::kMaxShaderBytes : extension == "json" ? scene::kMaxLottieBytes : extension == "mp4" ? kMaxArchiveBytes : kMaxPictureBytes;
+    case Kind::Asset:
+        if (extension == "hlsl") return scenegraph::kMaxShaderBytes;
+        if (extension == "json") return scenegraph::kMaxLottieBytes;
+        if (extension == "tex") return scenegraph::kMaxTextureBytes;
+        return extension == "mp4" || extension == "mov" || extension == "mkv" || extension == "webm" ? kMaxArchiveBytes : kMaxPictureBytes;
     }
     return 0;
 }
@@ -442,6 +446,16 @@ bool WriteArchive(const std::vector<Item> &items, Sink &sink, std::wstring *why)
 
 }  // namespace
 
+// What a scene package may carry besides scene.xml: pictures (or textures exported from the
+// library), Lottie files, shader sources and one video.
+bool IsSceneFile(std::string_view extension) {
+    std::string e(extension);
+    for (char &c : e) c = (char)tolower((unsigned char)c);
+    for (const char *ok : {"png", "jpg", "jpeg", "tex", "json", "hlsl", "mp4", "mov", "mkv", "webm"})
+        if (e == ok) return true;
+    return false;
+}
+
 bool Classify(std::string_view name, Kind *kind) {
     // Every allowed name is printable ASCII, so widening byte by byte is exact, and the
     // wallpaper and component names are checked by the same functions that check theme.xml's
@@ -456,9 +470,7 @@ bool Classify(std::string_view name, Kind *kind) {
     else if (theme::IsPackageWallpaperRef(wide)) k = Kind::Wallpaper;
     else if (wide == L"preview.png") k = Kind::Preview;
     else if (theme::IsPackageComponentRef(wide)) k = Kind::Component;
-    else if (scene::IsAssetName(wide) && (ExtensionOf(name) == "hlsl" || ExtensionOf(name) == "json" ||
-        ExtensionOf(name) == "bmp" || ExtensionOf(name) == "png" || ExtensionOf(name) == "jpg" ||
-        ExtensionOf(name) == "webp" || ExtensionOf(name) == "mp4")) k = Kind::Asset;
+    else if (scenegraph::IsPackagePath(wide) && IsSceneFile(ExtensionOf(name))) k = Kind::Asset;
     else return false;
     if (kind) *kind = k;
     return true;

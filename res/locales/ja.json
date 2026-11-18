@@ -1038,6 +1038,7 @@
   "wallpaper.meta.none": "黒",
   "wallpaper.meta.scene": "シーン · {size}",
   "wallpaper.meta.still": " · 静止画",
+  "wallpaper.meta.legacy": " · 旧形式のシーン、アニメーションは再生されません",
   "wallpaper.meta.video": "動画 · {size} · {fps} fps · {length}",
   "wallpaper.missing": "壁紙が見つかりません",
   "wallpaper.none": "壁紙なし",

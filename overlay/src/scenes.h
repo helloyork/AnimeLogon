@@ -9,8 +9,13 @@
 class Scenes {
 public:
     void Prepare(Presenter &presenter, const plan::Plan &plan);
+    // Which of the user's frame rate caps applies for this lock, read as it starts: a still picture
+    // chosen for it holds for the whole lock. Before anything asks Static().
+    void Power(bool onBattery, bool saver);
     void Begin();
-    bool Tick(const animelogon::scene::Inputs &inputs, bool draw, float refresh);
+    // `fps` is the frame rate cap for the power state now (settings.h FrameRateNow): a scene stops
+    // where it is while it is kFpsStill.
+    bool Tick(const animelogon::scene::Inputs &inputs, bool draw, float refresh, int fps);
     void Pause();
     void End();
     void Unlocked();
@@ -29,9 +34,13 @@ private:
         bool failed = false, active = false, everReady = false;
         bool blocked = false;
         bool staticOnly = false;
-        animelogon::Scaling fit = animelogon::Scaling::Fill;
+        // The video goes over whole: the renderer fits it into its node.
+        animelogon::Scaling fit = animelogon::Scaling::Stretch;
     };
     std::map<std::wstring, Entry> entries_;
+    animelogon::RenderSettings render_;
+    // The power state at the start of this lock asked for the still picture.
+    bool stillThisLock_ = false;
     bool live_ = false, healthRead_ = false;
     std::map<std::wstring, int> saved_;
     std::set<std::wstring> savedBlocked_;

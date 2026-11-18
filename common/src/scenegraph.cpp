@@ -253,8 +253,9 @@ bool PackagePath(std::wstring_view path) {
 }
 bool PackageExtension(AssetKind kind, std::wstring_view f) {
     switch (kind) {
+    // A .tex is a picture already turned into a texture, as a scene exported from the library has it.
     case AssetKind::Image: case AssetKind::Mask: case AssetKind::Frames:
-        return Ends(f, L".png") || Ends(f, L".jpg") || Ends(f, L".jpeg");
+        return Ends(f, L".png") || Ends(f, L".jpg") || Ends(f, L".jpeg") || Ends(f, L".tex");
     case AssetKind::Video: return Ends(f, L".mp4") || Ends(f, L".mov") || Ends(f, L".mkv") || Ends(f, L".webm");
     case AssetKind::Lottie: return Ends(f, L".json");
     default: return Ends(f, L".hlsl");
@@ -1236,6 +1237,113 @@ std::vector<float> Components(const std::wstring &s) {
 std::vector<std::wstring> EffectTypes() {
     std::vector<std::wstring> out;
     for (const auto &s : Effects()) out.push_back(s.type);
+    return out;
+}
+
+// --- Files ---------------------------------------------------------------------------------
+
+namespace {
+constexpr uint32_t kEnvelopeMagic = 0x32454353;  // "SCE2"
+void Put(std::vector<uint8_t> &out, uint32_t n) {
+    for (int i = 0; i < 4; ++i) out.push_back((uint8_t)(n >> (8 * i)));
+}
+uint32_t U32(const uint8_t *p) { return p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24; }
+// What an envelope may carry: the document, the still picture, a video's first frame as the
+// importer hands it over, and files named as a package or the library names them.
+bool EnvelopeName(std::wstring_view name) {
+    return name == L"scene.xml" || name == L"still.bmp" || name == L"poster.bmp" || PackagePath(name);
+}
+}  // namespace
+
+const File *Find(const Files &files, std::wstring_view name) {
+    for (const auto &f : files) if (f.name == name) return &f;
+    return nullptr;
+}
+
+std::vector<uint8_t> Pack(const Files &files) {
+    if (files.size() > kMaxFiles) return {};
+    std::vector<uint8_t> out;
+    size_t total = 8;
+    std::set<std::wstring> names;
+    for (const auto &f : files) {
+        if (!EnvelopeName(f.name) || !names.insert(f.name).second) return {};
+        total += 8 + ToUtf8(f.name).size() + f.bytes.size();
+        if (f.bytes.size() > kMaxBundleBytes || total > kMaxBundleBytes) return {};
+    }
+    out.reserve(total);
+    Put(out, kEnvelopeMagic);
+    Put(out, (uint32_t)files.size());
+    for (const auto &f : files) {
+        const std::string name = ToUtf8(f.name);
+        Put(out, (uint32_t)name.size());
+        Put(out, (uint32_t)f.bytes.size());
+        out.insert(out.end(), name.begin(), name.end());
+        out.insert(out.end(), f.bytes.begin(), f.bytes.end());
+    }
+    return out;
+}
+
+bool Unpack(const uint8_t *bytes, size_t size, Files *files, std::wstring *why) {
+    auto fail = [&] { if (why) *why = L"invalid scene envelope"; return false; };
+    if (!bytes || size < 8 || size > kMaxBundleBytes || U32(bytes) != kEnvelopeMagic || U32(bytes + 4) > kMaxFiles) return fail();
+    Files out;
+    std::set<std::wstring> names;
+    size_t at = 8;
+    const uint32_t count = U32(bytes + 4);
+    out.reserve(count);
+    for (uint32_t i = 0; i < count; ++i) {
+        if (size - at < 8) return fail();
+        const size_t n = U32(bytes + at), m = U32(bytes + at + 4);
+        at += 8;
+        if (!n || n > 128 || n > size - at || m > size - at - n) return fail();
+        const std::string_view name((const char *)bytes + at, n);
+        const std::wstring w = FromUtf8(name);
+        at += n;
+        if (ToUtf8(w) != name || !EnvelopeName(w) || !names.insert(w).second) return fail();
+        out.push_back({w, {bytes + at, bytes + at + m}});
+        at += m;
+    }
+    if (at != size) return fail();
+    *files = std::move(out);
+    return true;
+}
+
+bool IsPackagePath(std::wstring_view path) { return PackagePath(path); }
+
+int FormatOf(std::string_view utf8) {
+    xml::Element root;
+    std::wstring error;
+    xml::Limits limits;
+    limits.bytes = kMaxTextBytes;
+    limits.depth = 10;
+    limits.elements = 4096;
+    if (!xml::Parse(utf8, &root, &error, limits) || root.name != L"scene") return 0;
+    const auto *format = root.Find(L"format");
+    if (!format) return 0;
+    if (*format == L"1") return 1;
+    if (*format == L"2") return 2;
+    return 0;
+}
+
+std::wstring CompiledName(const Asset &a) { return L"shaders/" + a.id + L".dxbc"; }
+std::wstring PosterName(const Asset &video) { return L"textures/" + video.id + L".tex"; }
+
+std::vector<std::wstring> LibraryFiles(const Document &d) {
+    std::vector<std::wstring> out;
+    for (const auto &a : d.assets) {
+        switch (a.kind) {
+        case AssetKind::Video:
+            out.push_back(PosterName(a));
+            out.push_back(StoredName(a, 0));
+            break;
+        case AssetKind::LayerShader: case AssetKind::EffectShader:
+            out.push_back(StoredName(a, 0));
+            out.push_back(CompiledName(a));
+            break;
+        default:
+            for (size_t i = 0; i < a.files.size(); ++i) out.push_back(StoredName(a, i));
+        }
+    }
     return out;
 }
 

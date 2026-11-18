@@ -170,8 +170,10 @@ TEST(AppLeavesSpectraOutForThePageToMove) {
 TEST(AppSceneEditsSaveUndoResetAndDescribeControls) {
     wchar_t temp[MAX_PATH]{}; GetTempPathW(MAX_PATH,temp);
     const std::wstring path=std::wstring(temp)+L"scene-values-"+RandomHex(6)+L".xml";
-    const std::string xml="<scene format=\"1\" name=\"T\"><setting id=\"tint\" kind=\"color\" label=\"Tint\" default=\"#ff0000\"/>"
-        "<base shader=\"sky.hlsl\"/><layer lottie=\"bird.json\"/></scene>";
+    const std::string xml="<scene format=\"2\" name=\"T\"><settings><group label=\"Look\">"
+        "<color id=\"tint\" label=\"Tint\" default=\"#ff0000\"/><toggle id=\"glow\" label=\"Glow\" default=\"off\"/>"
+        "<number id=\"amount\" label=\"Amount\" min=\"0\" max=\"1\" step=\"0.1\" default=\"0.5\" when=\"$glow\"/></group></settings>"
+        "<assets><shader id=\"sky\" kind=\"layer\" file=\"shaders/sky.hlsl\"/></assets><layer source=\"sky\" full=\"true\"/></scene>";
     HANDLE file=CreateFileW(path.c_str(),GENERIC_WRITE,0,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);
     CHECK(file != INVALID_HANDLE_VALUE); if (file == INVALID_HANDLE_VALUE) return;
     DWORD n=0; CHECK(WriteFile(file,xml.data(),(DWORD)xml.size(),&n,nullptr) && n == xml.size()); CloseHandle(file);
@@ -179,18 +181,22 @@ TEST(AppSceneEditsSaveUndoResetAndDescribeControls) {
     auto stores=Stores(); auto &wp=stores.store.wallpapers[kWallpaperX]; wp.kind=WallpaperKind::Scene; wp.scenePath=path;
     app::Library library(stores); CHECK(library.Open(kThemeT));
     CHECK(library.SetValue(L"wallpaper",L"tint",L"#00ff00"));
-    CHECK(library.SetValue(L"wallpaper",L"p1.size",L"25"));
-    CHECK(!library.SetValue(L"wallpaper",L"p1.size",L"nan"));
+    CHECK(library.SetValue(L"wallpaper",L"glow",L"on"));
+    // Only a scene's own settings, with values they take; format 2 has no per-layer adjustments.
+    CHECK(!library.SetValue(L"wallpaper",L"p1.size",L"25") && !library.SetValue(L"wallpaper",L"amount",L"nan"));
     CHECK(library.Modifications(kThemeT) == 2 && library.Save());
-    CHECK(ParseSettings(stores.written).OverridesFor(kThemeT).wallpaperValues.at(L"tint") == L"#00ff00");
+    const auto saved = ParseSettings(stores.written).OverridesFor(kThemeT).wallpaperValues;
+    CHECK(saved.count(L"tint") && saved.at(L"tint") == L"#00ff00");
     CHECK(library.Undo() && library.settings().OverridesFor(kThemeT).wallpaperValues.size() == 1);
     CHECK(library.Redo() && library.settings().OverridesFor(kThemeT).wallpaperValues.size() == 2);
     json::Writer writer; library.WriteOpen(writer); json::Value opened;
     CHECK(json::Parse(writer.text(),&opened));
     CHECK(opened[L"wallpaper"][L"kind"].Str() == L"scene");
-    CHECK(opened[L"wallpaper"][L"scene"][L"settings"].size() == 1);
-    CHECK(opened[L"wallpaper"][L"scene"][L"parts"].size() == 1);
-    CHECK(library.ClearValues(L"wallpaper",{L"tint",L"p1.size"}) && library.Modifications(kThemeT) == 0);
+    const auto &settings=opened[L"wallpaper"][L"scene"][L"settings"];
+    CHECK(settings.size() == 3 && opened[L"wallpaper"][L"scene"][L"parts"].size() == 0);
+    // Grouped as the scene says, and shown only while what they depend on holds.
+    CHECK(settings[2][L"group"].Str() == L"Look" && settings[2][L"shown"].Bool());
+    CHECK(library.ClearValues(L"wallpaper",{L"tint",L"glow"}) && library.Modifications(kThemeT) == 0);
     CHECK(library.SetValue(L"wallpaper",L"tint",L"#00ff00"));
     CHECK(library.SetWallpaper(kWallpaperY) && library.settings().OverridesFor(kThemeT).wallpaperValues.empty());
 }

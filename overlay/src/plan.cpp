@@ -19,6 +19,10 @@ Wallpaper WallpaperOf(const ResolvedTheme &theme) {
     w.id = info.id;
     if (info.builtIn) {
         w.source = Source::Gradient;
+    } else if (info.kind == animelogon::WallpaperKind::Scene && info.sceneLegacy) {
+        // A scene in the first format is shown as its still picture, like an image wallpaper.
+        w.source = Source::Image;
+        w.path = info.imagePath;
     } else if (info.kind == animelogon::WallpaperKind::Scene) {
         w.source = Source::Scene;
         w.values = theme.wallpaperValues;
@@ -50,6 +54,7 @@ struct Resolution {
 Plan Build(const animelogon::Settings &settings, const std::vector<animelogon::MonitorInfo> &monitors,
            const animelogon::ThemeStore &store) {
     Plan plan;
+    plan.render = settings.render;
     if (monitors.empty()) return plan;
 
     // ResolveTheme sees a display only through its screen.<monitor> key, and only in per-monitor

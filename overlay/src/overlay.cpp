@@ -408,7 +408,7 @@ bool WaitForLogonScreen(Presenter &presenter, Scenes &scenes, bool *dismissed) {
                 replan.Planned(scene);
             }
         }
-        scenes.Tick({},false,60);
+        scenes.Tick({},false,60,animelogon::kFpsDisplay);
         const bool secure = screen::InputDesktopIsSecure();
         // On the logon desktop the session's state decides at once. Away from it, it only feeds
         // the slower checks below, so it is read twice a second rather than every turn.
@@ -569,6 +569,12 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
     std::vector<RECT> madeFor = displaylayout::Current();
     if (opt.windowed) plan = WindowedPlan(std::move(plan));
     scenes.Prepare(presenter,plan);
+    {
+        // Which frame rate cap applies (render_fps, render_fps_battery, render_fps_saver) is read
+        // once as the lock starts.
+        const animelogon::data::Battery power = animelogon::data::ReadBattery();
+        scenes.Power(power.state == animelogon::data::BatteryState::Discharging, power.saver);
+    }
     for (const std::wstring &p : plan.problems) ALOG(L"theme: %s", p.c_str());
     for (const plan::Display &d : plan.displays) ALOG(L"theme: %s", plan::Describe(d).c_str());
 
@@ -966,7 +972,7 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
             break;
         }
         bool ready = true, changed = false;
-        scenes.Tick({},true,(float)(1/refresh));
+        scenes.Tick({},true,(float)(1/refresh),animelogon::kFpsDisplay);
         const std::vector<Presenter::Picture> pictures = compose(0.0, &ready, &changed, nullptr);
         if (ready || GetTickCount64() >= until) {
             if (!presenter.Render(pictures, 0.0f, 1.0f) && presenter.DeviceLost() && !staticAfterReset()) done = true;
@@ -1227,17 +1233,13 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
             // Drawn only when something on it changed: a still wallpaper costs nothing between
             // the minutes, and a high refresh rate need not cost a full-screen draw per tick.
             bool fresh = lit || componentsChanged || g_overlay.woke || componentsFading || listened;
-            animelogon::scene::Inputs sceneInputs; sceneInputs.time = (float)t;
-            SYSTEMTIME local{}; GetLocalTime(&local);
-            sceneInputs.day = (local.wHour*3600.f+local.wMinute*60.f+local.wSecond)/86400.f;
-            sceneInputs.battery = snapshot.battery.percent < 0 ? -1.f : snapshot.battery.percent/100.f;
-            sceneInputs.playing = (float)snapshot.media.state;
-            animelogon::data::Context dataContext; dataContext.snapshot = &snapshot;
+            animelogon::scene::Inputs sceneInputs;
             FILETIME utc{}; GetSystemTimeAsFileTime(&utc);
-            dataContext.now = ((uint64_t)utc.dwHighDateTime<<32)|utc.dwLowDateTime;
-            double progress = 0; animelogon::data::FractionOf(L"media.progress",dataContext,&progress);
-            sceneInputs.progress = (float)progress;
-            fresh = scenes.Tick(sceneInputs,draw,(float)(1/refresh)) || fresh;
+            animelogon::scene::SetData(&sceneInputs.data, snapshot, ((uint64_t)utc.dwHighDateTime<<32)|utc.dwLowDateTime);
+            sceneInputs.data.time = t;
+            const int sceneFps = animelogon::FrameRateNow(plan.render,
+                snapshot.battery.state == animelogon::data::BatteryState::Discharging, snapshot.battery.saver);
+            fresh = scenes.Tick(sceneInputs,draw,(float)(1/refresh),sceneFps) || fresh;
             if (!track.empty() && scenes.Static(track)) { audio.FadeOut(.2f); track.clear(); }
             if (componentsFading) {
                 // Each panel comes in as its component says (enter, enter-delay, enter-duration),
@@ -1273,7 +1275,7 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
                 }
             }
         }
-        if (!draw) scenes.Tick({},false,(float)(1/refresh));
+        if (!draw) scenes.Tick({},false,(float)(1/refresh),animelogon::kFpsDisplay);
 
         if (now - lastKeepTop > 500) {
             lastKeepTop = now;

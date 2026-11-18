@@ -15,7 +15,7 @@
 #include "animelogon/text.h"
 #include "animelogon/theme.h"
 #include "animelogon/wallpaper.h"
-#include "animelogon/scene.h"
+#include "animelogon/scenegraph.h"
 
 #include "remux.h"
 
@@ -94,19 +94,27 @@ bool Build(const std::wstring &themeId, const Settings &settings, const ThemeSto
         WallpaperInfo w;
         if (!store.LoadWallpaper(t.wallpaper, &w, &why))
             return Fail(error, animelogon::i18n::Tr("export.error.wallpaper"), L"wallpaper " + t.wallpaper + L": " + why);
-        if (w.kind == WallpaperKind::Scene) {
-            scene::Document d; std::vector<uint8_t> xml;
-            if (!secure::ReadFileBytes(w.scenePath,&xml,64*1024) || !scene::Parse(std::string_view((const char *)xml.data(),xml.size()),&d,&why))
+        if (w.kind == WallpaperKind::Scene && !w.sceneLegacy) {
+            namespace sg = scenegraph;
+            sg::Document stored, d; std::vector<uint8_t> xml;
+            if (!secure::ReadFileBytes(w.scenePath,&xml,sg::kMaxTextBytes) ||
+                !sg::Parse(std::string_view((const char *)xml.data(),xml.size()),sg::Mode::Stored,&stored,&why))
                 return Fail(error,animelogon::i18n::Tr("export.error.scene"),why);
-            d = scene::Bake(d,settings.OverridesFor(themeId).wallpaperValues,&why);
-            if (!why.empty()) return Fail(error,animelogon::i18n::Tr("export.error.scene_limit"),why);
-            std::vector<package::Item> sceneItems{{"scene.xml",L"",Bytes(scene::Normalize(d))}};
+            if (!sg::Bake(stored,settings.OverridesFor(themeId).wallpaperValues,&d,&why))
+                return Fail(error,animelogon::i18n::Tr("export.error.scene_limit"),why);
+            // The library's file names and textures make a package as they are; shaders go as source
+            // and are compiled again when the package is imported.
+            const std::string text = sg::Write(d);
+            sg::Document check;
+            if (!sg::Parse(text,sg::Mode::Package,&check,&why)) return Fail(error,animelogon::i18n::Tr("export.error.scene"),why);
+            std::vector<package::Item> sceneItems{{"scene.xml",L"",Bytes(text)}};
             const std::wstring dir = w.scenePath.substr(0,w.scenePath.find_last_of(L'\\'));
-            for (const auto &name : scene::Assets(d,false)) {
-                std::wstring path = dir+L"\\"+name; std::replace(path.begin(),path.end(),L'/',L'\\');
-                if (d.base.kind == scene::Kind::Video && name == d.base.file && !VideoOf(w,workDir,&path,error)) return false;
-                sceneItems.push_back({ToUtf8(name),path,{}});
-            }
+            for (const auto &a : d.assets)
+                for (const auto &name : a.files) {
+                    std::wstring path = dir+L"\\"+name; std::replace(path.begin(),path.end(),L'/',L'\\');
+                    if (a.kind == sg::AssetKind::Video && !VideoOf(w,workDir,&path,error)) return false;
+                    sceneItems.push_back({ToUtf8(name),path,{}});
+                }
             wallpaperFile = L"wallpaper.alscene";
             if (!package::WriteToMemory(sceneItems,&wallpaper.bytes,&why)) return Fail(error,animelogon::i18n::Tr("export.error.scene_pack"),why);
         } else if (w.kind == WallpaperKind::Video) {

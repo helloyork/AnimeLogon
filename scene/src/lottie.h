@@ -1,19 +1,30 @@
+// A Lottie animation drawn on the processor by ThorVG, inside the sandboxed renderer only.
 #pragma once
+#include <array>
+#include <map>
 #include <memory>
+#include <string>
 #include <vector>
-#include "animelogon/scenehost.h"
 namespace animelogon::scene {
 class Lottie {
 public:
     Lottie();
     ~Lottie();
-    bool Open(const File &file, const Document &document, const Layer &layer, std::wstring *why);
-    bool Draw(const Document &document, const Layer &layer, const Inputs &inputs, int width, int height, std::wstring *why);
+    // Checks the JSON (no expressions, no external resources, bounded structure) and loads it.
+    bool Open(const std::vector<uint8_t> &bytes, std::wstring *why);
+    // Whether the file has a slot with this id that a value can be given to.
+    bool HasSlot(const std::wstring &id) const;
+    // Draws the frame at `time` seconds (looping) into width x height premultiplied BGRA pixels,
+    // with the slots given values. Returns false on failure; `changed` says whether the pixels differ
+    // from the last call's.
+    bool Draw(const std::map<std::wstring, std::array<float, 4>> &slots, double time, int width, int height,
+              bool *changed, std::wstring *why);
     const uint8_t *Pixels() const;
-    float Aspect() const;
+    float Width() const;
+    float Height() const;
     float Duration() const;
 private:
     struct State;
     std::unique_ptr<State> s_;
 };
-}
+}  // namespace animelogon::scene

@@ -47,6 +47,8 @@ struct WallpaperInfo {
     // Filled in by LoadWallpaper; never stored in wallpaper.ini.
     std::wstring videoPath, audioPath, imagePath;  // empty where the wallpaper has no such file
     std::wstring scenePath;
+    // A scene in the first scene format, which is no longer played: only its still picture is shown.
+    bool sceneLegacy = false;
     uint64_t bytes = 0;                            // the payload on disk
     bool builtIn = false;                          // "default": no files, drawn by AnimeLogon
 };

@@ -3,6 +3,8 @@
 #include <mfapi.h>
 #include <algorithm>
 #include <cmath>
+#include "animelogon/bitmap.h"
+#include "animelogon/secure.h"
 #include "animelogon/text.h"
 #include "player.h"
 #include "layout.h"
@@ -20,9 +22,10 @@ struct Preview::State {
     ComPtr<ID3D11PixelShader> ps;
     ComPtr<ID3D11Buffer> constants;
     ComPtr<ID3D11SamplerState> sampler;
-    Scaling fit = Scaling::Fill;
+    // The video is handed over whole: the renderer fits it into its node's box.
+    Scaling fit = Scaling::Stretch;
     skin::Values values;
-    Document document;
+    scenegraph::Document document;
     LONG requested = 0;
     bool mf = false, hasVideo = false, videoReady = false;
     bool author = false;
@@ -30,7 +33,7 @@ struct Preview::State {
     std::wstring videoPath;
     bool sent = false;
     bool sentRunning = false;
-    float sentTime = -1;
+    double sentTime = -1;
     Inputs sentInputs;
     std::vector<uint8_t> still;
     ~State() { player.Close(); host.Stop(); if (mf) MFShutdown(); }
@@ -60,27 +63,32 @@ struct Preview::State {
 };
 Preview::Preview() = default;
 Preview::~Preview() = default;
-std::vector<std::array<float,4>> Preview::Bounds() const { return s_ ? s_->host.Bounds() : std::vector<std::array<float,4>>{}; }
-bool Preview::Open(const WallpaperInfo &w, int width, int height, const skin::Values &values, std::wstring *why, bool author) {
-    s_.reset(); auto s = std::make_unique<State>(); Files files; Document doc;
+bool Preview::Open(const WallpaperInfo &w, int width, int height, const skin::Values &values, std::wstring *why, bool author,
+                   RenderQuality quality) {
+    s_.reset(); auto s = std::make_unique<State>(); Files files; scenegraph::Document doc;
     const auto dir=w.scenePath.substr(0,w.scenePath.find_last_of(L'\\'));
-    if (!LoadFiles(dir,false,&files,&doc,why)) return false;
-    if (!author && w.sceneFps == 0) {
-        if (const auto *still=Find(files,L"still.bmp")) s->still=still->bytes;
-        if (s->still.empty()) { if (why) *why=L"scene still is unavailable"; return false; }
+    // A scene the PC is too slow for, or one in the first scene format, shows its still picture.
+    if ((!author && w.sceneFps == 0 && quality == RenderQuality::Auto) || w.sceneLegacy) {
+        if (!secure::ReadFileBytes(dir+L"\\still.bmp",&s->still,(size_t)bitmap::kHeaderBytes+64ull*1024*1024) || s->still.empty()) {
+            if (why) *why=L"scene still is unavailable"; return false;
+        }
         s_=std::move(s); return true;
     }
+    if (!LoadFiles(dir,false,&files,&doc,why)) return false;
     if (!Device(&s->device,why)) return false;
-    s->document=doc; s->fit=doc.base.fit;
+    s->document=doc;
     s->author=author;
-    for (const auto &[key,value] : values) if (Accepts(doc,key,value)) s->values[key]=value;
+    for (const auto &[key,value] : values) if (scenegraph::Accepts(doc,key,value)) s->values[key]=value;
     s->device->GetImmediateContext(&s->context);
     ComPtr<ID3D10Multithread> multithread;
     if (SUCCEEDED(s->device.As(&multithread))) multithread->SetMultithreadProtected(TRUE);
     const double ratio = w.sceneTrialWidth > 0 ? std::sqrt((double)w.sceneTrialWidth*w.sceneTrialHeight/((double)width*height)) : 1;
-    const Tier tier=author ? Tier{true,0,1} : Tier{w.sceneTrialWidth > 0,w.sceneFps,std::clamp((float)(w.sceneScale/100.0*ratio),.5f,1.f)};
-    Inputs initial; initial.values=s->values;
-    if (!s->host.Start(s->device.Get(),files,width,height,false,why,tier,initial)) return false;
+    Options options;
+    options.tier=author ? Tier{true,0,1} : Tier{w.sceneTrialWidth > 0,w.sceneFps,std::clamp((float)(w.sceneScale/100.0*ratio),.5f,1.f)};
+    // The author's tool always shows the scene as it is, at full resolution.
+    options.quality=author ? RenderQuality::Highest : quality;
+    options.initial.values=s->values;
+    if (!s->host.Start(s->device.Get(),files,width,height,options,why)) return false;
     if (!w.videoPath.empty()) {
         s->videoPath=w.videoPath;
         s->mf = SUCCEEDED(MFStartup(MF_VERSION)); UINT token=0;
@@ -99,7 +107,7 @@ bool Preview::Open(const WallpaperInfo &w, int width, int height, const skin::Va
 void Preview::SetValues(const skin::Values &values) {
     if (!s_) return;
     skin::Values accepted;
-    for (const auto &[key,value] : values) if (Accepts(s_->document,key,value)) accepted[key]=value;
+    for (const auto &[key,value] : values) if (scenegraph::Accepts(s_->document,key,value)) accepted[key]=value;
     if (s_->values != accepted) { s_->values=std::move(accepted); s_->sent=false; }
 }
 bool Preview::Failed(std::wstring *why) const {
@@ -112,7 +120,7 @@ bool Preview::Frame(const Inputs &input, bool running, std::vector<uint8_t> *bit
     if (!s_ || Failed(why)) return false;
     if (!s_->still.empty()) { *bitmap=s_->still; return true; }
     auto &s=*s_; s.host.Poll();
-    if (s.hasVideo && input.time < s.sentTime) {
+    if (s.hasVideo && input.data.time < s.sentTime) {
         s.sent=false; s.videoReady=false; s.videoTime=-1;
         if (!s.player.Open(s.videoPath,s.device.Get(),s.manager.Get())) { if (why) *why=L"video preview could not rewind"; return false; }
     }
@@ -122,19 +130,21 @@ bool Preview::Frame(const Inputs &input, bool running, std::vector<uint8_t> *bit
     bool videoChanged=false, videoUpdated=false;
     if (s.hasVideo) {
         VideoPlayer::Frame frame;
-        if (s.player.FrameAt(input.time,&frame,&videoChanged) && (videoChanged || !s.videoReady)) {
+        if (s.player.FrameAt(input.data.time,&frame,&videoChanged) && (videoChanged || !s.videoReady)) {
             videoUpdated=s.videoReady=s.host.UpdateVideo([&](ID3D11Texture2D *t) { s.Video(t,frame); });
             if (videoUpdated) s.videoTime=frame.time;
         }
     }
-    const bool request = !s.sent || input.time != s.sentTime || videoUpdated || running != s.sentRunning || input.day != s.sentInputs.day ||
-        input.battery != s.sentInputs.battery || input.progress != s.sentInputs.progress || input.playing != s.sentInputs.playing;
+    const auto &d=input.data, &was=s.sentInputs.data;
+    const bool request = !s.sent || d.time != s.sentTime || videoUpdated || running != s.sentRunning || d.day != was.day ||
+        d.battery != was.battery || d.progress != was.progress || d.mediaState != was.mediaState || d.wake != was.wake ||
+        d.audio != was.audio || d.batteryState != was.batteryState || d.powerSource != was.powerSource || d.month != was.month;
     if (request) {
         Inputs in=input; in.values=s.values; s.requested=s.host.SetRunning(running,in,60,true);
-        s.sent=true; s.sentRunning=running; s.sentTime=input.time; s.sentInputs=input;
+        s.sent=true; s.sentRunning=running; s.sentTime=d.time; s.sentInputs=input;
     }
     if ((s.hasVideo && !s.videoReady) || (!running && s.host.FrameSequence() < s.requested)) return false;
-    if (s.author && s.hasVideo && input.time-s.videoTime > s.player.frameSeconds()*1.25) return false;
+    if (s.author && s.hasVideo && input.data.time-s.videoTime > s.player.frameSeconds()*1.25) return false;
     *bitmap=std::move(completed); return !bitmap->empty();
 }
 }

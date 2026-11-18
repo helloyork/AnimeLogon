@@ -11,6 +11,7 @@
 #include <cmath>
 #include <mutex>
 #include "animelogon/bitmap.h"
+#include "animelogon/data.h"
 #include "animelogon/log.h"
 #include "animelogon/paths.h"
 #include "animelogon/secure.h"
@@ -42,6 +43,28 @@ HANDLE ReadOnly(HANDLE source) {
 std::wstring Path(const std::wstring &dir, const std::wstring &name) {
     std::wstring s = dir + L"\\" + name; std::replace(s.begin(), s.end(), L'/', L'\\'); return s;
 }
+template <size_t N> uint32_t IndexOf(const wchar_t *const (&words)[N], const std::wstring &word) {
+    for (size_t i = 0; i < N; ++i) if (word == words[i]) return (uint32_t)i;
+    return 0;
+}
+float Fraction(double v) { return std::isfinite(v) ? (float)std::clamp(v, -1.0, 1.0) : -1.f; }
+// Between two increments of `sequence`, so the child never reads half of an update.
+void WriteInputs(ipc::Command &c, const Inputs &in) {
+    const auto &d = in.data;
+    c.time = std::isfinite(d.time) ? std::max(0.0, d.time) : 0;
+    c.day = (float)std::clamp(std::isfinite(d.day) ? d.day : 0, 0.0, 1.0);
+    c.wake = (float)std::clamp(std::isfinite(d.wake) ? d.wake : 0, 0.0, 1.0);
+    c.battery = Fraction(d.battery); c.progress = Fraction(d.progress);
+    for (size_t i = 0; i < 4; ++i) c.audio[i] = (float)std::clamp(std::isfinite(d.audio[i]) ? d.audio[i] : 0, 0.0, 1.0);
+    c.month = (uint32_t)std::clamp(d.month, 1, 12);
+    c.batteryState = IndexOf(ipc::kBatteryStates, d.batteryState);
+    c.powerSource = IndexOf(ipc::kPowerSources, d.powerSource);
+    c.mediaState = IndexOf(ipc::kMediaStates, d.mediaState);
+    std::string text;
+    for (const auto &[k, v] : in.values) text += ToUtf8(k) + "=" + ToUtf8(v) + "\n";
+    c.valuesBytes = (uint32_t)std::min(text.size(), sizeof(c.values));
+    memcpy(c.values, text.data(), c.valuesBytes);
+}
 }
 struct Host::State {
     HANDLE commandMap = nullptr, inputMap = nullptr, statusMap = nullptr, process = nullptr, job = nullptr;
@@ -54,7 +77,6 @@ struct Host::State {
     int width = 0, height = 0;
     bool importing = false, received = false;
     LONG frame = 0;
-    std::vector<std::array<float,4>> bounds;
     ComPtr<ID3D11Device> device;
     ComPtr<ID3D11DeviceContext> context;
     ComPtr<ID3D11Texture2D> shared, copy, video;
@@ -74,6 +96,8 @@ struct Host::State {
         if (!profile.empty()) DeleteAppContainerProfile(profile.c_str());
     }
     bool Spawn(const std::vector<HANDLE> &handles, std::wstring *why) {
+        // Importing holds the package's pictures, their decoded pixels and the textures at once.
+        const unsigned long long memoryLimit = (importing ? 2048ull : 1024ull) * 1024 * 1024;
         std::lock_guard<std::mutex> stationLock(stationMutex);
         std::wstring failure;
         auto record = [&](bool ok, const wchar_t *stage) {
@@ -113,7 +137,7 @@ struct Host::State {
         job = CreateJobObjectW(nullptr, nullptr);
         JOBOBJECT_EXTENDED_LIMIT_INFORMATION limit{};
         limit.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_ACTIVE_PROCESS | JOB_OBJECT_LIMIT_PROCESS_MEMORY;
-        limit.BasicLimitInformation.ActiveProcessLimit = 1; limit.ProcessMemoryLimit = 1024ull * 1024 * 1024;
+        limit.BasicLimitInformation.ActiveProcessLimit = 1; limit.ProcessMemoryLimit = (SIZE_T)memoryLimit;
         ok = ok && job && SetInformationJobObject(job, JobObjectExtendedLimitInformation, &limit, sizeof(limit));
         record(ok, L"setting the job limits");
         PSECURITY_DESCRIPTOR sd = nullptr;
@@ -171,7 +195,7 @@ struct Host::State {
             if (ok) ok = ResumeThread(pi.hThread) != (DWORD)-1;
             if (!ok) TerminateProcess(process, 0);
             CloseHandle(pi.hThread);
-            ALOG(L"scene: AppContainer child %lu, no capabilities, private desktop, job limit 1 GiB", pi.dwProcessId);
+            ALOG(L"scene: AppContainer child %lu, no capabilities, private desktop, job limit %llu MiB", pi.dwProcessId, memoryLimit >> 20);
         }
         if (initialized) DeleteProcThreadAttributeList(list);
         if (package) FreeSid(package);
@@ -182,10 +206,12 @@ struct Host::State {
 Host::Host() = default;
 Host::~Host() = default;
 void Host::Stop() { s_.reset(); }
-bool Host::Start(ID3D11Device *device, const Files &files, int width, int height, bool importing, std::wstring *why, const Tier &tier, const Inputs &initial) {
+bool Host::Start(ID3D11Device *device, const Files &files, int width, int height, const Options &options, std::wstring *why) {
+    const bool importing = options.importing;
+    const Tier &tier = options.tier;
     Stop();
     if (!device || width <= 0 || height <= 0 || width > 16384 || height > 16384 || (uint64_t)width * height > 64 * 1024 * 1024) return Fail(why, L"invalid scene canvas");
-    const auto input = Pack(files);
+    const auto input = scenegraph::Pack(files);
     if (input.empty()) return Fail(why, L"the scene is too large");
     auto s = std::make_unique<State>(); s->device = device; device->GetImmediateContext(&s->context);
     s->width = width; s->height = height; s->importing = importing;
@@ -194,7 +220,7 @@ bool Host::Start(ID3D11Device *device, const Files &files, int width, int height
     PSECURITY_DESCRIPTOR sd = nullptr;
     if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(Access().c_str(), SDDL_REVISION_1, &sd, nullptr)) return Fail(why, L"cannot protect scene IPC");
     SECURITY_ATTRIBUTES sa{sizeof(sa), sd, TRUE};
-    s->capacity = sizeof(ipc::Status) + (importing ? kMaxBundleBytes : 0);
+    s->capacity = sizeof(ipc::Status) + (importing ? scenegraph::kMaxBundleBytes : 0);
     s->commandMap = CreateFileMappingW(INVALID_HANDLE_VALUE, &sa, PAGE_READWRITE, 0, sizeof(ipc::Command), nullptr);
     s->inputMap = CreateFileMappingW(INVALID_HANDLE_VALUE, &sa, PAGE_READWRITE, 0, (DWORD)input.size(), nullptr);
     s->statusMap = CreateFileMappingW(INVALID_HANDLE_VALUE, &sa, PAGE_READWRITE, 0, (DWORD)s->capacity, nullptr);
@@ -208,15 +234,13 @@ bool Host::Start(ID3D11Device *device, const Files &files, int width, int height
         s->command->adapter = ad.AdapterLuid; s->command->width = width; s->command->height = height;
         s->command->inputBytes = (uint32_t)input.size(); s->command->outputBytes = (uint32_t)s->capacity;
         s->command->importing = importing;
+        s->command->quality = (uint32_t)options.quality;
+        s->command->videoMemory = (uint32_t)std::clamp(options.videoMemory, 0, kVideoMemoryMax);
+        s->command->particles = (uint32_t)std::clamp(options.particles, kParticlesMin, kParticlesMax);
         s->command->calibrated = tier.calibrated;
         s->command->startFps = tier.fps == 0 || tier.fps == 30 ? tier.fps : 60;
         s->command->startScale = std::isfinite(tier.scale) ? std::clamp(tier.scale,.5f,1.f) : 1.f;
-        s->command->time=initial.time; s->command->day=initial.day; s->command->battery=initial.battery;
-        s->command->progress=initial.progress; s->command->playing=initial.playing;
-        std::string values;
-        for (const auto &[key,value] : initial.values) values+=ToUtf8(key)+"="+ToUtf8(value)+"\n";
-        s->command->valuesBytes=(uint32_t)std::min(values.size(),sizeof(s->command->values));
-        memcpy(s->command->values,values.data(),s->command->valuesBytes);
+        WriteInputs(*s->command, options.initial);
     }
     auto texture = [&](ComPtr<ID3D11Texture2D> &t, ComPtr<IDXGIKeyedMutex> &mutex, HANDLE *h, DWORD access) {
         D3D11_TEXTURE2D_DESC d{}; d.Width = width; d.Height = height; d.MipLevels = d.ArraySize = 1;
@@ -241,32 +265,22 @@ bool Host::Start(ID3D11Device *device, const Files &files, int width, int height
     if (!ok) return false;
     s_ = std::move(s); return true;
 }
-LONG Host::SetRunning(bool running, const Inputs &in, float refresh, bool redraw) {
+LONG Host::SetRunning(bool running, const Inputs &in, float fps, bool redraw) {
     if (!s_) return 0;
     auto &c = *s_->command;
     InterlockedIncrement(&c.sequence);
-    c.time = in.time; c.day = in.day; c.battery = in.battery; c.progress = in.progress; c.playing = in.playing;
-    c.refresh = std::clamp(refresh, 1.f, 60.f);
-    std::string text;
-    for (const auto &[k, v] : in.values) text += ToUtf8(k) + "=" + ToUtf8(v) + "\n";
-    c.valuesBytes = (uint32_t)std::min(text.size(), sizeof(c.values)); memcpy(c.values, text.data(), c.valuesBytes);
+    WriteInputs(c, in);
+    c.fps = std::isfinite(fps) ? std::clamp(fps, 1.f, (float)kRenderFpsMax) : 60.f;
     InterlockedIncrement(&c.sequence);
     InterlockedExchange(&c.running, running ? 1 : 0);
     InterlockedExchange(&c.redraw, redraw ? 1 : 0);
     return c.sequence;
 }
 LONG Host::FrameSequence() const { return s_ ? s_->frame : 0; }
-std::vector<std::array<float,4>> Host::Bounds() const { return s_ ? s_->bounds : std::vector<std::array<float,4>>{}; }
 bool Host::Poll() {
     if (!s_ || s_->mutex->AcquireSync(1, 0) != S_OK) return false;
     s_->context->CopyResource(s_->copy.Get(), s_->shared.Get()); s_->context->Flush();
     s_->frame = s_->status->sequence;
-    s_->bounds.clear();
-    for (const auto &raw : s_->status->bounds) {
-        std::array<float,4> rect{};
-        for (size_t i=0;i<4;++i) rect[i]=std::isfinite(raw[i]) ? std::clamp(raw[i],-2.f,3.f) : 0;
-        s_->bounds.push_back(rect);
-    }
     s_->mutex->ReleaseSync(0); s_->received = true; return true;
 }
 bool Host::Ready() const { return s_ && s_->received && s_->status->state == 2; }
@@ -291,7 +305,7 @@ bool Host::Normalized(Files *files, std::wstring *why) const {
     // Copy before parsing: an untrusted child must never race a bounds check on shared data.
     const auto *p = reinterpret_cast<const uint8_t *>(s_->status) + sizeof(ipc::Status);
     const std::vector<uint8_t> snapshot(p, p + n);
-    return Unpack(snapshot.data(), snapshot.size(), files, why);
+    return scenegraph::Unpack(snapshot.data(), snapshot.size(), files, why);
 }
 std::vector<uint8_t> Host::Bitmap(std::wstring *why) const {
     if (!s_ || !s_->received) { Fail(why, L"no scene frame"); return {}; }
@@ -313,6 +327,7 @@ bool Host::Profile(Tier *tier) const {
     if ((fps != 0 && fps != 30 && fps != 60) || !std::isfinite(scale) || scale < .5f || scale > 1) return false;
     *tier = {true,(int)fps,scale}; return true;
 }
+uint64_t Host::TextureBytes() const { return s_ ? s_->status->textureBytes : 0; }
 bool Host::UpdateVideo(const std::function<void(ID3D11Texture2D *)> &draw) {
     if (!s_ || s_->videoMutex->AcquireSync(0, 0) != S_OK) return false;
     draw(s_->video.Get()); s_->context->Flush();
@@ -325,7 +340,7 @@ bool Device(ComPtr<ID3D11Device> *out, std::wstring *why) {
         nullptr, 0, D3D11_SDK_VERSION, out->ReleaseAndGetAddressOf(), &level, nullptr);
     return SUCCEEDED(hr) || Fail(why, Format(L"no hardware scene device (0x%08X)", hr));
 }
-bool LoadFiles(const std::wstring &dir, bool trusted, Files *files, Document *document, std::wstring *why) {
+bool LoadFiles(const std::wstring &dir, bool trusted, Files *files, scenegraph::Document *document, std::wstring *why) {
     Files out;
     auto read = [&](const std::wstring &name, size_t limit) {
         const std::wstring path = Path(dir, name);
@@ -334,14 +349,30 @@ bool LoadFiles(const std::wstring &dir, bool trusted, Files *files, Document *do
         if (!secure::ReadFileBytes(path, &f.bytes, limit)) return Fail(why, name + L" cannot be read");
         out.push_back(std::move(f)); return true;
     };
-    if (!read(L"scene.xml", 64 * 1024) || !Parse(std::string_view((const char *)out.front().bytes.data(), out.front().bytes.size()), document, why)) return false;
+    if (!read(L"scene.xml", scenegraph::kMaxTextBytes) ||
+        !scenegraph::Parse(std::string_view((const char *)out.front().bytes.data(), out.front().bytes.size()), scenegraph::Mode::Stored, document, why))
+        return false;
     size_t total = out.front().bytes.size();
-    for (const auto &name : Assets(*document, true)) {
-        if (document->base.kind == Kind::Video && name == document->base.file) continue;
+    for (const auto &name : scenegraph::LibraryFiles(*document)) {
+        if (name == L"video.mp4") continue;
         const auto ext = name.substr(name.find_last_of(L'.'));
-        const size_t limit = ext == L".hlsl" ? kMaxShaderBytes : ext == L".dxbc" ? 1024 * 1024 : ext == L".json" ? kMaxLottieBytes : kMaxBundleBytes;
-        if (!read(name, limit) || (total += out.back().bytes.size()) > kMaxBundleBytes) return Fail(why, L"scene assets exceed the size limit");
+        const size_t limit = ext == L".hlsl" ? scenegraph::kMaxShaderBytes : ext == L".dxbc" ? scenegraph::kMaxCompiledBytes :
+            ext == L".json" ? scenegraph::kMaxLottieBytes : scenegraph::kMaxBundleBytes;
+        if (!read(name, limit)) return false;
+        if ((total += out.back().bytes.size()) > scenegraph::kMaxBundleBytes) return Fail(why, L"scene files exceed the size limit");
     }
     *files = std::move(out); return true;
+}
+void SetData(scenegraph::Inputs *in, const data::Snapshot &snapshot, uint64_t now) {
+    SYSTEMTIME local{}; GetLocalTime(&local);
+    in->day = (local.wHour*3600.0 + local.wMinute*60.0 + local.wSecond + local.wMilliseconds/1000.0) / 86400.0;
+    in->month = local.wMonth;
+    data::Context context; context.snapshot = &snapshot; context.now = now;
+    double v = 0;
+    in->battery = data::FractionOf(L"battery.level", context, &v) ? v : -1;
+    in->progress = data::FractionOf(L"media.progress", context, &v) ? v : -1;
+    in->batteryState = data::StateOf(L"battery.state", context, local);
+    in->powerSource = data::StateOf(L"power.source", context, local);
+    in->mediaState = data::StateOf(L"media.state", context, local);
 }
 }  // namespace animelogon::scene

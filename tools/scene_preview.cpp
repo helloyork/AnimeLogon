@@ -28,7 +28,8 @@ int wmain(int argc,wchar_t **argv) {
     if (argc < 3) {
         std::fwprintf(stderr,L"usage: scene_preview <scene.alscene|normalized directory> <out.png|frames directory>\n"
             L"       [--width N] [--height N] [--frames N] [--fps N] [--time seconds]\n"
-            L"       [--day fraction] [--battery fraction|-1] [--progress fraction] [--state 0|1|2] [key=value ...]\n");
+            L"       [--day fraction] [--battery fraction|-1] [--progress fraction] [--state 0|1|2]\n"
+            L"       [--wake fraction] [--month 1-12] [key=value ...]\n");
         return 2;
     }
     int width=1920,height=1080,frames=1,fps=30; scene::Inputs input; skin::Values values;
@@ -41,11 +42,13 @@ int wmain(int argc,wchar_t **argv) {
             else if (arg == L"--height" && n >= 16 && n <= 4320 && n == (int)n) height=(int)n;
             else if (arg == L"--frames" && n >= 1 && n <= 3600 && n == (int)n) frames=(int)n;
             else if (arg == L"--fps" && n >= 1 && n <= 60 && n == (int)n) fps=(int)n;
-            else if (arg == L"--time" && n >= 0 && n <= 86400) input.time=(float)n;
-            else if (arg == L"--day" && n >= 0 && n <= 1) input.day=(float)n;
-            else if (arg == L"--battery" && (n == -1 || (n >= 0 && n <= 1))) input.battery=(float)n;
-            else if (arg == L"--progress" && n >= 0 && n <= 1) input.progress=(float)n;
-            else if (arg == L"--state" && n >= 0 && n <= 2 && n == (int)n) input.playing=(float)n;
+            else if (arg == L"--time" && n >= 0 && n <= 86400) input.data.time=n;
+            else if (arg == L"--day" && n >= 0 && n <= 1) input.data.day=n;
+            else if (arg == L"--battery" && (n == -1 || (n >= 0 && n <= 1))) input.data.battery=n;
+            else if (arg == L"--progress" && n >= 0 && n <= 1) input.data.progress=n;
+            else if (arg == L"--state" && n >= 0 && n <= 2 && n == (int)n) input.data.mediaState=n == 1 ? L"playing" : n == 2 ? L"paused" : L"none";
+            else if (arg == L"--wake" && n >= 0 && n <= 1) input.data.wake=n;
+            else if (arg == L"--month" && n >= 1 && n <= 12 && n == (int)n) input.data.month=(int)n;
             else return Refused(L"unknown or out-of-range option");
         } else {
             const auto eq=arg.find(L'='); if (eq == std::wstring::npos) return Refused(L"expected key=value");
@@ -67,15 +70,15 @@ int wmain(int argc,wchar_t **argv) {
         return Refused(why.empty() ? L"expected an imported scene directory" : why);
     info.scenePath=directory+L"\\scene.xml"; info.imagePath=directory+L"\\still.bmp";
     if (info.sceneVideo) info.videoPath=directory+L"\\video.mp4";
-    scene::Files files; scene::Document doc;
+    scene::Files files; scenegraph::Document doc;
     if (!scene::LoadFiles(directory,false,&files,&doc,&why)) return Refused(why);
-    for (const auto &[key,value] : values) if (!scene::Accepts(doc,key,value)) return Refused(L"invalid scene value: "+key);
+    for (const auto &[key,value] : values) if (!scenegraph::Accepts(doc,key,value)) return Refused(L"invalid scene value: "+key);
     scene::Preview preview; if (!preview.Open(info,width,height,values,&why,true)) return Refused(why);
     const std::wstring output=std::filesystem::absolute(argv[2]).wstring();
     if (frames > 1 && !CreateDirectoryW(output.c_str(),nullptr) && GetLastError() != ERROR_ALREADY_EXISTS) return Refused(L"cannot create output directory");
-    const float start=input.time;
+    const double start=input.data.time;
     for (int i=0;i<frames;++i) {
-        input.time=start+(float)i/fps;
+        input.data.time=start+(double)i/fps;
         std::vector<uint8_t> bmp,png; const ULONGLONG deadline=GetTickCount64()+30000;
         // Each frame is a one-shot with an acknowledged input sequence, independent of wall time.
         scene::Inputs frame=input;

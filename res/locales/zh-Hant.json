@@ -1038,6 +1038,7 @@
   "wallpaper.meta.none": "純黑",
   "wallpaper.meta.scene": "場景 · {size}",
   "wallpaper.meta.still": " · 靜止畫面",
+  "wallpaper.meta.legacy": " · 舊版場景，不再播放動畫",
   "wallpaper.meta.video": "影片 · {size} · {fps} fps · {length}",
   "wallpaper.missing": "桌布遺失",
   "wallpaper.none": "無桌布",

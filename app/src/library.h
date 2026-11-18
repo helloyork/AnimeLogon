@@ -11,7 +11,7 @@
 #include "animelogon/resolve.h"
 #include "animelogon/rotation.h"
 #include "animelogon/settings.h"
-#include "animelogon/scene.h"
+#include "animelogon/scenegraph.h"
 #include "animelogon/skin.h"
 #include "animelogon/theme.h"
 #include "animelogon/wallpaper.h"
@@ -67,7 +67,9 @@ public:
     // Changes whenever anything a picture of the theme depends on changes.
     unsigned Revision(const std::wstring &id) const;
     bool LoadSkin(const std::wstring &component, animelogon::skin::Skin *out) const;
-    bool LoadScene(const std::wstring &theme, animelogon::scene::Document *out) const;
+    // The theme's scene wallpaper as the library stores it; false for anything else, and for a scene
+    // in the first format, which has no settings any more.
+    bool LoadScene(const std::wstring &theme, animelogon::scenegraph::Document *out) const;
 
     // Writes settings.ini. False when it could not; the edits stay in memory.
     bool Save();

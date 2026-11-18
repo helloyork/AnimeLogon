@@ -3,6 +3,7 @@
 #include "check.h"
 #include "animelogon/bitmap.h"
 #include "animelogon/scenehost.h"
+#include "texencode.h"
 #include <algorithm>
 #include <cstdio>
 
@@ -33,13 +34,18 @@ TEST(SceneAcknowledgesVideoOnItsFirstFrameAndWhilePaused) {
     }
     ComPtr<ID3D11DeviceContext> context;
     device->GetImmediateContext(&context);
-    const std::string xml = "<scene format=\"1\" name=\"Video input\"><base video=\"video.mp4\"/></scene>";
+    const std::string xml = "<scene format=\"2\" name=\"Video input\" width=\"64\" height=\"64\">"
+        "<assets><video id=\"clip\" file=\"video.mp4\"/></assets><layer source=\"clip\" full=\"true\"/></scene>";
     std::vector<uint8_t> pixels(64 * 64 * 4, 0);
     for (size_t i = 3; i < pixels.size(); i += 4) pixels[i] = 255;
-    const scene::Files files{{L"scene.xml", {xml.begin(), xml.end()}},
-        {L"images/video.bmp", bitmap::Build(64, 64, pixels.data(), pixels.size())}};
+    // The video's first frame, as the importer keeps it: a black texture until frames arrive.
+    std::vector<uint8_t> poster;
+    CHECK(scene::EncodeTexture(device.Get(), pixels.data(), 64, 64, 64 * 4, scene::TextureKind::Color, &poster, &why));
+    const scene::Files files{{L"scene.xml", {xml.begin(), xml.end()}}, {L"textures/clip.tex", poster}};
     scene::Host host;
-    CHECK(host.Start(device.Get(), files, 64, 64, false, &why, {true, 0, 1}));
+    scene::Options options;
+    options.tier = {true, 0, 1};
+    CHECK(host.Start(device.Get(), files, 64, 64, options, &why));
     if (host.Failed(&why)) return;
     auto publish = [&](float r, float g, float b) {
         bool drawn = false;
