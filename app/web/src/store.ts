@@ -24,6 +24,7 @@ export type Dialog = { id: number } & (
   | { kind: 'wallpaper' }
   | { kind: 'addComponent' }
   | { kind: 'copyComponents' }  // the open theme's components, to other themes
+  | { kind: 'rotation' }  // themes to add to the rotation
   | { kind: 'workshop'; wallpaper: boolean }  // with `wallpaper`, one, for the open theme
   | { kind: 'import'; from?: number }  // what to import; `from` is the dialog it was opened from
 );
@@ -217,7 +218,25 @@ export function goBack() {
 
 /* --- library actions --- */
 export const apply = (id: string, monitor = '') => send('apply', { theme: id, monitor });
+// The rotation, in the order it moves through: themes added go last.
+export const inRotation = (id: string) => !!state.lib?.settings.rotation.themes.includes(id);
+export const setRotation = (ids: string[]) => global('rotation.themes', ids.join(','));
+export function addToRotation(ids: string[]) {
+  const now = state.lib?.settings.rotation.themes ?? [];
+  setRotation([...now, ...ids.filter(id => !now.includes(id))]);
+}
+export function removeFromRotation(id: string) {
+  const r = state.lib?.settings.rotation;
+  if (!r) return;
+  const left = r.themes.filter(t => t !== id);
+  // Fewer than two themes leave nothing to move through.
+  if (r.on && left.length < 2) global('rotation.on', false);
+  setRotation(left);
+}
 export function applyFlow(id: string) {
+  // Chosen by hand, a theme the rotation does not hold stops it (app/src/library.h).
+  const r = state.lib?.settings.rotation;
+  if (r?.on && !r.themes.includes(id) && !perMonitor()) toast(t('msg.rotation_stopped'));
   if (!perMonitor()) apply(id);
   else openDialog({ kind: 'monitor', theme: id });
 }
