@@ -12,6 +12,7 @@
 
 #include <atomic>
 #include <string>
+#include <vector>
 
 #include "animelogon/instance.h"
 #include "animelogon/log.h"
@@ -106,33 +107,53 @@ DWORD FindWinlogon(DWORD session) {
     return found;
 }
 
-// Puts back the lock screen picture of the person signed in at the console, which only they can
-// do: animelogon.exe --restore-lock-screen in their session (app/src/lockscreen.h), waited for.
-// Anyone else's comes back when they next sign in while AnimeLogon is off (the icon does it).
+// Puts back the lock screen picture of everyone signed in -- at the console or not -- which only
+// each of them can do: animelogon.exe --restore-lock-screen in their own session
+// (app/src/lockscreen.h), all at once, waited for. Accounts not signed in come back when they next
+// sign in: the icon does it after AnimeLogon is switched off, a one-time step after it is removed
+// (animelogon/lockrestore.h).
 void RestorePersonLockScreen() {
-    const DWORD session = WTSGetActiveConsoleSessionId();
-    HANDLE token = nullptr;
-    if (session == 0xFFFFFFFF || !WTSQueryUserToken(session, &token)) return;
-    LPVOID env = nullptr;
-    CreateEnvironmentBlock(&env, token, FALSE);
-    STARTUPINFOW si{};
-    si.cb = sizeof(si);
-    si.lpDesktop = const_cast<wchar_t *>(L"WinSta0\\Default");
-    std::wstring cmd = L"\"" + animelogon::paths::ModuleDir() + L"animelogon.exe\" --restore-lock-screen";
-    PROCESS_INFORMATION pi{};
-    if (CreateProcessAsUserW(token, nullptr, cmd.data(), nullptr, nullptr, FALSE,
-                             CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW, env, nullptr, &si, &pi)) {
-        CloseHandle(pi.hThread);
-        DWORD code = STILL_ACTIVE;
-        if (WaitForSingleObject(pi.hProcess, kPersonRestoreMs) == WAIT_OBJECT_0) GetExitCodeProcess(pi.hProcess, &code);
-        ALOG(L"launcher: the lock screen picture of the person in session %lu %s (%lu)", session,
-             code == 0 ? L"is put back" : code == STILL_ACTIVE ? L"was still being put back" : L"could not be put back", code);
-        CloseHandle(pi.hProcess);
-    } else {
-        ALOG(L"launcher: cannot start the lock screen picture's restore in session %lu (%lu)", session, GetLastError());
+    struct Started {
+        DWORD session;
+        HANDLE process;
+    };
+    std::vector<Started> started;
+    PWTS_SESSION_INFOW sessions = nullptr;
+    DWORD count = 0;
+    if (WTSEnumerateSessionsW(WTS_CURRENT_SERVER_HANDLE, 0, 1, &sessions, &count)) {
+        for (DWORD i = 0; i < count; ++i) {
+            const DWORD session = sessions[i].SessionId;
+            HANDLE token = nullptr;
+            if (session == 0 || !WTSQueryUserToken(session, &token)) continue;  // nobody signed in to it
+            LPVOID env = nullptr;
+            CreateEnvironmentBlock(&env, token, FALSE);
+            STARTUPINFOW si{};
+            si.cb = sizeof(si);
+            si.lpDesktop = const_cast<wchar_t *>(L"WinSta0\\Default");
+            std::wstring cmd = L"\"" + animelogon::paths::ModuleDir() + L"animelogon.exe\" --restore-lock-screen";
+            PROCESS_INFORMATION pi{};
+            if (CreateProcessAsUserW(token, nullptr, cmd.data(), nullptr, nullptr, FALSE,
+                                     CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW, env, nullptr, &si, &pi)) {
+                CloseHandle(pi.hThread);
+                started.push_back({session, pi.hProcess});
+            } else {
+                ALOG(L"launcher: cannot start the lock screen picture's restore in session %lu (%lu)", session, GetLastError());
+            }
+            if (env) DestroyEnvironmentBlock(env);
+            CloseHandle(token);
+        }
+        WTSFreeMemory(sessions);
     }
-    if (env) DestroyEnvironmentBlock(env);
-    CloseHandle(token);
+    const ULONGLONG until = GetTickCount64() + kPersonRestoreMs;
+    for (const Started &s : started) {
+        const ULONGLONG now = GetTickCount64();
+        DWORD code = STILL_ACTIVE;
+        if (WaitForSingleObject(s.process, now < until ? (DWORD)(until - now) : 0) == WAIT_OBJECT_0)
+            GetExitCodeProcess(s.process, &code);
+        ALOG(L"launcher: the lock screen picture of the person in session %lu %s (%lu)", s.session,
+             code == 0 ? L"is put back" : code == STILL_ACTIVE ? L"was still being put back" : L"could not be put back", code);
+        CloseHandle(s.process);
+    }
 }
 
 // Everything the sign-in background took from Windows and from the person at the console.
