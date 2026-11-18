@@ -16,7 +16,7 @@ foreach(entry IN ITEMS VS Box Gauss Up)
     animelogon_compile_shader(animelogon_tests ${PROJECT_SOURCE_DIR}/overlay/shaders/blur.hlsl ${entry} ${profile}
                               g_blur_${lower} blur_${lower}.h)
 endforeach()
-target_sources(animelogon_tests PRIVATE scene_tests.cpp)
+target_sources(animelogon_tests PRIVATE scene_tests.cpp scenegraph_tests.cpp)
 target_sources(animelogon_tests PRIVATE scene_runtime_tests.cpp)
 add_dependencies(animelogon_tests scene)
 # The overlay's plan and its reading of still wallpapers need nothing but animelogon_common.
