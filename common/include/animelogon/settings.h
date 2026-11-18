@@ -80,6 +80,33 @@ enum class RotationOrder {
     Sequential,  // as listed, starting again after the last
     Shuffle,     // every theme once in a random order, then a new order
 };
+
+// How scenes are drawn (and web wallpapers, once there are any): what the user trades between
+// looks and cost. Every scene shares these.
+enum class RenderQuality {
+    Auto,     // adapts: lowers the frame rate, then the inner resolution, then stops on the still picture
+    Highest,  // always full resolution with full-resolution effects; never lowered, frames are dropped instead
+    High,     // full resolution, soft effects (blur, glow, rays) at half resolution
+    Medium,   // three quarters of the resolution, soft effects at a quarter
+    Low,      // half the resolution, soft effects at a quarter, half the particles
+};
+// What a scene does while the PC runs on its battery.
+enum class BatteryRender {
+    Same,   // as on mains power
+    Half,   // half the frame rate
+    Still,  // the still picture only
+};
+constexpr int kRenderFps = 60, kRenderFpsMin = 15, kRenderFpsMax = 240;
+constexpr int kVideoMemoryMin = 128, kVideoMemoryMax = 16384;  // MB
+constexpr int kParticlesMin = 10, kParticlesMax = 100;         // percent
+struct RenderSettings {
+    RenderQuality quality = RenderQuality::Auto;    // `render_quality`
+    int fps = kRenderFps;      // `render_fps`; 0 is `display`, the display's own refresh rate
+    int videoMemory = 0;       // `render_video_memory` in MB; 0 is `auto`
+    int particles = kParticlesMax;                  // `render_particles`: percent of each emitter's particles
+    BatteryRender onBattery = BatteryRender::Half;  // `render_on_battery`
+    bool stillOnSaver = true;  // `render_battery_saver`: `still` while Windows saves power, or `same`
+};
 // `rotation_minutes`, between kRotationMinutesMin and Max. Every move to a theme not shown lately
 // has Windows prepare its sign-in picture again, so the shortest interval is a few minutes.
 constexpr int kRotationMinutes = 30, kRotationMinutesMin = 5, kRotationMinutesMax = 1440;
@@ -156,6 +183,9 @@ struct Settings {
     RotationTrigger rotationTrigger = RotationTrigger::Interval;
     int rotationMinutes = kRotationMinutes;
     RotationOrder rotationOrder = RotationOrder::Sequential;
+    // `render_quality`, `render_fps`, `render_video_memory`, `render_particles`, `render_on_battery`,
+    // `render_battery_saver`: how every scene is drawn.
+    RenderSettings render;
 
     // --- Themes --------------------------------------------------------------------------
     std::map<std::wstring, ThemeOverrides> themeOverrides;  // by theme id
@@ -208,5 +238,9 @@ const wchar_t *ToString(RotationTrigger trigger);
 bool Parse(std::wstring_view text, RotationTrigger *out);  // interval or lock
 const wchar_t *ToString(RotationOrder order);
 bool Parse(std::wstring_view text, RotationOrder *out);  // sequential or shuffle
+const wchar_t *ToString(RenderQuality quality);
+bool Parse(std::wstring_view text, RenderQuality *out);  // auto, highest, high, medium or low
+const wchar_t *ToString(BatteryRender render);
+bool Parse(std::wstring_view text, BatteryRender *out);  // same, half or still
 
 }  // namespace animelogon

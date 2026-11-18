@@ -286,6 +286,26 @@ int main(int argc, char **argv) {
     return check::RunAll();
 }
 
+TEST(SettingsKeepHowScenesAreDrawn) {
+    const Settings d = ParseSettings(L"theme = default\r\n");
+    CHECK(d.render.quality == RenderQuality::Auto && d.render.fps == kRenderFps && d.render.videoMemory == 0);
+    CHECK(d.render.particles == 100 && d.render.onBattery == BatteryRender::Half && d.render.stillOnSaver);
+    Settings s;
+    s.render = {RenderQuality::Highest, 0, 2048, 40, BatteryRender::Same, false};
+    std::vector<std::wstring> problems;
+    const Settings t = ParseSettings(SerializeSettings(s), &problems);
+    CHECK(problems.empty());
+    CHECK(t.render.quality == RenderQuality::Highest && t.render.fps == 0 && t.render.videoMemory == 2048);
+    CHECK(t.render.particles == 40 && t.render.onBattery == BatteryRender::Same && !t.render.stillOnSaver);
+    CHECK(SerializeSettings(s).find(L"render_fps = display\r\n") != std::wstring::npos);
+    // Values out of range or unknown keep the defaults and are reported.
+    const Settings bad = ParseSettings(L"theme = default\r\nrender_quality = ultra\r\nrender_fps = 10\r\n"
+                                       L"render_video_memory = 64\r\nrender_particles = 0\r\nrender_on_battery = off\r\n"
+                                       L"render_battery_saver = maybe\r\n", &problems);
+    CHECK(problems.size() == 6 && bad.render.quality == RenderQuality::Auto && bad.render.fps == kRenderFps);
+    CHECK(bad.render.videoMemory == 0 && bad.render.particles == 100 && bad.render.stillOnSaver);
+}
+
 TEST(SettingsKeepTheTrayAndTheRecentThemes) {
     const Settings d = ParseSettings(L"theme = default\r\n");
     CHECK(d.tray && d.trayRecent == kTrayRecent && d.recent.empty());

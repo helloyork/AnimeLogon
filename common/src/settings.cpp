@@ -27,6 +27,8 @@ const wchar_t *const kComponentDisplays[] = {L"auto", L"primary", L"all"};
 const wchar_t *const kOtherDisplays[] = {L"blur", L"picture", L"black"};
 const wchar_t *const kRotationTriggers[] = {L"interval", L"lock"};
 const wchar_t *const kRotationOrders[] = {L"sequential", L"shuffle"};
+const wchar_t *const kRenderQualities[] = {L"auto", L"highest", L"high", L"medium", L"low"};
+const wchar_t *const kBatteryRenders[] = {L"same", L"half", L"still"};
 
 bool ParseBool(std::wstring_view v, bool *out) {
     if (EqualsNoCase(v, L"true") || v == L"1") return *out = true, true;
@@ -226,6 +228,22 @@ bool Parse(std::wstring_view text, RotationTrigger *out) {
     return false;
 }
 
+const wchar_t *ToString(RenderQuality quality) { return kRenderQualities[(int)quality]; }
+
+bool Parse(std::wstring_view text, RenderQuality *out) {
+    for (size_t i = 0; i < ARRAYSIZE(kRenderQualities); ++i)
+        if (EqualsNoCase(text, kRenderQualities[i])) return *out = (RenderQuality)i, true;
+    return false;
+}
+
+const wchar_t *ToString(BatteryRender render) { return kBatteryRenders[(int)render]; }
+
+bool Parse(std::wstring_view text, BatteryRender *out) {
+    for (size_t i = 0; i < ARRAYSIZE(kBatteryRenders); ++i)
+        if (EqualsNoCase(text, kBatteryRenders[i])) return *out = (BatteryRender)i, true;
+    return false;
+}
+
 const wchar_t *ToString(RotationOrder order) { return kRotationOrders[(int)order]; }
 
 bool Parse(std::wstring_view text, RotationOrder *out) {
@@ -351,6 +369,31 @@ void Read(const std::wstring &text, Settings *out, bool *namesTheme, std::vector
             if (ok) s.rotationMinutes = (int)n;
         } else if (key == L"rotation_order") {
             ok = Parse(value, &s.rotationOrder);
+        } else if (key == L"render_quality") {
+            ok = Parse(value, &s.render.quality);
+        } else if (key == L"render_fps") {
+            long long n = 0;
+            if (EqualsNoCase(value, L"display")) s.render.fps = 0, ok = true;
+            else {
+                ok = ParseInt(value, &n) && n >= kRenderFpsMin && n <= kRenderFpsMax;
+                if (ok) s.render.fps = (int)n;
+            }
+        } else if (key == L"render_video_memory") {
+            long long n = 0;
+            if (EqualsNoCase(value, L"auto")) s.render.videoMemory = 0, ok = true;
+            else {
+                ok = ParseInt(value, &n) && n >= kVideoMemoryMin && n <= kVideoMemoryMax;
+                if (ok) s.render.videoMemory = (int)n;
+            }
+        } else if (key == L"render_particles") {
+            long long n = 0;
+            ok = ParseInt(value, &n) && n >= kParticlesMin && n <= kParticlesMax;
+            if (ok) s.render.particles = (int)n;
+        } else if (key == L"render_on_battery") {
+            ok = Parse(value, &s.render.onBattery);
+        } else if (key == L"render_battery_saver") {
+            ok = EqualsNoCase(value, L"still") || EqualsNoCase(value, L"same");
+            if (ok) s.render.stillOnSaver = EqualsNoCase(value, L"still");
         } else if (key == L"clock_hours") {
             ok = Parse(std::wstring(value), &s.clock.hours);
         } else if (key == L"clock_ampm") {
@@ -434,6 +477,13 @@ std::wstring SerializeSettings(const Settings &s) {
     out += L"rotation_trigger = " + std::wstring(ToString(s.rotationTrigger)) + L"\r\n";
     out += L"rotation_minutes = " + std::to_wstring(s.rotationMinutes) + L"\r\n";
     out += L"rotation_order = " + std::wstring(ToString(s.rotationOrder)) + L"\r\n";
+    const RenderSettings &r = s.render;
+    out += L"render_quality = " + std::wstring(ToString(r.quality)) + L"\r\n";
+    out += L"render_fps = " + (r.fps ? std::to_wstring(r.fps) : std::wstring(L"display")) + L"\r\n";
+    out += L"render_video_memory = " + (r.videoMemory ? std::to_wstring(r.videoMemory) : std::wstring(L"auto")) + L"\r\n";
+    out += L"render_particles = " + std::to_wstring(r.particles) + L"\r\n";
+    out += L"render_on_battery = " + std::wstring(ToString(r.onBattery)) + L"\r\n";
+    out += L"render_battery_saver = " + std::wstring(r.stillOnSaver ? L"still" : L"same") + L"\r\n";
     AppendOverrides(s, &out);
     return out;
 }
