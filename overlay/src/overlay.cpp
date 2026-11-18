@@ -882,10 +882,13 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
 
     // A spectrum listens to the output device while the screen is up, and is drawn every frame
     // while its bands move (animelogon/audiocapture.h). It listens to the signed-in person's output.
-    const bool listening = withComponents && layer.Listens();
+    // A scene that follows the sound (audio.*) hears the same, as four smoothed measures.
+    const bool componentsListen = withComponents && layer.Listens(), scenesListen = scenes.Listens();
+    const bool listening = componentsListen || scenesListen;
     animelogon::AudioCapture capture;
     animelogon::spectrum::Analyzer analyzer;
     animelogon::spectrum::Frame heard;
+    animelogon::spectrum::Sound sceneSound;
     std::vector<float> samples, ownSound;
     bool readingTrack = false;  // said once in the log
     if (listening) capture.Start(AudioSystem::ListeningDevice);
@@ -1186,8 +1189,11 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
             } else {
                 heard = {{}, 0.0f, false, now / 1000.0};
             }
-            layer.SetAudio(heard);
-            listened = layer.Moving();
+            if (componentsListen) {
+                layer.SetAudio(heard);
+                listened = layer.Moving();
+            }
+            if (scenesListen) sceneSound.Follow(heard);
         }
 
         // Once its sound track plays, the video follows the track's clock instead.
@@ -1237,6 +1243,9 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
             FILETIME utc{}; GetSystemTimeAsFileTime(&utc);
             animelogon::scene::SetData(&sceneInputs.data, snapshot, ((uint64_t)utc.dwHighDateTime<<32)|utc.dwLowDateTime);
             sceneInputs.data.time = t;
+            // How far the screen has gone after a wake, which a scene can follow (`wake`).
+            sceneInputs.data.wake = g_overlay.woke ? std::clamp((double)WakeProgress(plan, shownAt), 0.0, 1.0) : 0.0;
+            if (scenesListen) sceneInputs.data.audio = sceneSound.Levels();
             const int sceneFps = animelogon::FrameRateNow(plan.render,
                 snapshot.battery.state == animelogon::data::BatteryState::Discharging, snapshot.battery.saver);
             fresh = scenes.Tick(sceneInputs,draw,(float)(1/refresh),sceneFps) || fresh;

@@ -214,4 +214,30 @@ void Bands::Follow(const Frame &frame, const Shape &shape) {
     moving_ = moving || (wanted > 0.0f && !frame.sound);
 }
 
+namespace {
+// Narrow enough bands to split at 250 Hz and 2 kHz, smoothed as a spectrum is by default.
+const Shape kSoundShape{24, 40.0f, 16000.0f, 1.0f, 0.5f};
+}  // namespace
+
+void Sound::Follow(const Frame &frame) { bands_.Follow(frame, kSoundShape); }
+
+// Each measure is halfway between its bands' mean and its loudest band: broad sound reads about as
+// loud as it is, and a single note (a kick, a high voice) still shows instead of being averaged away.
+std::array<double, 4> Sound::Levels() const {
+    const std::vector<float> &levels = bands_.levels();
+    double sum[4]{}, count[4]{}, most[4]{};
+    for (size_t i = 0; i < levels.size(); ++i) {
+        // The band's middle, its bands spaced evenly in octaves from `low` to `high`.
+        const double hz = kSoundShape.low * std::pow((double)kSoundShape.high / kSoundShape.low, (i + 0.5) / levels.size());
+        for (const int part : {0, hz < 250 ? 1 : hz < 2000 ? 2 : 3}) {
+            sum[part] += levels[i];
+            ++count[part];
+            most[part] = std::max(most[part], (double)levels[i]);
+        }
+    }
+    std::array<double, 4> out{};
+    for (int i = 0; i < 4; ++i) out[i] = count[i] ? std::clamp((sum[i] / count[i] + most[i]) / 2, 0.0, 1.0) : 0.0;
+    return out;
+}
+
 }  // namespace animelogon::spectrum

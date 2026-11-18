@@ -287,6 +287,17 @@ TEST(SceneGraphKnowsWhenNothingMoves) {
     CHECK(sg::Parse(Scene(kAssets + "<layer source=\"birds\"/>"), sg::Mode::Package, &d, &why));
     CHECK(sg::Moves(d));
     CHECK(sg::EffectTypes().size() == 17);
+    // The sound is listened to only for a scene that follows it, or has a shader that could.
+    CHECK(sg::ReadsSound(d));  // kAssets has a shader
+    const std::string sky = "<assets><image id=\"sky\" file=\"sky.png\"/></assets>";
+    CHECK(sg::Parse(Scene(sky + "<layer source=\"sky\"><drive property=\"opacity\" by=\"audio.bass\" from=\"0.5\" to=\"1\"/></layer>"),
+                    sg::Mode::Package, &d, &why));
+    CHECK(sg::ReadsSound(d));
+    CHECK(sg::Parse(Scene(sky + "<layer source=\"sky\" when=\"!audio.level\"/>"), sg::Mode::Package, &d, &why));
+    CHECK(sg::ReadsSound(d));
+    CHECK(sg::Parse(Scene(sky + "<camera><drive property=\"scale\" by=\"wake\" from=\"1\" to=\"1.1\"/></camera><layer source=\"sky\"/>"),
+                    sg::Mode::Package, &d, &why));
+    CHECK(!sg::ReadsSound(d));
 }
 
 TEST(SceneGraphEnvelopesAreBoundedAndExact) {

@@ -8,6 +8,7 @@
 // (Bands). Nothing here knows about drawing; previews take a made-up frame (Sample).
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <vector>
 
@@ -77,6 +78,18 @@ private:
     double at_ = -1.0, heardAt_ = -1.0;
     float presence_ = 0.0f;
     bool moving_ = false;
+};
+
+// What a scene hears (audio.level, audio.bass, audio.mid, audio.treble): the whole range, below
+// 250 Hz, 250 Hz to 2 kHz, and above, each 0 to 1, rising and falling as a spectrum's bands do.
+class Sound {
+public:
+    void Follow(const Frame &frame);
+    void Reset() { bands_.Reset(); }
+    // Level, bass, middle and treble.
+    std::array<double, 4> Levels() const;
+private:
+    Bands bands_;
 };
 
 }  // namespace animelogon::spectrum

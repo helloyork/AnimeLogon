@@ -182,6 +182,9 @@ bool Moves(const Document &document);
 // Whether an effect changes from frame to frame by itself: a built-in one that animates (bend, grain
 // and the like), or an author's shader, which can read the time and the inputs.
 bool EffectMoves(const Effect &effect);
+// Whether the scene can follow the sound playing: it drives something by audio.*, shows something
+// on a condition about it, or has a shader, which can read it.
+bool ReadsSound(const Document &document);
 
 // Numbers, colors (#RRGGBB[AA]) and two to four space-separated numbers, as floats.
 std::vector<float> Components(const std::wstring &literal);

@@ -1236,6 +1236,28 @@ Frame Evaluate(const Document &d, const Values &values, const Inputs &in) {
 
 bool EffectMoves(const Effect &effect) { return !effect.source.empty() || TimeDriven(effect.type); }
 
+bool ReadsSound(const Document &d) {
+    const auto audio = [](const std::wstring &name) {
+        const size_t at = name.find(L"audio.");
+        return at == 0 || (at == 1 && name[0] == L'!');
+    };
+    for (const Asset &a : d.assets) if (a.kind == AssetKind::LayerShader || a.kind == AssetKind::EffectShader) return true;
+    const auto drives = [&](const std::vector<Motion> &motions) {
+        for (const Motion &m : motions) if (m.kind == MotionKind::Drive && audio(m.by)) return true;
+        return false;
+    };
+    if (drives(d.camera)) return true;
+    std::function<bool(const Node &)> reads = [&](const Node &n) {
+        if (drives(n.motions)) return true;
+        if (const auto *w = n.Find(L"when"); w && audio(*w)) return true;
+        for (const Effect &e : n.effects) if (audio(e.when)) return true;
+        for (const Node &c : n.children) if (reads(c)) return true;
+        return false;
+    };
+    for (const Node &n : d.nodes) if (reads(n)) return true;
+    return false;
+}
+
 bool Moves(const Document &d) {
     if (!d.camera.empty()) return true;
     std::function<bool(const Node &)> moves = [&](const Node &n) {

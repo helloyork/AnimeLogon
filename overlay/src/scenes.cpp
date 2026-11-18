@@ -99,6 +99,7 @@ void Scenes::Prepare(Presenter &presenter, const plan::Plan &plan) {
                 return true; })() &&
             host->Start(presenter.device(),files,e.width,e.height,options,&why)) {
             e.host = std::move(host); e.last = GetTickCount64(); e.everReady = false;
+            e.hears = scenegraph::ReadsSound(document);
             e.failed = false;
         } else {
             ALOG(L"scene: %s could not be prepared (%s); its static image remains available",e.id.c_str(),why.c_str());
@@ -132,6 +133,10 @@ void Scenes::Fail(const std::wstring &id, const std::wstring &why) {
     if (failures == 3) ALOG(L"scene: %s disabled after three consecutive failed locks; waiting for a wallpaper change",id.c_str());
 }
 void Scenes::FailAll(const std::wstring &why) { for (const auto &[id,e] : entries_) Fail(e.id,why); }
+bool Scenes::Listens() const {
+    for (const auto &[id,e] : entries_) if (e.active && e.hears && e.host) return true;
+    return false;
+}
 bool Scenes::Static(const std::wstring &id) const {
     for (const auto &[key,e] : entries_) if (e.id == id && (e.staticOnly || e.failed || e.blocked || e.failures >= 3 || stillThisLock_)) return true;
     return false;

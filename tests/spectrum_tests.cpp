@@ -437,3 +437,18 @@ TEST(SpectrumIsDrawnWhereItsRoomIs) {
         }
     if (SUCCEEDED(co)) CoUninitialize();
 }
+
+TEST(SpectrumGivesScenesTheBassMiddleAndTreble) {
+    // A low tone is bass; a high one is treble; silence falls back to nothing.
+    spectrum::Sound low, high;
+    double t = 0.0;
+    for (; t < 0.3; t += 1.0 / 60.0) {
+        low.Follow(FrameOf(Sine(80.0f, 0.5f), t));
+        high.Follow(FrameOf(Sine(6000.0f, 0.5f), t));
+    }
+    const auto l = low.Levels(), h = high.Levels();
+    CHECK(l[1] > 0.3 && l[1] > 2 * l[3] && l[0] > 0.0 && l[0] < l[1]);
+    CHECK(h[3] > 0.3 && h[3] > 2 * h[1]);
+    for (const double end = t + 5.0; t < end; t += 1.0 / 60.0) low.Follow({{}, 0.0f, false, t});
+    CHECK(low.Levels() == (std::array<double, 4>{}));
+}

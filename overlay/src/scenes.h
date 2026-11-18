@@ -22,6 +22,8 @@ public:
     void Fail(const std::wstring &id, const std::wstring &why);
     void FailAll(const std::wstring &why);
     bool Static(const std::wstring &id) const;
+    // Whether a scene playing this lock follows the sound, so the sound is listened to.
+    bool Listens() const;
     Presenter::Picture Picture(const plan::Wallpaper &wallpaper) const;
     void Video(const std::wstring &id, Presenter &presenter, const VideoPlayer::Frame &frame, int width, int height);
 private:
@@ -34,6 +36,7 @@ private:
         bool failed = false, active = false, everReady = false;
         bool blocked = false;
         bool staticOnly = false;
+        bool hears = false;  // the scene reads audio.* (scenegraph::ReadsSound)
         // The quality, video memory and particle settings the renderer was started with.
         int quality = -1, videoMemory = -1, particles = -1;
         // The video goes over whole: the renderer fits it into its node.
