@@ -78,6 +78,12 @@ export function LibraryPage() {
             <Button size="sm" shield onClick={() => send('switch', { on: true })}>{tr('library.turn_off_others', { names: others })}</Button>
           </div>
         )}
+        {s.env.installed && s.env.library.away && (
+          <div className="notice" role="status">
+            <Warning16Regular />
+            <span>{tr('library.away', { dir: s.env.library.dir })}</span>
+          </div>
+        )}
         {perMonitor() ? <Screens /> : <Current />}
         {s.env.steam ? <WithWorkshop /> : (
           <>

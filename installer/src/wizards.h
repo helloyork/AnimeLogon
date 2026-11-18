@@ -1,6 +1,7 @@
 // The pages of install.exe and uninstall.exe, on the window in ui.h.
 //
-// Installing: 欢迎 (what AnimeLogon changes, the language) -> 安装位置 (a new install only) ->
+// Installing: 欢迎 (what AnimeLogon changes, the language) -> 安装位置 (a new install only: which
+// drive, drives.h) ->
 // 正在安装 -> 安装完成, or 无法安装 when something stops it before it starts, or 安装未完成 when it
 // fails half way. Uninstalling: 卸载 (keep the themes or not) -> 正在卸载 -> 卸载完成.
 //
@@ -12,6 +13,7 @@
 #include <thread>
 #include <vector>
 
+#include "drives.h"
 #include "engine.h"
 #include "ui.h"
 
@@ -35,6 +37,9 @@ public:
     std::wstring step;
     std::vector<engine::Blocker> blockers;
     engine::Report report;
+    // The drives on the location page, read when it is first shown (or set by the preview).
+    std::vector<drives::Drive> drives;
+    bool drivesKnown = false;
     // Set by the preview: the buttons do nothing.
     bool preview = false;
 
@@ -49,7 +54,8 @@ protected:
 
 private:
     void Start();
-    void ChooseFolder();
+    void ReadDrives();
+    bool Chosen(const drives::Drive &d) const;
     void ChooseLanguage();
     std::thread worker_;
 };

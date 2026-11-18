@@ -19,6 +19,7 @@
 #include "animelogon/background.h"
 #include "animelogon/components.h"
 #include "animelogon/i18n.h"
+#include "animelogon/library.h"
 #include "animelogon/live.h"
 #include "animelogon/log.h"
 #include "animelogon/machine.h"
@@ -33,6 +34,7 @@
 #include "animelogon/wallpaper.h"
 
 #include "assoc.h"
+#include "drives.h"
 #include "payload.h"
 #include "restart.h"
 
@@ -62,8 +64,13 @@ DWORD SceneReadAccess(const std::wstring &path, bool directory) {
     access.grfAccessPermissions = directory ? FILE_TRAVERSE | FILE_READ_ATTRIBUTES | READ_CONTROL : FILE_GENERIC_READ | FILE_GENERIC_EXECUTE;
     access.grfAccessMode = GRANT_ACCESS; access.grfInheritance = NO_INHERITANCE;
     access.Trustee.TrusteeForm = TRUSTEE_IS_SID; access.Trustee.ptstrName = reinterpret_cast<LPWSTR>(sid);
+    // A protected DACL stays protected: <drive>:\AnimeLogon must not start inheriting from the
+    // drive's root, which lets Authenticated Users change what is made in it.
+    SECURITY_DESCRIPTOR_CONTROL control = 0; DWORD revision = 0;
+    const bool isProtected = GetSecurityDescriptorControl(sd,&control,&revision) && (control & SE_DACL_PROTECTED);
+    const SECURITY_INFORMATION what = DACL_SECURITY_INFORMATION | (isProtected ? PROTECTED_DACL_SECURITY_INFORMATION : 0);
     e = SetEntriesInAclW(1,&access,oldAcl,&newAcl);
-    if (e == ERROR_SUCCESS) e = SetNamedSecurityInfoW(const_cast<LPWSTR>(path.c_str()),SE_FILE_OBJECT,DACL_SECURITY_INFORMATION,nullptr,nullptr,newAcl,nullptr);
+    if (e == ERROR_SUCCESS) e = SetNamedSecurityInfoW(const_cast<LPWSTR>(path.c_str()),SE_FILE_OBJECT,what,nullptr,nullptr,newAcl,nullptr);
     if (newAcl) LocalFree(newAcl); LocalFree(sd); return e;
 }
 
@@ -269,8 +276,36 @@ DWORD WriteUninstallEntry(const std::wstring &targetDir) {
     return ERROR_SUCCESS;
 }
 
+// <drive>:\AnimeLogon for an install on a drive other than Windows' own, and the library in it,
+// pinned in the registry (library.h). The directory is made here with administrators-only
+// permissions, or is one administrators already hold: an earlier install's, or what an uninstall
+// that kept the themes left. One that anybody else made or could change is left alone -- it may
+// be somebody's own folder -- and the install stops, saying so in `why`.
+DWORD PrepareDriveInstall(const std::wstring &dir, std::wstring *why) {
+    std::wstring w;
+    if (secure::RootIsOpen(dir.substr(0, 3), &w)) {
+        ALOG(L"install: %s lets %s remove what is in it", dir.substr(0, 3).c_str(), w.c_str());
+        *why = Tr("install.error.open_root", {{L"root", dir.substr(0, 3)}});
+        return ERROR_ACCESS_DENIED;
+    }
+    if (GetFileAttributesW(dir.c_str()) == INVALID_FILE_ATTRIBUTES) {
+        const DWORD gone = GetLastError();
+        if (gone != ERROR_FILE_NOT_FOUND && gone != ERROR_PATH_NOT_FOUND) return gone;
+        const DWORD e = secure::SecureDirectory(dir);
+        if (e != ERROR_SUCCESS) return e;
+    } else if (!secure::IsTrustedDirectory(dir, &w)) {
+        ALOG(L"install: %s %s", dir.c_str(), w.c_str());
+        *why = Tr("install.error.taken", {{L"dir", dir}});
+        return ERROR_ALREADY_EXISTS;
+    }
+    const std::wstring kept = library::LibraryIn(dir);
+    const DWORD e = secure::SecureDirectory(kept);
+    return e == ERROR_SUCCESS ? library::Pin(kept) : e;
+}
+
 // %ProgramData%\AnimeLogon and the directories in it, taken back and emptied if anyone but
-// an administrator could have prepared them: the logs, and the stores themes are made of.
+// an administrator could have prepared them: the logs, and the stores themes are made of (which
+// are in the library on the install's own drive when that is not Windows').
 DWORD PrepareDataDir() {
     for (const std::wstring &dir : {paths::DataDir(), paths::LogDir(), WallpapersDir(), ComponentsDir(), ThemesDir()}) {
         const DWORD e = secure::SecureDirectory(dir);
@@ -411,11 +446,39 @@ std::wstring ProgramFilesDir() {
     return dir.empty() ? std::wstring(L"C:\\Program Files") : dir;
 }
 
+std::wstring RefusalText(library::Refusal why) {
+    switch (why) {
+    case library::Refusal::None: return L"";
+    case library::Refusal::NotLocal: return Tr("drive.refusal.not_local");
+    case library::Refusal::Removable: return Tr("drive.refusal.removable");
+    case library::Refusal::Locked: return Tr("drive.refusal.locked");
+    case library::Refusal::NoPermissions: return Tr("drive.refusal.no_permissions");
+    case library::Refusal::LockedAtBoot: return Tr("drive.refusal.locked_at_boot");
+    case library::Refusal::OpenRoot: return Tr("drive.refusal.open_root");
+    }
+    return L"";
+}
+
 // The SYSTEM service runs from here, so every directory on the way must already be closed
-// to everyone but administrators. Program Files is; an arbitrary --dir may not be.
-bool InstallDirAllowed(const std::wstring &dir) {
+// to everyone but administrators. Program Files is; so is <drive>:\AnimeLogon on a drive whose
+// root nobody else may delete from (library::Judge), the installer making it itself. An arbitrary
+// --dir may not be: a folder somebody made can be renamed away and replaced, contents and all.
+std::wstring DirRefusal(const std::wstring &dir) {
     const std::wstring root = ProgramFilesDir();
-    return paths::IsPlainAbsolute(dir) && paths::IsWithin(dir, root) && dir.size() > root.size();
+    if (paths::IsPlainAbsolute(dir) && paths::IsWithin(dir, root) && dir.size() > root.size()) return L"";
+    if (!library::IsDriveInstallDir(dir) || dir[0] == drives::SystemLetter())
+        return Tr("check.folder.detail", {{L"root", root}});
+    return RefusalText(library::Judge(drives::Probe(dir[0])));
+}
+
+bool InstallDirAllowed(const std::wstring &dir) { return DirRefusal(dir).empty(); }
+
+std::wstring MoveRefusal(const std::wstring &targetDir) {
+    // The library goes where the install goes; carrying it to another drive is not an update's to do.
+    const std::wstring installed = machine::InstallDir();
+    if (installed.empty() || EqualsNoCase(installed, targetDir)) return L"";
+    if (!library::IsDriveInstallDir(targetDir) && !library::IsDriveInstallDir(installed)) return L"";
+    return Tr("install.error.move", {{L"dir", installed}});
 }
 
 bool WebView2Installed() {
@@ -470,8 +533,9 @@ std::vector<Blocker> CheckBeforeInstall(const std::wstring &targetDir) {
         found.push_back({Tr("check.machine.title"),
                          Tr("check.machine.detail", {{L"machine", payload::MachineName(payload::NativeMachine())}})});
     if (!H264Available()) found.push_back({Tr("check.h264.title"), Tr("check.h264.detail")});
-    if (!InstallDirAllowed(targetDir)) {
-        found.push_back({Tr("check.folder.title"), Tr("check.folder.detail", {{L"root", ProgramFilesDir()}})});
+    const std::wstring refused = DirRefusal(targetDir), moved = refused.empty() ? MoveRefusal(targetDir) : L"";
+    if (!refused.empty() || !moved.empty()) {
+        found.push_back({Tr("check.folder.title"), refused.empty() ? moved : refused});
     } else {
         // An update replaces files of about the same size; only a new install needs the room.
         const unsigned long long need = RequiredBytes(), free = FreeBytes(targetDir);
@@ -546,8 +610,12 @@ Report Install(const std::wstring &targetDir, const InstallOptions &options) {
         r.message = Tr("install.error.h264");
         return r;
     }
-    if (!InstallDirAllowed(targetDir)) {
-        r.message = Tr("install.error.dir", {{L"root", ProgramFilesDir()}, {L"dir", targetDir}});
+    if (const std::wstring refused = DirRefusal(targetDir); !refused.empty()) {
+        r.message = Tr("install.error.dir", {{L"dir", targetDir}, {L"why", refused}});
+        return r;
+    }
+    if (const std::wstring moved = MoveRefusal(targetDir); !moved.empty()) {
+        r.message = moved;
         return r;
     }
 
@@ -561,8 +629,14 @@ Report Install(const std::wstring &targetDir, const InstallOptions &options) {
     const DWORD stopped = machine::StopLauncherService();
     restartOnFailure = before == SERVICE_RUNNING || before == SERVICE_START_PENDING;
 
+    // On a drive other than Windows' own, <drive>:\AnimeLogon and the library in it first: the
+    // stores below are made in the library. In Program Files the library is ProgramData's.
+    std::wstring why;
+    DWORD e = library::IsDriveInstallDir(targetDir) ? PrepareDriveInstall(targetDir, &why) : library::Unpin();
+    if (e != ERROR_SUCCESS) return fail(why.empty() ? WithError(Tr("install.error.library"), e) : why);
+
     // The data directory before anything is written into it, the log included.
-    DWORD e = PrepareDataDir();
+    e = PrepareDataDir();
     if (e != ERROR_SUCCESS) return fail(WithError(Tr("install.error.data"), e));
     log::Open(paths::LogPath(L"install.log"));
     ALOG(L"install: version %S for %s into %s (Windows runs on %s; this setup program is %s and carries %s)", ANIMELOGON_VERSION,
@@ -608,7 +682,6 @@ Report Install(const std::wstring &targetDir, const InstallOptions &options) {
     // from the video -- since every change costs one black credential screen.
     at(0.62, "install.step.background");
     const std::vector<uint8_t> png = background::Render();
-    std::wstring why;
     if (!secure::IsTrusted(paths::BackgroundPath(), &why)) {
         e = secure::WriteBytes(paths::BackgroundPath(), png.data(), png.size());
         if (e != ERROR_SUCCESS) return fail(WithError(Tr("install.error.background"), e));
@@ -758,6 +831,9 @@ Report Uninstall(bool keepData, const Progress &progress) {
     };
 
     const std::wstring dir = machine::InstallDir();
+    // Read before the install record, which pins the library, goes.
+    const bool libraryElsewhere = library::Elsewhere();
+    const std::wstring libraryDir = library::Dir();
 
     at(0.05, "uninstall.step.close_app");
     CloseRunningApp();
@@ -796,8 +872,10 @@ Report Uninstall(bool keepData, const Progress &progress) {
     if (!keepData) {
         at(0.70, "uninstall.step.data");
         e = secure::RemoveTree(paths::DataDir());
+        if (e == ERROR_SUCCESS && libraryElsewhere) e = secure::RemoveTree(libraryDir);
         if (e != ERROR_SUCCESS) problem("uninstall.problem.data", e);
     } else {
+        r.keptAt = libraryDir;
         // The themes, their wallpapers and components, and settings.ini stay for a later install.
         // What somebody's session last reported is not kept; the service deletes it when it
         // stops, and this covers a service that could not.
@@ -828,7 +906,10 @@ Report Uninstall(bool keepData, const Progress &progress) {
         }
         // Gone now if empty; otherwise after the restart that removes what is still in use
         // (uninstall.exe itself, usually). Queued after the files, so it is empty by then.
+        // A library kept in the install directory keeps the directory too.
+        const bool keepDir = keepData && libraryElsewhere && paths::IsWithin(libraryDir, dir);
         for (const std::wstring &d : {dir + L"\\licenses", dir}) {
+            if (keepDir && d == dir) continue;
             if (RemoveDirectoryW(d.c_str())) continue;
             e = GetLastError();
             if (e == ERROR_FILE_NOT_FOUND || e == ERROR_PATH_NOT_FOUND) continue;

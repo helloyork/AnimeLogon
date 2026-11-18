@@ -1,5 +1,6 @@
 // Wallpapers: what fills a display behind the components. An imported wallpaper lives in
-// %ProgramData%\AnimeLogon\wallpapers\<id>\ as wallpaper.ini plus either video.mp4 (and
+// the library's wallpapers\<id>\ (library.h: %ProgramData%\AnimeLogon, or <drive>:\AnimeLogon\Library
+// for an install on another drive) as wallpaper.ini plus either video.mp4 (and
 // audio.wav when it has sound) or image.bmp. Every file there is the output of the settings
 // app's normalisation, written only by its elevated helper; wallpaper.ini is parsed and written
 // afresh there, never copied.

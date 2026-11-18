@@ -39,6 +39,9 @@ public:
     void Gap(float dips);
     // A check box with its label, and a quieter line under it.
     void Check(int id, const std::wstring &label, const std::wstring &detail, bool checked, bool enabled = true);
+    // One choice of several, drawn as a round button: the window decides which is selected and
+    // rebuilds; clicking one sends its id to OnClick.
+    void Radio(int id, const std::wstring &label, const std::wstring &detail, bool selected, bool enabled = true);
     // A path in a box, read-only, with a button beside it.
     void Field(const std::wstring &value, int buttonId, const std::wstring &buttonLabel);
     void Progress(double fraction);

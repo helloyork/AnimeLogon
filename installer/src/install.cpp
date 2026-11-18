@@ -20,14 +20,18 @@
 #include <objbase.h>
 #include <shellapi.h>
 
+#include <cwctype>
 #include <string>
 #include <vector>
 
 #include "animelogon/i18n.h"
+#include "animelogon/library.h"
 #include "animelogon/log.h"
 #include "animelogon/machine.h"
 #include "animelogon/others.h"
+#include "animelogon/text.h"
 
+#include "drives.h"
 #include "engine.h"
 #include "wizards.h"
 
@@ -87,6 +91,12 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     std::wstring target = animelogon::machine::InstallDir();
     if (target.empty()) target = engine::DefaultInstallDir();
     if (const wchar_t *dir = Arg(argc, argv, L"--dir")) target = FullPath(dir);
+    // <drive>:\AnimeLogon however it was typed, in the one spelling the installer goes by.
+    if (target.size() > 3 && animelogon::EqualsNoCase(target, animelogon::library::InstallDirOn(target[0])))
+        target = animelogon::library::InstallDirOn(target[0]);
+    // --drive D: the install directory on drive D (drives.h): Program Files on Windows' own.
+    if (const wchar_t *drive = Arg(argc, argv, L"--drive"); drive && iswalpha(drive[0]) && (!drive[1] || drive[1] == L':'))
+        target = drives::InstallDirOn(drive[0], engine::ProgramFilesDir());
 
     int code = 0;
     if (quiet) {

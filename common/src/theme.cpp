@@ -6,6 +6,7 @@
 #include <cwchar>
 
 #include "animelogon/components.h"
+#include "animelogon/library.h"
 #include "animelogon/paths.h"
 #include "animelogon/secure.h"
 #include "animelogon/text.h"
@@ -412,7 +413,7 @@ bool IsThemeId(const std::wstring &id) { return id == kDefaultTheme || IsHexId(i
 
 std::wstring NewThemeId() { return RandomHex(8); }
 
-std::wstring ThemesDir() { return paths::DataDir() + L"\\themes"; }
+std::wstring ThemesDir() { return library::Dir() + L"\\themes"; }
 std::wstring ThemeDir(const std::wstring &id) { return ThemesDir() + L"\\" + id; }
 std::wstring ThemeFilePath(const std::wstring &id) { return ThemeDir(id) + L"\\theme.xml"; }
 

@@ -22,6 +22,9 @@ export interface Environment {
   version: string;     // this program's version, as its version resource gives it
   user: string;        // the name Windows' sign-in screen greets this person by
   accountPicture: boolean;  // they have an account picture, served as `account`
+  // Where the themes, wallpapers and components are (common/include/animelogon/library.h); `away` when
+  // that is a drive of its own that cannot be used just now, so the lock screen shows the default.
+  library: { dir: string; away: boolean };
   wallpaperEngine: boolean; // Wallpaper Engine keeps wallpapers on this computer (app/src/workshop.h)
   steam: boolean;           // the Steam edition, with the Steam Workshop (app/src/host_steam.cpp)
   // The file types each kind of import takes, as extensions without the dot: the ones the file

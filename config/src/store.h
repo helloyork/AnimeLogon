@@ -56,7 +56,7 @@ public:
 };
 const Target &Disk();
 
-// `dataPath`, a path under paths::DataDir() such as WallpaperDir(id), moved under t.Root().
+// `dataPath`, a path in the library (library::Dir()) such as WallpaperDir(id), moved under t.Root().
 std::wstring In(const Target &t, const std::wstring &dataPath);
 
 // The settings app's work directory, %LOCALAPPDATA%\AnimeLogon\import\<12 hex digits>, on a

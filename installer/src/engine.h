@@ -6,6 +6,8 @@
 #include <string>
 #include <vector>
 
+#include "animelogon/library.h"
+
 namespace engine {
 
 // How far the work is (0 to 1) and the step it is on, as it goes; called on the working thread.
@@ -20,6 +22,7 @@ struct Report {
     bool restartPending = false;         // uninstall: files in use go at the next restart
     std::wstring switchedOff;            // install: another program drawing the logon screen it switched off
     std::vector<std::wstring> othersOff; // uninstall: such programs left off, to be switched on in their own settings
+    std::wstring keptAt;                 // uninstall: where the themes that stay are (the library)
 };
 
 // The files installed are payload.h's: from inside install.exe, the programs for the processor
@@ -32,8 +35,13 @@ bool WebView2Installed();
 
 std::wstring ProgramFilesDir();
 std::wstring DefaultInstallDir();
-// The SYSTEM service runs from the install directory, so it must lie inside Program Files.
+// The SYSTEM service runs from the install directory, so it must lie inside Program Files, or be
+// <drive>:\AnimeLogon on another local drive that library::Judge does not refuse (drives.h).
 bool InstallDirAllowed(const std::wstring &dir);
+// Why `dir` cannot take an install, in a sentence; empty when it can.
+std::wstring DirRefusal(const std::wstring &dir);
+// A sentence for why a drive cannot hold an install.
+std::wstring RefusalText(animelogon::library::Refusal why);
 // The version in the uninstall entry; empty when AnimeLogon is not installed.
 std::wstring InstalledVersion();
 // Free space on the volume `dir` would be on (its nearest existing ancestor's).
@@ -59,10 +67,13 @@ struct InstallOptions {
 // Changes nothing where there are no programs for the processor Windows runs on
 // (payload::InstallMachine), and installs that processor's programs otherwise. Stops the service of
 // an install being updated, and starts it again if the update fails before its own is installed.
-// Takes %ProgramData%\AnimeLogon and its wallpapers\, components\ and themes\ (then opens
-// install.log in it), deletes the videos\ and skins\ stores from before themes, closes AnimeLogon's
-// own windows on this desktop (the settings app, the icon in the notification area), writes the
-// program files to `targetDir`, which must lie inside Program Files -- a file still in use elsewhere
+// On a drive other than Windows' own, makes <drive>:\AnimeLogon and its Library administrators-only
+// and pins the library there (library.h), refusing a directory of that name somebody else made; in
+// Program Files, unpins it. Takes %ProgramData%\AnimeLogon and the library's wallpapers\,
+// components\ and themes\ (then opens install.log in ProgramData), deletes the videos\ and skins\
+// stores from before themes, closes AnimeLogon's own windows on this desktop (the settings app, the
+// icon in the notification area), writes the program files to `targetDir` (InstallDirAllowed; an
+// update does not move to or from another drive) -- a file still in use elsewhere
 // is moved aside and deleted at the next restart -- and deletes config.exe there (the settings app
 // of earlier versions), bakes the background, writes default settings (the default theme) unless
 // settings.ini already names a theme, registers the uninstall entry and .altheme files (assoc.h),
@@ -76,8 +87,9 @@ Report Install(const std::wstring &targetDir, const InstallOptions &options = {}
 // Closes AnimeLogon's windows on this desktop, removes the shortcuts, the Run entry, the
 // uninstall entry and what registered .altheme files (assoc.h), stops and removes the service,
 // restores the Windows lock screen, and deletes the installed files (at the next restart if in
-// use). `keepData` leaves the themes, their wallpapers and components, and settings.ini in place;
-// otherwise all of %ProgramData%\AnimeLogon goes.
+// use). `keepData` leaves the themes, their wallpapers and components, and settings.ini in place
+// (a library on another drive keeps <drive>:\AnimeLogon too, for a later install there to find);
+// otherwise all of %ProgramData%\AnimeLogon goes, and the library wherever it is.
 Report Uninstall(bool keepData, const Progress &progress = {});
 
 }  // namespace engine

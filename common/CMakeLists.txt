@@ -10,6 +10,7 @@ add_library(animelogon_common STATIC
     src/i18n.cpp
     src/image.cpp
     src/instance.cpp
+    src/library.cpp
     src/live.cpp
     src/log.cpp
     src/machine.cpp

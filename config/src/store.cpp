@@ -6,6 +6,7 @@
 
 #include "animelogon/bitmap.h"
 #include "animelogon/components.h"
+#include "animelogon/library.h"
 #include "animelogon/log.h"
 #include "animelogon/paths.h"
 #include "animelogon/secure.h"
@@ -38,8 +39,8 @@ constexpr const wchar_t *kComponentsDirName = L"components";
 
 class Disk_ : public Target {
 public:
-    std::wstring Root() const override { return paths::DataDir(); }
-    bool Ready(std::wstring *why) const override { return secure::IsTrustedDirectory(paths::DataDir(), why); }
+    std::wstring Root() const override { return library::Dir(); }
+    bool Ready(std::wstring *why) const override { return secure::IsTrustedDirectory(library::Dir(), why); }
     bool Trusted(const std::wstring &file, std::wstring *why) const override { return secure::IsTrusted(file, why); }
     DWORD MakeDirectory(const std::wstring &dir) const override { return secure::SecureDirectory(dir); }
     DWORD WriteBytes(const std::wstring &file, const void *bytes, size_t size) const override {
@@ -475,7 +476,7 @@ const Target &Disk() {
 }
 
 std::wstring In(const Target &t, const std::wstring &dataPath) {
-    const std::wstring data = paths::DataDir();
+    const std::wstring data = library::Dir();
     if (dataPath.size() < data.size() || dataPath.compare(0, data.size(), data) != 0) return dataPath;
     return t.Root() + dataPath.substr(data.size());
 }

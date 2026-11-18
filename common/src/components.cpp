@@ -5,6 +5,7 @@
 #include <map>
 #include <mutex>
 
+#include "animelogon/library.h"
 #include "animelogon/paths.h"
 #include "animelogon/secure.h"
 #include "animelogon/text.h"
@@ -264,7 +265,7 @@ bool IsComponentId(const std::wstring &id) { return IsBuiltInComponent(id) || Is
 
 std::wstring NewComponentId() { return RandomHex(8); }
 
-std::wstring ComponentsDir() { return paths::DataDir() + L"\\components"; }
+std::wstring ComponentsDir() { return library::Dir() + L"\\components"; }
 std::wstring ComponentDir(const std::wstring &id) { return ComponentsDir() + L"\\" + id; }
 std::wstring ComponentFilePath(const std::wstring &id) { return ComponentDir(id) + L"\\component.xml"; }
 

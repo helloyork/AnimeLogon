@@ -5,6 +5,7 @@
 
 #include <cwchar>
 
+#include "animelogon/library.h"
 #include "animelogon/paths.h"
 #include "animelogon/text.h"
 
@@ -371,8 +372,19 @@ bool IsTrustedDirectory(const std::wstring &dir, std::wstring *why) {
         return false;
     }
     if (InSandbox(dir)) return true;
-    const std::wstring root = paths::DataDir();
-    if (!paths::IsWithin(dir, root)) return DirectoryHeld(dir, why);
+    std::wstring root = paths::DataDir();
+    if (!paths::IsWithin(dir, root)) {
+        // The library on a drive of its own: the directories in it as below, and what holds it
+        // there (the drive, the directory's identity, the directory above, the root).
+        const std::wstring library = library::Dir();
+        if (!library::Elsewhere() || !paths::IsWithin(dir, library)) return DirectoryHeld(dir, why);
+        std::wstring w;
+        if (!library::Verify(&w)) {
+            *why = L"is in a library that " + w;
+            return false;
+        }
+        root = library;
+    }
     // Inside the data directory every directory above counts too: any of them could
     // otherwise be renamed away and replaced, contents and all.
     for (std::wstring at = dir;; at = ParentOf(at)) {
@@ -411,6 +423,27 @@ bool IsTrusted(const std::wstring &file, std::wstring *why) {
     const bool ok = HeldByAdmins(f, false, why);
     CloseHandle(f);
     return ok;
+}
+
+bool RootIsOpen(const std::wstring &root, std::wstring *who) {
+    HANDLE h = OpenToLook(root, true);
+    if (h == INVALID_HANDLE_VALUE) {
+        *who = L"anyone (the root cannot be opened: " + std::to_wstring(GetLastError()) + L")";
+        return true;
+    }
+    PACL dacl = nullptr;
+    PSECURITY_DESCRIPTOR sd = nullptr;
+    const DWORD e = GetSecurityInfo(h, SE_FILE_OBJECT, DACL_SECURITY_INFORMATION, nullptr, nullptr, &dacl, nullptr, &sd);
+    CloseHandle(h);
+    if (e != ERROR_SUCCESS) {
+        *who = L"anyone (its security is unreadable: " + std::to_wstring(e) + L")";
+        return true;
+    }
+    // Adding files and folders to a root is ordinary (Authenticated Users may, on a drive Windows
+    // formatted); deleting a child or taking over the root is what would let a directory in it go.
+    const bool open = GrantsOutside(dacl, FILE_DELETE_CHILD | WRITE_DAC | WRITE_OWNER | GENERIC_ALL, who);
+    LocalFree(sd);
+    return open;
 }
 
 bool IsAdminOwnedFile(const std::wstring &file, std::wstring *why) {

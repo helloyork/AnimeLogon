@@ -21,6 +21,7 @@
 #include "animelogon/clock.h"
 #include "animelogon/components.h"
 #include "animelogon/i18n.h"
+#include "animelogon/library.h"
 #include "animelogon/log.h"
 #include "animelogon/machine.h"
 #include "animelogon/others.h"
@@ -815,6 +816,14 @@ void Host::SendEnvironment() {
     w.Member(L"lang", i18n::Tag(i18n::Current())).Member(L"langChoice", i18n::UserChoice());
     // Who the sign-in screen would greet, for the lock-screen preview.
     w.Member(L"user", AccountName()).Member(L"accountPicture", !AccountPicture().empty());
+    // Where the themes are (library.h), and whether that is a drive of its own that is not there just
+    // now: the logon screen then shows the default wallpaper, and the page says why.
+    {
+        std::wstring why;
+        const bool away = library::Elsewhere() && !library::Verify(&why);
+        if (away) ALOG(L"library: %s", why.c_str());
+        w.Key(L"library").BeginObject().Member(L"dir", library::Dir()).Member(L"away", away).EndObject();
+    }
     // Whether there are Wallpaper Engine wallpapers to offer; the page asks for them when it shows them.
     w.Member(L"wallpaperEngine", !workshopFolders_.empty());
     // The Steam edition, with the Steam Workshop: the discover page and the Workshop's themes.

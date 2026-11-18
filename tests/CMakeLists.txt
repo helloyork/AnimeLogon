@@ -66,6 +66,8 @@ target_sources(animelogon_tests PRIVATE config_tests.cpp
     ${PROJECT_SOURCE_DIR}/config/src/exporter.cpp
     ${PROJECT_SOURCE_DIR}/config/src/transcode.cpp)
 target_include_directories(animelogon_tests PRIVATE ${PROJECT_SOURCE_DIR}/config/src)
+# Where the library is: the drives an install may go on, and the stores following the library.
+target_sources(animelogon_tests PRIVATE library_tests.cpp)
 # Only export_sound_tests.cpp and player_tests.cpp call into Media Foundation, and they check
 # first; delay-loading keeps the tests starting on a machine without Media Foundation.
 target_link_libraries(animelogon_tests PRIVATE mfplat mfreadwrite mfuuid ole32 delayimp)

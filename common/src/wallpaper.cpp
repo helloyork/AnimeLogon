@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstring>
 
+#include "animelogon/library.h"
 #include "animelogon/paths.h"
 #include "animelogon/secure.h"
 #include "animelogon/text.h"
@@ -117,7 +118,7 @@ std::wstring NewWallpaperId() {
     }
 }
 
-std::wstring WallpapersDir() { return paths::DataDir() + L"\\wallpapers"; }
+std::wstring WallpapersDir() { return library::Dir() + L"\\wallpapers"; }
 std::wstring WallpaperDir(const std::wstring &id) { return WallpapersDir() + L"\\" + id; }
 std::wstring WallpaperInfoPath(const std::wstring &id) { return WallpaperDir(id) + L"\\wallpaper.ini"; }
 std::wstring WallpaperVideoPath(const std::wstring &id) { return WallpaperDir(id) + L"\\video.mp4"; }

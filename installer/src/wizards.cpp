@@ -6,6 +6,7 @@
 #include <wrl/client.h>
 
 #include "animelogon/i18n.h"
+#include "animelogon/library.h"
 #include "animelogon/paths.h"
 #include "animelogon/text.h"
 #include "animelogon/version.h"
@@ -20,8 +21,9 @@ namespace {
 
 // Control ids; 1 and 2 are IDOK and IDCANCEL, which the dialog manager sends for Enter and Esc.
 enum : int {
-    kLanguage = 101, kNext, kCancel, kBack, kBrowse, kDesktop, kFinish, kOpenApp, kLicense, kRetry, kLogs, kClose,
-    kPurge, kUninstall
+    kLanguage = 101, kNext, kCancel, kBack, kDesktop, kFinish, kOpenApp, kLicense, kRetry, kLogs, kClose,
+    kPurge, kUninstall,
+    kDrive = 200  // and one more for each drive after the first
 };
 
 // What the working thread tells the window.
@@ -46,6 +48,21 @@ void ReceiveProgress(WPARAM wp, LPARAM lp, double *fraction, std::wstring *step)
 }
 
 std::wstring Percent(double fraction) { return std::to_wstring((int)(fraction * 100 + 0.5)) + L"%"; }
+
+// A few words for why a drive cannot be chosen, for the line that lists such drives.
+std::wstring ShortRefusal(animelogon::library::Refusal why) {
+    using R = animelogon::library::Refusal;
+    switch (why) {
+    case R::NotLocal: return Tr("drive.short.not_local");
+    case R::Removable: return Tr("drive.short.removable");
+    case R::Locked: return Tr("drive.short.locked");
+    case R::NoPermissions: return Tr("drive.short.no_permissions");
+    case R::LockedAtBoot: return Tr("drive.short.locked_at_boot");
+    case R::OpenRoot: return Tr("drive.short.open_root");
+    case R::None: break;
+    }
+    return L"";
+}
 
 }  // namespace
 
@@ -95,17 +112,39 @@ void InstallWizard::Build(Builder &b) {
         break;
     }
     case Page::Location: {
+        if (!drivesKnown) ReadDrives();
         b.Title(Tr("setup.location.title"));
         b.Subtitle(Tr("setup.location.subtitle"));
-        b.Field(targetDir, kBrowse, Tr("button.browse"));
-        const bool allowed = engine::InstallDirAllowed(targetDir);
-        const unsigned long long need = engine::RequiredBytes(), free = engine::FreeBytes(targetDir);
-        if (!allowed)
-            b.Caption(Tr("setup.location.outside", {{L"root", engine::ProgramFilesDir()}}), Tone::Danger);
-        else
-            b.Caption(Tr("setup.location.space", {{L"need", FormatSize(need)}, {L"free", FormatSize(free)}}),
-                      free && free < need ? Tone::Danger : Tone::Secondary);
-        b.Gap(16);
+        // The drives it can go on, one choice each; the others in one line, each with why not, so
+        // that the page holds as many drives as a computer is likely to have.
+        const drives::Drive *chosen = nullptr;
+        std::wstring refused;
+        for (size_t i = 0; i < drives.size(); ++i) {
+            const drives::Drive &d = drives[i];
+            const std::wstring letter = std::wstring(1, d.letter) + L":";
+            if (d.refusal != animelogon::library::Refusal::None) {
+                refused += (refused.empty() ? L"" : Tr("list.join")) + Tr("setup.location.refused.item", {{L"drive", letter}, {L"why", ShortRefusal(d.refusal)}});
+                continue;
+            }
+            if (Chosen(d)) chosen = &d;
+            const std::wstring name = (d.label.empty() ? Tr(d.system ? "setup.location.drive.system" : "setup.location.drive.local") : d.label) +
+                                      L" (" + letter + L")";
+            std::wstring detail = Tr("setup.location.drive.detail", {{L"dir", d.system && Chosen(d) ? targetDir : d.installDir}, {L"free", FormatSize(d.freeBytes)}});
+            if (d.keptLibrary) detail += L" \u00b7 " + Tr("setup.location.drive.kept");
+            b.Radio(kDrive + (int)i, name, detail, Chosen(d));
+        }
+        if (!refused.empty()) b.Caption(Tr("setup.location.refused", {{L"list", refused}}), Tone::Tertiary);
+        const bool allowed = chosen != nullptr;
+        if (!allowed) {
+            b.Caption(Tr("setup.location.none"), Tone::Danger);
+        } else {
+            b.Caption(chosen->system ? Tr("setup.location.where.system", {{L"dir", targetDir}, {L"library", animelogon::paths::DataDir()}})
+                                     : Tr("setup.location.where.drive", {{L"dir", targetDir}}));
+            const unsigned long long need = engine::RequiredBytes(), free = chosen->freeBytes;
+            if (free && free < need)
+                b.Caption(Tr("setup.location.space", {{L"need", FormatSize(need)}, {L"free", FormatSize(free)}}), Tone::Danger);
+        }
+        b.Gap(8);
         b.Check(kDesktop, Tr("setup.location.desktop"), L"", desktopShortcut);
         b.StartButton(kBack, Tr("button.back"));
         b.Button(kNext, Tr("button.install"), true, allowed);
@@ -159,7 +198,8 @@ void InstallWizard::OnClick(int id) {
         if (page == Page::Welcome && installedVersion.empty()) {
             page = Page::Location;
             Rebuild();
-        } else if ((page == Page::Welcome || page == Page::Location) && (page == Page::Welcome || engine::InstallDirAllowed(targetDir))) {
+        } else if (page == Page::Welcome || page == Page::Location) {
+            // The engine checks the location again (CheckBeforeInstall) and says why, if it cannot.
             Start();
         }
         break;
@@ -168,7 +208,6 @@ void InstallWizard::OnClick(int id) {
         page = page == Page::Blocked && installedVersion.empty() ? Page::Location : Page::Welcome;
         Rebuild();
         break;
-    case kBrowse: ChooseFolder(); break;
     case kDesktop:
         desktopShortcut = Checked(kDesktop);
         Rebuild();
@@ -181,6 +220,14 @@ void InstallWizard::OnClick(int id) {
     case kFinish: Close(0); break;
     case kCancel:
     case kClose: OnCloseRequest(); break;
+    default:
+        if (id >= kDrive && id < kDrive + (int)drives.size() && drives[id - kDrive].refusal == animelogon::library::Refusal::None) {
+            const drives::Drive &d = drives[id - kDrive];
+            // Windows' drive keeps a folder already chosen in Program Files (--dir).
+            if (!Chosen(d)) targetDir = d.installDir;
+            Rebuild();
+        }
+        break;
     }
 }
 
@@ -234,32 +281,27 @@ void InstallWizard::OnPosted(UINT message, WPARAM w, LPARAM l) {
     }
 }
 
-void InstallWizard::ChooseFolder() {
-    ComPtr<IFileOpenDialog> dialog;
-    if (FAILED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dialog)))) return;
-    FILEOPENDIALOGOPTIONS o = 0;
-    dialog->GetOptions(&o);
-    dialog->SetOptions(o | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST);
-    dialog->SetTitle(Tr("setup.location.pick").c_str());
-    // Opens where the current choice is, or its nearest folder that exists.
-    std::wstring start = targetDir;
-    while (!start.empty() && GetFileAttributesW(start.c_str()) == INVALID_FILE_ATTRIBUTES) start.resize(start.find_last_of(L'\\') == std::wstring::npos ? 0 : start.find_last_of(L'\\'));
-    ComPtr<IShellItem> folder;
-    if (!start.empty() && SUCCEEDED(SHCreateItemFromParsingName(start.c_str(), nullptr, IID_PPV_ARGS(&folder)))) dialog->SetFolder(folder.Get());
-    if (dialog->Show(Hwnd()) != S_OK) return;
-    ComPtr<IShellItem> chosen;
-    PWSTR path = nullptr;
-    if (FAILED(dialog->GetResult(&chosen)) || FAILED(chosen->GetDisplayName(SIGDN_FILESYSPATH, &path))) return;
-    std::wstring dir = path;
-    CoTaskMemFree(path);
-    while (dir.size() > 3 && dir.back() == L'\\') dir.pop_back();
-    // A folder of its own, as in Program Files: what is picked is where AnimeLogon's folder goes,
-    // unless it is that folder already.
-    const size_t slash = dir.find_last_of(L'\\');
-    const std::wstring leaf = slash == std::wstring::npos ? dir : dir.substr(slash + 1);
-    if (!animelogon::EqualsNoCase(leaf, L"AnimeLogon")) dir += (dir.back() == L'\\' ? L"" : L"\\") + std::wstring(L"AnimeLogon");
-    targetDir = dir;
-    Rebuild();
+void InstallWizard::ReadDrives() {
+    drives = drives::List();
+    drivesKnown = true;
+    // A new install offered where it would go anyway goes where an earlier one left its themes,
+    // when that is one drive other than Windows'.
+    if (!animelogon::EqualsNoCase(targetDir, engine::DefaultInstallDir())) return;
+    const drives::Drive *kept = nullptr;
+    int keptCount = 0;
+    for (const drives::Drive &d : drives)
+        if (d.keptLibrary && d.refusal == animelogon::library::Refusal::None) {
+            ++keptCount;
+            if (!d.system) kept = &d;
+        }
+    if (keptCount == 1 && kept) targetDir = kept->installDir;
+}
+
+// Whether `d` is where the install is going: Windows' drive for any folder in Program Files.
+bool InstallWizard::Chosen(const drives::Drive &d) const {
+    if (!d.system) return animelogon::EqualsNoCase(d.installDir, targetDir);
+    const std::wstring root = engine::ProgramFilesDir();
+    return animelogon::paths::IsWithin(targetDir, root) && targetDir.size() > root.size();
 }
 
 void InstallWizard::ChooseLanguage() {
@@ -307,7 +349,9 @@ void UninstallWizard::Build(Builder &b) {
         if (report.ok) {
             b.Title(Tr("uninstall.done.title"));
             b.Subtitle(Tr("uninstall.done.subtitle"));
-            if (!purge) b.Para(Tr("uninstall.done.kept", {{L"path", animelogon::paths::DataDir()}}), Tone::Secondary);
+            if (!purge)
+                b.Para(Tr("uninstall.done.kept", {{L"path", report.keptAt.empty() ? animelogon::paths::DataDir() : report.keptAt}}),
+                       Tone::Secondary);
         } else {
             b.Title(Tr("uninstall.partial.title"));
             b.Subtitle(Tr("uninstall.partial.subtitle"), Tone::Danger);

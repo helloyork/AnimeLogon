@@ -126,8 +126,20 @@ int wmain(int argc, wchar_t **argv) {
     install(L"1-welcome", [](auto &w) { w.page = P::Welcome; });
     install(L"1c-welcome-others", [](auto &w) { w.page = P::Welcome; w.othersOn = kOther; });
     install(L"1b-welcome-update", [](auto &w) { w.page = P::Welcome; w.installedVersion = kOld; w.askConsent = false; });
-    install(L"2-location", [](auto &w) { w.page = P::Location; });
-    install(L"2b-location-outside", [](auto &w) { w.page = P::Location; w.targetDir = L"D:\\Apps\\AnimeLogon"; });
+    // The same drives on every machine: Windows' own, one to install on with themes an earlier install
+    // kept, and one for each refusal a person is likeliest to meet.
+    auto fakeDrives = [](wizard::InstallWizard &w) {
+        using R = animelogon::library::Refusal;
+        const unsigned long long gb = 1024ull * 1024 * 1024;
+        w.drives = {{L'C', L"", L"C:\\Program Files\\AnimeLogon", 212 * gb, 952 * gb, true, R::None, false},
+                    {L'D', L"Data", L"D:\\AnimeLogon", 1310 * gb, 1863 * gb, false, R::None, true},
+                    {L'E', L"USB", L"E:\\AnimeLogon", 58 * gb, 64 * gb, false, R::Removable, false},
+                    {L'F', L"Old disk", L"F:\\AnimeLogon", 120 * gb, 500 * gb, false, R::NoPermissions, false},
+                    {L'Z', L"", L"Z:\\AnimeLogon", 0, 0, false, R::NotLocal, false}};
+        w.drivesKnown = true;
+    };
+    install(L"2-location", [&](auto &w) { w.page = P::Location; fakeDrives(w); });
+    install(L"2b-location-drive", [&](auto &w) { w.page = P::Location; fakeDrives(w); w.targetDir = L"D:\\AnimeLogon"; });
     install(L"3-working", [](auto &w) {
         w.page = P::Working;
         w.fraction = 0.42;

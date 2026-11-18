@@ -102,7 +102,7 @@ struct Builder::Item {
     Tone tone = Tone::Primary;
     Severity severity = Severity::Info;
     int id = 0;
-    bool primary = false, enabled = true, checked = false, link = false;
+    bool primary = false, enabled = true, checked = false, link = false, radio = false;
     float gap = 0;
     double fraction = 0;
 };
@@ -141,6 +141,10 @@ void Builder::Check(int id, const std::wstring &label, const std::wstring &detai
     i->checked = checked;
     i->enabled = enabled;
     items_.push_back(i);
+}
+void Builder::Radio(int id, const std::wstring &label, const std::wstring &detail, bool selected, bool enabled) {
+    Check(id, label, detail, selected, enabled);
+    items_.back()->radio = true;
 }
 void Builder::Field(const std::wstring &value, int buttonId, const std::wstring &buttonLabel) {
     auto i = std::make_shared<Item>(Item{Kind::Field, value, buttonLabel});
@@ -184,7 +188,7 @@ void Builder::StartButton(int id, const std::wstring &label, bool link) {
 
 namespace {
 
-enum class ControlKind { Primary, Secondary, Link, Menu, Check };
+enum class ControlKind { Primary, Secondary, Link, Menu, Check, Radio };
 
 // A button as laid out: where (DIPs), what it says, how it is drawn.
 struct Control {
@@ -492,10 +496,12 @@ void Window::Rebuild() {
             const float h2 = it->detail.empty() ? 0 : Impl::Height(m.Layout(it->detail, m.caption.Get(), textW).Get()) + 2;
             const float textRight = kPad + 32 + std::max(m.TextWidth(it->text, m.body.Get()),
                                                          it->detail.empty() ? 0.f : m.TextWidth(it->detail, m.caption.Get()));
-            Control c{it->id, ControlKind::Check, D2D1::RectF(kPad, y, std::min(right, textRight + 4), y + std::max(20.f, h1 + h2)),
+            Control c{it->id, it->radio ? ControlKind::Radio : ControlKind::Check,
+                      D2D1::RectF(kPad, y, std::min(right, textRight + 4), y + std::max(20.f, h1 + h2)),
                       it->text, it->detail, it->enabled, it->checked};
             m.controls.push_back(c);
-            y += std::max(20.f, h1 + h2) + 16;
+            // Choices of one list sit closer together than check boxes that stand alone.
+            y += std::max(20.f, h1 + h2) + (it->radio ? 10 : 16);
             break;
         }
         case Kind::Field: {
@@ -587,19 +593,20 @@ void Window::Rebuild() {
     const HWND focused = GetFocus();
     bool focusLost = false;
     for (const Control &c : m.controls) {
-        const bool check = c.kind == ControlKind::Check;
+        const bool check = c.kind == ControlKind::Check || c.kind == ControlKind::Radio;
+        const DWORD type = c.kind == ControlKind::Radio ? BS_RADIOBUTTON : BS_AUTOCHECKBOX;
         HWND h = nullptr;
         auto old = m.hwnds.find(c.id);
         if (old != m.hwnds.end()) {
-            const bool wasCheck = (GetWindowLongW(old->second, GWL_STYLE) & BS_TYPEMASK) == BS_AUTOCHECKBOX;
-            if (wasCheck == check) h = old->second;
+            const DWORD was = GetWindowLongW(old->second, GWL_STYLE) & BS_TYPEMASK;
+            if (check ? was == type : (was != BS_AUTOCHECKBOX && was != BS_RADIOBUTTON)) h = old->second;
             else {
                 if (old->second == focused) focusLost = true;
                 DestroyWindow(old->second);
             }
             m.hwnds.erase(old);
         }
-        const DWORD style = WS_CHILD | WS_VISIBLE | WS_TABSTOP | (check ? BS_AUTOCHECKBOX | BS_MULTILINE : BS_PUSHBUTTON);
+        const DWORD style = WS_CHILD | WS_VISIBLE | WS_TABSTOP | (check ? type | BS_MULTILINE : BS_PUSHBUTTON);
         if (!h) {
             h = CreateWindowExW(0, L"BUTTON", c.label.c_str(), style, 0, 0, 0, 0, hwnd_, (HMENU)(INT_PTR)c.id,
                                 GetModuleHandleW(nullptr), nullptr);
@@ -790,10 +797,25 @@ LRESULT Window::Handle(UINT msg, WPARAM wp, LPARAM lp) {
             t->DrawTextLayout(D2D1::Point2F(0, 0), l.Get(), text.Get());
             break;
         }
-        case ControlKind::Check: {
+        case ControlKind::Check:
+        case ControlKind::Radio: {
             const bool checked = SendMessageW(nm->hwndFrom, BM_GETCHECK, 0, 0) == BST_CHECKED;
             const D2D1_RECT_F box = D2D1::RectF(0, 1, 20, 21);
-            if (checked) {
+            if (c->kind == ControlKind::Radio) {
+                // A ring, filled with the accent and a dot when selected, as Windows 11 draws one.
+                const D2D1_ELLIPSE ring = D2D1::Ellipse(D2D1::Point2F(10, 11), 9.5f, 9.5f);
+                if (checked) {
+                    fill->SetColor(disabled ? p.text3 : pressed ? p.accentPress : hot ? p.accentHover : p.accent);
+                    t->FillEllipse(ring, fill.Get());
+                    fill->SetColor(p.onAccent);
+                    t->FillEllipse(D2D1::Ellipse(D2D1::Point2F(10, 11), hot && !disabled ? 5.f : 4.f, hot && !disabled ? 5.f : 4.f), fill.Get());
+                } else {
+                    fill->SetColor(pressed ? p.press : hot ? p.hover : p.field);
+                    stroke->SetColor(disabled ? p.borderStrong : p.text3);
+                    t->FillEllipse(ring, fill.Get());
+                    t->DrawEllipse(ring, stroke.Get(), 1);
+                }
+            } else if (checked) {
                 fill->SetColor(disabled ? p.text3 : pressed ? p.accentPress : hot ? p.accentHover : p.accent);
                 RoundRect(t, box, 4, fill.Get(), nullptr);
                 const wchar_t mark[2] = {kGlyphCheck, 0};
@@ -817,7 +839,8 @@ LRESULT Window::Handle(UINT msg, WPARAM wp, LPARAM lp) {
         }
         if (focus) {
             stroke->SetColor(p.text1);
-            const D2D1_RECT_F ring = c->kind == ControlKind::Check ? D2D1::RectF(-1, 0, 22, 22) : D2D1::RectF(1, 1, w - 1, h - 1);
+            const bool box = c->kind == ControlKind::Check || c->kind == ControlKind::Radio;
+            const D2D1_RECT_F ring = box ? D2D1::RectF(-1, 0, 22, 22) : D2D1::RectF(1, 1, w - 1, h - 1);
             t->DrawRoundedRectangle(D2D1::RoundedRect(ring, kRadius, kRadius), stroke.Get(), 2);
         }
         if (t->EndDraw() == D2DERR_RECREATE_TARGET) m.target.Reset();

@@ -19,9 +19,16 @@ constexpr const wchar_t *kPrivateFileSddl = L"O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)";
 
 // True when the owner is SYSTEM, Administrators or TrustedInstaller, no other account may
 // write the file or replace it, and none of it is a reparse point. For anything inside
-// paths::DataDir(), every directory up to and including DataDir is checked too.
+// paths::DataDir() or the library (library.h), every directory up to and including that root is
+// checked too, and a library on a drive of its own must pass library::Verify.
 bool IsTrusted(const std::wstring &file, std::wstring *why);
 bool IsTrustedDirectory(const std::wstring &dir, std::wstring *why);
+
+// Whether a drive's root (such as L"D:\\") lets anyone but administrators delete what is in it,
+// or change its owner or permissions; `who` names the first such account. A directory in a root
+// that does not cannot be taken away and replaced by them, whatever lies beside it. An unreadable
+// root counts as open.
+bool RootIsOpen(const std::wstring &root, std::wstring *who);
 
 // A plain file (no link, a single name) owned by SYSTEM, Administrators or TrustedInstaller,
 // whatever its DACL. For settings.ini, which Users may rewrite but never create.

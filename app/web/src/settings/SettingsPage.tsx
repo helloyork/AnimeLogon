@@ -235,6 +235,7 @@ export function SettingsPage() {
         </Group>
 
         <Group title={t('settings.system')}>
+          {s.env.library.dir && <Row title={t('settings.library')} description={s.env.library.dir} />}
           <Row title={t('settings.logs')} description={t('settings.logs.detail')}>{() => <Button size="sm" onClick={() => send('logs')}>{t('settings.logs.open')}</Button>}</Row>
           <Row title={t('settings.uninstall')} description={t('settings.uninstall.detail')}>
             {() => <Button size="sm" shield danger onClick={() => send('uninstall')}>{t('settings.uninstall.button')}</Button>}
