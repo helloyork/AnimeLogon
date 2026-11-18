@@ -90,7 +90,8 @@ AnimeLogon 在系统托盘中显示一个图标。单击图标打开设置；右
 |---|---|
 | `--quiet` | 不显示向导，结果输出到命令行。脚本中请用 `start /wait` 等待它结束。 |
 | `--lang <语言>` | 界面语言：`zh-Hans`、`zh-Hant`、`en` 或 `ja`。 |
-| `--dir <路径>` | 安装到指定路径。未指定时，新安装位于 `C:\Program Files\AnimeLogon`，更新安装在已安装的位置。 |
+| `--dir <路径>` | 安装到指定路径：`C:\Program Files` 中的文件夹，或其他本地磁盘上的 `<盘符>:\AnimeLogon`。未指定时，新安装位于 `C:\Program Files\AnimeLogon`，更新安装在已安装的位置。 |
+| `--drive <盘符>` | 安装到指定磁盘：Windows 所在磁盘装到 `C:\Program Files\AnimeLogon`，其他磁盘装到 `<盘符>:\AnimeLogon`。可移动磁盘、网络驱动器、FAT32 和 exFAT 磁盘，以及开机时 BitLocker 不会自动解锁的磁盘不能使用。更新安装不会换磁盘。 |
 | `--setup-in-app` | 与 `--quiet` 一起使用：只安装，不启用。首次打开 AnimeLogon 时由向导启用。 |
 
 退出代码：`0` 安装成功，`1` 失败，`1223` 已取消。
@@ -120,9 +121,9 @@ AnimeLogon 在系统托盘中显示一个图标。单击图标打开设置；右
 
 | 位置 | 内容 |
 |---|---|
-| `C:\Program Files\AnimeLogon\` | 程序、`uninstall.exe` 和第三方许可证（`licenses\`）。 |
+| `C:\Program Files\AnimeLogon\`，装在其他磁盘时为 `<盘符>:\AnimeLogon\` | 程序、`uninstall.exe` 和第三方许可证（`licenses\`）。装在其他磁盘时，这个文件夹由安装程序建在磁盘根目录下，只有管理员可以修改，主题也放在里面（`Library\`）。 |
 | `%ProgramData%\AnimeLogon\settings.ini` | 全机设置：当前主题、多显示器、时钟、声音，以及对各主题的修改。每行一个 `键 = 值`，只含 id、枚举和带类型的值，不含路径或自由文本。键的说明见 [settings.h](common/include/animelogon/settings.h)。 |
-| `%ProgramData%\AnimeLogon\themes\`、`components\`、`wallpapers\` | 已导入的主题、组件和壁纸，以及安装程序写入的默认主题壁纸。只有管理员可以写入，内容由 AnimeLogon 规范化后写入。 |
+| `%ProgramData%\AnimeLogon\themes\`、`components\`、`wallpapers\`（装在其他磁盘时为 `<盘符>:\AnimeLogon\Library\…`） | 已导入的主题、组件和壁纸，以及安装程序写入的默认主题壁纸。只有管理员可以写入，内容由 AnimeLogon 规范化后写入。 |
 | `%ProgramData%\AnimeLogon\logs\` | 日志。 |
 
 ## 从源码构建

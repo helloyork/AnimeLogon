@@ -116,7 +116,8 @@ To try components without changing what is installed, use `animelogon.exe --sand
 |---|---|
 | `--quiet` | No wizard; the result is written to the console. In a script, wait for it with `start /wait`. |
 | `--lang <language>` | The language: `zh-Hans`, `zh-Hant`, `en` or `ja`. |
-| `--dir <path>` | Installs to `<path>`. Without it, a new installation goes to `C:\Program Files\AnimeLogon` and an update to where AnimeLogon is installed. |
+| `--dir <path>` | Installs to `<path>`: a folder inside `C:\Program Files`, or `<drive>:\AnimeLogon` on another local drive. Without it, a new installation goes to `C:\Program Files\AnimeLogon` and an update to where AnimeLogon is installed. |
+| `--drive <letter>` | Installs on that drive: in `C:\Program Files\AnimeLogon` on the drive Windows is on, in `<letter>:\AnimeLogon` on another one. Removable drives, network drives, FAT32 and exFAT drives, and drives BitLocker doesn't unlock at startup can't be used. An update stays on its drive. |
 | `--setup-in-app` | With `--quiet`: installs without turning AnimeLogon on. A wizard turns it on the first time AnimeLogon is opened. |
 
 Exit codes: `0` installed, `1` failed, `1223` cancelled.
@@ -150,9 +151,9 @@ the Steam edition (planned), `animelogon-steam.exe`, speaks the protocol in
 
 | Location | Contents |
 |---|---|
-| `C:\Program Files\AnimeLogon\` | The programs, `uninstall.exe` and the third-party licences (`licenses\`). |
+| `C:\Program Files\AnimeLogon\`, or `<drive>:\AnimeLogon\` when installed on another drive | The programs, `uninstall.exe` and the third-party licences (`licenses\`). On another drive the installer makes this folder at the drive's root, only administrators can change it, and it holds the themes too (`Library\`). |
 | `%ProgramData%\AnimeLogon\settings.ini` | Machine-wide settings: the theme in use, multiple displays, the clock, sound, and the changes made to each theme. One `key = value` per line, holding only ids, choices and typed values, never a path or free text. The keys are described in [settings.h](common/include/animelogon/settings.h). |
-| `%ProgramData%\AnimeLogon\themes\`, `components\`, `wallpapers\` | Imported themes, components and wallpapers, and the default theme's wallpaper, which the installer writes. Only administrators can write there, and AnimeLogon writes them in normalized form. |
+| `%ProgramData%\AnimeLogon\themes\`, `components\`, `wallpapers\` (`<drive>:\AnimeLogon\Library\…` when installed on another drive) | Imported themes, components and wallpapers, and the default theme's wallpaper, which the installer writes. Only administrators can write there, and AnimeLogon writes them in normalized form. |
 | `%ProgramData%\AnimeLogon\logs\` | Logs. |
 
 ## Building from source
