@@ -15,6 +15,7 @@ can place videos, widgets and other content on it.
 - [x] Full-screen video on the lock screen and on the sign-in screen at startup
 - [x] Custom clock styles
 - [x] Widgets
+- [x] Theme rotation
 - [ ] Scene wallpapers (HLSL and Lottie)
 
 ## Requirements
@@ -47,6 +48,11 @@ To change it, click a theme in the theme library. Videos, pictures and theme pac
 Double-clicking a .altheme file imports it the same way. Select **Customize** on a theme to change
 its wallpaper and widgets. Themes can be exported as .altheme files to share.
 
+Add several themes under **Rotation** in the theme library and turn it on, and the lock screen
+switches between them at the interval you set (at least 5 minutes) or after each lock. The sign-in
+screen background changes with them. Themes switch only while someone is signed in and the PC is
+unlocked.
+
 Choose the display language in **Settings > General > Display language**: 简体中文, 繁體中文, English or
 日本語. It follows Windows unless you choose one.
 
@@ -59,8 +65,11 @@ and the number of themes in its menu changed.
 - **The Windows lock screen is turned off.** This is required for the video to be
   visible. Windows Spotlight and lock screen widgets are unavailable while AnimeLogon is
   installed.
-- **The sign-in screen background is set by AnimeLogon.** The lock screen picture can no
-  longer be changed in Windows Settings.
+- **The sign-in screen background is set by AnimeLogon.** The lock screen picture of each
+  signed-in account is set to the current theme's picture, and Windows Spotlight is turned off for
+  that account; a picture chosen in Windows Settings is replaced. Turning off **Enable AnimeLogon**,
+  or uninstalling, restores the picture and Windows Spotlight of the account signed in at the time;
+  after turning it off, other accounts are restored the next time they sign in.
 - **Imported videos, pictures and themes are stored on drive C:.** The location cannot be changed.
 - **The system tray icon runs at sign-in.** The installer adds a startup entry for every account
   and uninstalling removes it. It can also be disabled under **Startup apps** in Task Manager.

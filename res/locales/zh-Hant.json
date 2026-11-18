@@ -835,7 +835,7 @@
   "setup.location.title": "安裝位置",
   "setup.welcome.change.lock_screen": "Windows 鎖定畫面改由 AnimeLogon 繪製。",
   "setup.welcome.change.others": "{names} 將被停用。它不會被解除安裝，設定也會保留，之後可以在它的設定程式中重新啟用。",
-  "setup.welcome.change.spotlight": "無法使用 Windows 焦點和鎖定畫面小工具，也無法在 Windows 設定中變更鎖定畫面圖片。",
+  "setup.welcome.change.spotlight": "鎖定畫面圖片會設為目前主題的畫面，無法使用 Windows 焦點和鎖定畫面小工具。",
   "setup.welcome.change.undo": "在 AnimeLogon 的「設定」中關閉「啟用 AnimeLogon」或解除安裝，即可還原。",
   "setup.welcome.changes": "安裝後",
   "setup.welcome.from": "目前版本 {old}，將更新至 {version}",

@@ -835,7 +835,7 @@
   "setup.location.title": "インストール先",
   "setup.welcome.change.lock_screen": "Windows のロック画面は AnimeLogon が描画します。",
   "setup.welcome.change.others": "{names} は無効になります。アンインストールはされず、設定も保持されます。後でその設定アプリから再び有効にできます。",
-  "setup.welcome.change.spotlight": "Windows スポットライトとロック画面のウィジェットは使用できず、Windows の設定でロック画面の画像を変更することもできません。",
+  "setup.welcome.change.spotlight": "ロック画面の画像は現在のテーマの画像に設定され、Windows スポットライトとロック画面のウィジェットは使用できません。",
   "setup.welcome.change.undo": "元に戻すには、AnimeLogon の [設定] で [AnimeLogon を有効にする] をオフにするか、AnimeLogon をアンインストールします。",
   "setup.welcome.changes": "インストール後",
   "setup.welcome.from": "バージョン {old} がインストールされています。{version} に更新します。",

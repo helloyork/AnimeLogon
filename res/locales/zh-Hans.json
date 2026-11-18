@@ -835,7 +835,7 @@
   "setup.location.title": "安装位置",
   "setup.welcome.change.lock_screen": "Windows 锁屏由 AnimeLogon 绘制。",
   "setup.welcome.change.others": "{names} 将被停用。它不会被卸载，设置也会保留，以后可以在它的设置程序中重新启用。",
-  "setup.welcome.change.spotlight": "Windows 聚焦和锁屏小组件不可用，Windows 设置中也无法更换锁屏图片。",
+  "setup.welcome.change.spotlight": "锁屏图片设为当前主题的画面，Windows 聚焦和锁屏小组件不可用。",
   "setup.welcome.change.undo": "在 AnimeLogon 的「设置」中关闭「启用 AnimeLogon」或卸载，即可恢复。",
   "setup.welcome.changes": "安装后",
   "setup.welcome.from": "当前版本 {old}，将更新到 {version}",

@@ -835,7 +835,7 @@
   "setup.location.title": "Install location",
   "setup.welcome.change.lock_screen": "AnimeLogon draws the Windows lock screen.",
   "setup.welcome.change.others": "{names} will be turned off. It isn't uninstalled and its settings are kept; you can turn it on again in its own settings.",
-  "setup.welcome.change.spotlight": "Windows Spotlight and lock screen widgets aren't available, and the lock screen picture can't be changed in Windows Settings.",
+  "setup.welcome.change.spotlight": "The lock screen picture is set to the current theme's picture, and Windows Spotlight and lock screen widgets aren't available.",
   "setup.welcome.change.undo": "To undo this, turn off Enable AnimeLogon in AnimeLogon's Settings, or uninstall AnimeLogon.",
   "setup.welcome.changes": "After installation",
   "setup.welcome.from": "Version {old} is installed. This updates it to {version}.",
