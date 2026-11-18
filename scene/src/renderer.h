@@ -24,6 +24,8 @@ public:
     bool Draw(const Inputs &inputs, ID3D11Texture2D *video, ID3D11Texture2D *output, float scale, float *milliseconds, std::wstring *why);
     // The user's quality (settings.h): how coarse the resolution of blurs, glows and rays may be.
     void SetQuality(RenderQuality quality);
+    // The user's particle density, 10..100 percent of what each emitter would give off.
+    void SetParticles(int percent);
     // How long the trial plays to see the scene's motion.
     float TrialSeconds() const;
     uint64_t TextureBytes() const;

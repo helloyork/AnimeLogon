@@ -133,6 +133,7 @@ int wmain(int argc, wchar_t **argv) {
     const RenderQuality quality = command->quality <= (uint32_t)RenderQuality::Low ? (RenderQuality)command->quality : RenderQuality::Auto;
     const bool adapts = quality == RenderQuality::Auto;
     renderer.SetQuality(quality);
+    renderer.SetParticles((int)command->particles);
     float cost = 0, scale = 1;
     if (adapts && command->calibrated) scale = std::clamp(command->startScale,.5f,1.f);
     else if (quality == RenderQuality::Medium) scale = .75f;

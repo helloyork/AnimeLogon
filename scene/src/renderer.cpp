@@ -1,6 +1,7 @@
 #include "renderer.h"
 #include "effects.h"
 #include "lottie.h"
+#include "particles.h"
 #include <d3dcompiler.h>
 #include <d3d11shader.h>
 #include <dxgi.h>
@@ -230,6 +231,9 @@ struct Renderer::State {
     std::map<std::wstring, MaskView> masks;
     RenderQuality quality = RenderQuality::Auto;
     int soft = 2;  // the coarsest resolution divisor blurs, glows and rays work at this frame
+    ParticleDrawer particles;
+    int particlePercent = 100;  // the user's particle density setting
+    double density = 1;         // the share of particles born this frame, the low quality halving it
     Texture videoPicture;
     Texture canvas;
     ComPtr<ID3D11Texture2D> videoTexture;
@@ -509,7 +513,6 @@ struct Renderer::State {
         if (p.opacity <= 0) return true;
         const Size box = BoxOf(p, p.width * unit, p.height * unit, parentBox);
         if (box.w <= 0 || box.h <= 0) return true;
-        if (p.node->kind == sg::NodeKind::Particles) return true;
         const Affine m = parent * Place(p, box, parentBox, unit);
         if (!p.effects.empty()) return DrawEffected(p, m, box, parentBox, depth, target, why);
         return DrawContent(p, m, box, parentBox, depth, target, {p.opacity, p.blend, &p.mask}, why);
@@ -552,6 +555,24 @@ struct Renderer::State {
             ID3D11ShaderResourceView *mask = nullptr;
             Mask(&c, maskId, &mask);
             Quad(target, c, look.blend, layer.view.Get(), mask);
+            return true;
+        }
+        if (p.node->kind == sg::NodeKind::Particles) {
+            // Particles fly out of their box, so they are not culled by it; each is blended on its own.
+            std::vector<ParticlePicture> frames;
+            if (const auto it = pictures.find(p.source); it != pictures.end())
+                frames.push_back({it->second.view.Get(), it->second.u, it->second.v, it->second.premultiplied});
+            else if (const auto seq = sequences.find(p.source); seq != sequences.end())
+                for (const auto &t : seq->second) frames.push_back({t.view.Get(), t.u, t.v, t.premultiplied});
+            ParticleTarget pt;
+            pt.target = target.target.Get(); pt.width = target.width; pt.height = target.height;
+            pt.a = m.a; pt.b = m.b; pt.c = m.c; pt.d = m.d; pt.e = m.e; pt.f = m.f;
+            pt.boxWidth = box.w; pt.boxHeight = box.h;
+            pt.blend = blends[(int)look.blend].Get(); pt.opacity = look.opacity;
+            if (const auto it = maskId.empty() ? pictures.end() : pictures.find(maskId); it != pictures.end()) {
+                pt.mask = it->second.view.Get(); pt.maskU = it->second.u; pt.maskV = it->second.v;
+            }
+            particles.Draw(p, frames, pt, in->data.time, density);
             return true;
         }
         if (!Visible(q, target)) return true;
@@ -657,8 +678,15 @@ struct Renderer::State {
         for (const auto &[k, v] : p.text) { key->append(ToUtf8(k)); key->push_back('='); key->append(ToUtf8(v)); key->push_back(0); }
         if (lotties.count(p.source) || shaders.count(p.source)) put(&p.localTime, sizeof(p.localTime));
         if (p.source == videoId) put(&in->videoSequence, sizeof(in->videoSequence));
+        ParticlesKey(p, key);
         EffectsKey(p, key);
         for (const auto &c : p.children) Key(c, key);
+    }
+    // Particles move all the time, and how many there are follows the density setting.
+    void ParticlesKey(const sg::Placed &p, std::string *key) const {
+        if (p.node->kind != sg::NodeKind::Particles) return;
+        key->append((const char *)&in->data.time, sizeof(in->data.time));
+        key->append((const char *)&density, sizeof(density));
     }
     // A node's effects: their parameters and masks, the time when they move by themselves, and the
     // inputs when an author's shader can read them.
@@ -696,6 +724,7 @@ struct Renderer::State {
         // Words as well as numbers: a blend, a fit or colour stops chosen by a setting.
         for (const auto &[k, v] : p.text) { key->append(ToUtf8(k)); key->push_back('='); key->append(ToUtf8(v)); key->push_back(0); }
         if (lotties.count(p.source) || shaders.count(p.source) || p.source == videoId) put(&p.localTime, sizeof(p.localTime));
+        ParticlesKey(p, key);
         EffectsKey(p, key);
         for (const auto &c : p.children) Key(c, key);
         key->push_back(1);
@@ -707,6 +736,7 @@ Renderer::~Renderer() = default;
 uint64_t Renderer::TextureBytes() const { return s_ ? s_->textureBytes : 0; }
 uint32_t Renderer::ReducedLevels() const { return s_ ? s_->reduced : 0; }
 void Renderer::SetQuality(RenderQuality quality) { if (s_) s_->quality = quality; }
+void Renderer::SetParticles(int percent) { if (s_) s_->particlePercent = std::clamp(percent, 0, 100); }
 float Renderer::TrialSeconds() const {
     float seconds = 4;
     for (const auto &[id, animation] : s_->lotties) seconds = std::max(seconds, animation->Duration());
@@ -744,7 +774,7 @@ bool Renderer::Open(ID3D11Device *device, const Files &files, int width, int hei
         return true;
     };
     for (const auto &n : s->d.nodes) if (!slots(n)) return false;
-    if (!s->chain.Open(device, why)) return false;
+    if (!s->chain.Open(device, why) || !s->particles.Open(device, why)) return false;
     for (const auto &a : s->d.assets)
         if (a.kind == sg::AssetKind::Mask) {
             const auto &t = s->pictures[a.id];
@@ -829,6 +859,7 @@ bool Renderer::Draw(const Inputs &in, ID3D11Texture2D *video, ID3D11Texture2D *o
     case RenderQuality::Medium: case RenderQuality::Low: s.soft = 4; break;
     default: s.soft = scale >= 1 ? 2 : 4; break;
     }
+    s.density = s.particlePercent / 100.0 * (s.quality == RenderQuality::Low ? .5 : 1);
     s.context->Begin(s.disjoint.Get());
     s.context->End(s.begin.Get());
     const sg::Frame frame = sg::Evaluate(s.d, in.values, in.data);

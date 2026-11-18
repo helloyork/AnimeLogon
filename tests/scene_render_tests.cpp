@@ -391,3 +391,84 @@ TEST(SceneEffectsOnAFullScreenPictureKeepItsEdges) {
     if (p.width != 100) { CHECK(false); return; }
     CHECK(Near(p.At(0, 0), 255, 255, 255) && Near(p.At(99, 49), 255, 255, 255) && Near(p.At(50, 0), 255, 255, 255));
 }
+
+namespace {
+// How many pixels of a picture are brighter than `level` in their blue channel.
+int Lit(const Picture &p, int level = 60) {
+    int n = 0;
+    for (size_t i = 0; i < p.bgra.size(); i += 4) n += p.bgra[i] > level;
+    return n;
+}
+}  // namespace
+
+TEST(SceneParticlesAreAPureFunctionOfTimeAndFollowTheDensity) {
+    Stage s;
+    // White dots falling from the top of the stage, none fading, so each one counts.
+    const std::string xml = Scene(
+        "<fill color=\"#000000\"/>"
+        "<particles rate=\"200\" lifetime=\"2\" max=\"400\" speed=\"40\" spread=\"0\" size=\"3\" fade=\"0\" seed=\"5\"/>", 200, 100);
+    CHECK(s.Open({{L"scene.xml", Bytes(xml)}}, 200, 100));
+    const Picture a = s.Draw(3.25), b = s.Draw(5), c = s.Draw(3.25);
+    if (a.width != 200 || b.width != 200) { CHECK(false); return; }
+    CHECK(!a.bgra.empty() && a.bgra == c.bgra && a.bgra != b.bgra);
+    // Particles born before the scene started are already in flight at its first moment.
+    const int full = Lit(a), start = Lit(s.Draw(0));
+    CHECK(full > 300 && start > 300);
+    // A tenth of the density leaves about a tenth of them.
+    s.renderer.SetParticles(10);
+    const int thin = Lit(s.Draw(3.25));
+    CHECK(thin > 0 && thin < full / 4);
+}
+
+TEST(SceneParticlesFallWhereTheirEmitterSays) {
+    Stage s;
+    // Left half: dots born along the top of a box, falling at 50 points a second (give or take a
+    // fifth) for 0.6 seconds (give or take a fifth), so they stay in its top 45 points. Right half:
+    // dots born in the middle of their box that do not move, sized to be seen.
+    const std::string xml = Scene(
+        "<fill color=\"#000000\"/>"
+        "<particles x=\"0\" y=\"0\" width=\"100\" height=\"100\" rate=\"400\" lifetime=\"0.6\" max=\"500\" speed=\"50\" spread=\"0\" size=\"2\" fade=\"0\"/>"
+        "<particles x=\"100\" y=\"0\" width=\"100\" height=\"100\" emit=\"point\" rate=\"20\" lifetime=\"4\" max=\"100\" speed=\"0\" size=\"10\" fade=\"0\"/>",
+        200, 100);
+    CHECK(s.Open({{L"scene.xml", Bytes(xml)}}, 200, 100));
+    const Picture p = s.Draw(10);
+    if (p.width != 200) { CHECK(false); return; }
+    int top = 0, bottom = 0;
+    for (int y = 0; y < 100; ++y)
+        for (int x = 0; x < 100; ++x) {
+            if (p.At(x, y)[0] <= 60) continue;
+            if (y < 45) ++top;
+            else if (y > 55) ++bottom;
+        }
+    CHECK(top > 100 && bottom == 0);
+    // Every still dot sits at the box's centre (150, 50).
+    CHECK(p.At(150, 50)[0] > 200 && p.At(130, 50)[0] < 10 && p.At(150, 70)[0] < 10);
+}
+
+TEST(SceneParticlePresetsFillInWhatIsNotWritten) {
+    Stage s;
+    // Stars twinkle where they are born; rain falls in streaks. Both from presets alone.
+    const std::string xml = Scene(
+        "<fill color=\"#000000\"/><particles preset=\"stars\" seed=\"3\"/><particles preset=\"rain\" x=\"0\" y=\"0\" width=\"10\" height=\"10\"/>", 200, 100);
+    CHECK(s.Open({{L"scene.xml", Bytes(xml)}}, 400, 200));
+    const Picture a = s.Draw(20), b = s.Draw(20.5);
+    if (a.width != 400) { CHECK(false); return; }
+    CHECK(Lit(a, 40) > 50 && a.bgra != b.bgra);
+}
+
+TEST(SceneParticlesWearPicturesAndTakeEffects) {
+    Stage s;
+    // Red squares that do not move, given a glow: the glow spreads past each square.
+    const std::string xml = Scene(
+        "<assets><image id=\"red\" file=\"red.tex\" exact=\"true\"/></assets>"
+        "<fill color=\"#000000\"/>"
+        "<particles source=\"red\" emit=\"point\" rate=\"5\" lifetime=\"4\" max=\"20\" speed=\"0\" size=\"10\" fade=\"0\">"
+        "<effect type=\"glow\" radius=\"0.3\" threshold=\"0\" strength=\"3\"/></particles>", 100, 50);
+    CHECK(s.Open({{L"scene.xml", Bytes(xml)}, {L"red.tex", Solid(s.device.Get(), 8, 8, 0xFFFF0000)}}, 100, 50));
+    const Picture p = s.Draw(10);
+    if (p.width != 100) { CHECK(false); return; }
+    // Turned squares of 7 to 13 points around (50, 25), reaching at most 9.2 points out: solid red
+    // at the centre, and red light just beyond the largest of them.
+    CHECK(Near(p.At(50, 25), 0, 0, 255, 8));
+    CHECK(p.At(50, 36)[2] > 15 && p.At(50, 36)[2] < 250 && p.At(50, 36)[1] < 10);
+}

@@ -88,7 +88,40 @@ const Prop kParticles[] = {
     {L"seed", Type::Integer, 0, 1000000, nullptr, false, L"1"},
     {L"max", Type::Integer, 1, (double)kMaxParticles, nullptr, false, L"2000"},
     {L"fps", Type::Number, 1, 60, nullptr, false, L"24"},
+    {L"sway", Type::Number, 0, 1000, nullptr, true, L"0"},     // side-to-side drift, in points
+    {L"twinkle", Type::Number, 0, 1, nullptr, true, L"0"},     // how far each particle's brightness pulses
+    {L"stretch", Type::Number, 0, 1, nullptr, false, L"0"},    // drawn as a streak this many seconds of motion long
 };
+
+// What each particle preset changes from the plain defaults; anything written on the element wins.
+struct PresetValue {
+    const wchar_t *preset, *name, *value;
+};
+const PresetValue kPresetValues[] = {
+    {L"rain", L"rate", L"300"}, {L"rain", L"lifetime", L"1.2"}, {L"rain", L"speed", L"1400"}, {L"rain", L"angle", L"100"},
+    {L"rain", L"spread", L"4"}, {L"rain", L"size", L"2"}, {L"rain", L"stretch", L"0.03"}, {L"rain", L"color", L"#B8CCFF99"},
+    {L"rain", L"fade", L"0.05"}, {L"rain", L"max", L"1500"},
+    {L"snow", L"rate", L"40"}, {L"snow", L"lifetime", L"14"}, {L"snow", L"speed", L"50"}, {L"snow", L"spread", L"30"},
+    {L"snow", L"sway", L"25"}, {L"snow", L"size", L"7"}, {L"snow", L"color", L"#FFFFFFE6"}, {L"snow", L"max", L"800"},
+    {L"petals", L"rate", L"12"}, {L"petals", L"lifetime", L"14"}, {L"petals", L"speed", L"70"}, {L"petals", L"angle", L"100"},
+    {L"petals", L"spread", L"40"}, {L"petals", L"sway", L"45"}, {L"petals", L"spin", L"120"}, {L"petals", L"size", L"16"},
+    {L"petals", L"color", L"#FFC4D6"}, {L"petals", L"max", L"600"},
+    {L"fireflies", L"rate", L"4"}, {L"fireflies", L"lifetime", L"7"}, {L"fireflies", L"emit", L"area"}, {L"fireflies", L"speed", L"15"},
+    {L"fireflies", L"spread", L"360"}, {L"fireflies", L"drag", L"0.4"}, {L"fireflies", L"sway", L"30"}, {L"fireflies", L"twinkle", L"0.8"},
+    {L"fireflies", L"size", L"9"}, {L"fireflies", L"color", L"#FFE680"}, {L"fireflies", L"fade", L"0.2"}, {L"fireflies", L"max", L"120"},
+    {L"fireflies", L"blend", L"add"},
+    {L"stars", L"rate", L"30"}, {L"stars", L"lifetime", L"8"}, {L"stars", L"emit", L"area"}, {L"stars", L"speed", L"0"},
+    {L"stars", L"spread", L"0"}, {L"stars", L"twinkle", L"0.9"}, {L"stars", L"size", L"3"}, {L"stars", L"fade", L"0.3"},
+    {L"stars", L"max", L"400"}, {L"stars", L"blend", L"add"},
+    {L"dust", L"rate", L"15"}, {L"dust", L"lifetime", L"10"}, {L"dust", L"emit", L"area"}, {L"dust", L"speed", L"6"},
+    {L"dust", L"spread", L"360"}, {L"dust", L"sway", L"12"}, {L"dust", L"twinkle", L"0.3"}, {L"dust", L"size", L"3"},
+    {L"dust", L"color", L"#FFF4E080"}, {L"dust", L"fade", L"0.25"}, {L"dust", L"max", L"300"}, {L"dust", L"blend", L"add"},
+};
+const wchar_t *PresetDefault(const std::wstring &preset, const wchar_t *name) {
+    for (const auto &v : kPresetValues)
+        if (preset == v.preset && !wcscmp(name, v.name)) return v.value;
+    return nullptr;
+}
 
 struct EffectSpec {
     const wchar_t *type;
@@ -987,9 +1020,13 @@ struct Evaluator {
         if (n.kind == NodeKind::Layer) { own = std::begin(kLayer); ownEnd = std::end(kLayer); }
         else if (n.kind == NodeKind::Fill) { own = std::begin(kFill); ownEnd = std::end(kFill); }
         else if (n.kind == NodeKind::Particles) { own = std::begin(kParticles); ownEnd = std::end(kParticles); }
+        // A particle preset only stands in for what the element leaves out.
+        const auto *presetText = n.kind == NodeKind::Particles ? n.Find(L"preset") : nullptr;
+        const std::wstring preset = presetText ? Resolve(d, values, *presetText) : L"";
         auto take = [&](const Prop &prop) {
             const auto *written = n.Find(prop.name);
-            const std::wstring text = written ? Resolve(d, values, *written) : prop.fallback;
+            const wchar_t *fallback = preset.empty() ? nullptr : PresetDefault(preset, prop.name);
+            const std::wstring text = written ? Resolve(d, values, *written) : fallback ? fallback : prop.fallback;
             p.text[prop.name] = text;
             if (prop.type == Type::Number || prop.type == Type::Integer || prop.type == Type::Color || prop.type == Type::Pair) {
                 auto v = Vec(text);
