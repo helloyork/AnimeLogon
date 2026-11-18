@@ -2,6 +2,8 @@
 #pragma once
 
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <functional>
 #include <vector>
 
@@ -26,8 +28,11 @@ struct Register {
     Register(const char *name, void (*run)()) { Cases().push_back({name, run}); }
 };
 
+// ANIMELOGON_TESTS=<text> runs only the tests whose names contain it.
 inline int RunAll() {
+    const char *only = std::getenv("ANIMELOGON_TESTS");
     for (const Case &c : Cases()) {
+        if (only && *only && !std::strstr(c.name, only)) continue;
         const int before = Failures();
         c.run();
         std::printf("%s  %s\n", Failures() == before ? "ok  " : "FAIL", c.name);

@@ -1,4 +1,5 @@
 #include "renderer.h"
+#include "effects.h"
 #include "lottie.h"
 #include <d3dcompiler.h>
 #include <d3d11shader.h>
@@ -20,28 +21,6 @@ namespace sg = scenegraph;
 namespace {
 constexpr double kPi = 3.14159265358979323846;
 
-// What an author's shader can read (D51). `source` is the node's picture so far and `mask` its mask,
-// for effect shaders; a layer shader draws from nothing but these numbers.
-constexpr char kHeader[] = R"(
-cbuffer Scene : register(b0) {
-    float time; float2 resolution; float day;
-    float battery; float progress; float playing; float wake;
-    float4 audio;
-    float month; float3 reserved;
-    float4 param[16];
-};
-Texture2D<float4> source : register(t0);
-Texture2D<float4> mask : register(t1);
-SamplerState linearClamp : register(s0);
-)";
-struct ShaderConstants {
-    float time = 0, resolution[2]{}, day = 0;
-    float battery = -1, progress = -1, playing = 0, wake = 0;
-    float audio[4]{};
-    float month = 1, reserved[3]{};
-    float param[16][4]{};
-};
-
 // A full-screen triangle for authors' layer shaders; TEXCOORD0 is in the register the contract says.
 constexpr char kFullScreen[] = R"(
 struct V { float2 uv : TEXCOORD0; float4 position : SV_Position; };
@@ -59,6 +38,7 @@ cbuffer Draw : register(b0) {
     float4 fromCanvas0, fromCanvas1;  // the box's unit square from a canvas pixel, for a whole-canvas quad
     float4 canvas;                    // xy: the target's size in pixels
     float4 sourceRect, maskRect;      // xy: the used part of the texture, as a fraction of it
+    float4 maskMap;                   // the box's unit square from the quad's: xy scale, zw offset
     float4 color;
     float4 stops[8];
     float4 stopAt0, stopAt1;
@@ -80,7 +60,7 @@ Texture2D<float4> picture : register(t0);
 Texture2D<float4> maskPicture : register(t1);
 SamplerState linearClamp : register(s0);
 float4 main(float2 box : TEXCOORD0, float4 position : SV_Position) : SV_Target {
-    float2 uv = whole > .5 ? float2(dot(fromCanvas0.xyz, float3(position.xy, 1)), dot(fromCanvas1.xyz, float3(position.xy, 1))) : box;
+    float2 uv = whole > .5 ? float2(dot(fromCanvas0.xyz, float3(position.xy, 1)), dot(fromCanvas1.xyz, float3(position.xy, 1))) : box * maskMap.xy + maskMap.zw;
     float4 c;
     if (mode < .5) c = picture.Sample(linearClamp, box * sourceRect.xy);
     else if (mode < 1.5) c = color;
@@ -90,7 +70,7 @@ float4 main(float2 box : TEXCOORD0, float4 position : SV_Position) : SV_Target {
         c = stops[0];
         for (int i = 1; i < 8; ++i)
             if (i < stopCount && t > at[i - 1]) c = lerp(stops[i - 1], stops[i], saturate((t - at[i - 1]) / max(1e-5, at[i] - at[i - 1])));
-    } else c = picture.Sample(linearClamp, position.xy / canvas.xy);
+    } else c = picture.Sample(linearClamp, position.xy / canvas.xy * sourceRect.xy);
     if (premultiplied < .5) c.rgb *= c.a;
     if (useMask > .5) c *= any(uv < 0) || any(uv > 1) ? 0 : maskPicture.Sample(linearClamp, uv * maskRect.xy).r;
     return c * opacity;
@@ -99,6 +79,7 @@ struct DrawConstants {
     float toCanvas0[4]{}, toCanvas1[4]{}, fromCanvas0[4]{}, fromCanvas1[4]{};
     float canvas[4]{};
     float sourceRect[4]{1, 1, 0, 0}, maskRect[4]{1, 1, 0, 0};
+    float maskMap[4]{1, 1, 0, 0};
     float color[4]{};
     float stops[8][4]{};
     float stopAt[8]{};
@@ -158,7 +139,7 @@ const wchar_t *const kAnchorWords[] = {L"top-left", L"top", L"top-right", L"left
 
 bool CompileShader(std::string_view source, std::vector<uint8_t> *bytecode, std::wstring *why) {
     ComPtr<ID3DBlob> blob;
-    if (!Compile(std::string(kHeader) + std::string(source), "ps_5_0", &blob, why)) return false;
+    if (!Compile(std::string(kShaderHeader) + std::string(source), "ps_5_0", &blob, why)) return false;
     const auto *p = (const uint8_t *)blob->GetBufferPointer();
     bytecode->assign(p, p + blob->GetBufferSize());
     return CheckShader(bytecode->data(), bytecode->size(), why);
@@ -234,7 +215,21 @@ struct Renderer::State {
     std::map<std::wstring, std::unique_ptr<Lottie>> lotties;
     std::map<std::wstring, ComPtr<ID3D11PixelShader>> shaders;
     std::map<const sg::Node *, Texture> drawn;  // Lottie and shader layers, drawn for this frame
-    std::vector<Texture> layers;                 // offscreen targets for isolated groups, one per depth
+    std::vector<Surface> layers;                 // offscreen targets for isolated groups, one per depth
+    // A node with effects is drawn into its own picture, its box with a margin around it for what
+    // the effects move outward, and the effects run over that. The picture is kept while nothing
+    // it depends on changes, so a still node with effects costs one composite a frame.
+    struct Effected {
+        Surface picture;
+        std::string key;
+        int width = 0, height = 0, margin = 0;
+    };
+    std::map<const sg::Node *, Effected> effected;
+    Surface scratch;
+    EffectChain chain;
+    std::map<std::wstring, MaskView> masks;
+    RenderQuality quality = RenderQuality::Auto;
+    int soft = 2;  // the coarsest resolution divisor blurs, glows and rays work at this frame
     Texture videoPicture;
     Texture canvas;
     ComPtr<ID3D11Texture2D> videoTexture;
@@ -258,6 +253,14 @@ struct Renderer::State {
             FAILED(device->CreateRenderTargetView(t->texture.Get(), nullptr, &t->target))) return false;
         t->width = w; t->height = h; t->usedW = w; t->usedH = h;
         return true;
+    }
+    // The top-left w x h of a surface, as a target to draw into and a picture to read.
+    static Texture View(const Surface &s, int w, int h) {
+        Texture t;
+        t.texture = s.texture; t.view = s.view; t.target = s.target;
+        t.width = w; t.height = h; t.u = (float)w / s.width; t.v = (float)h / s.height;
+        t.usedW = w; t.usedH = h;
+        return t;
     }
     static uint64_t BytesFrom(const Source &s) {
         uint64_t n = 0;
@@ -480,18 +483,7 @@ struct Renderer::State {
             Texture &t = drawn[p.node];
             if (!Make(&t, w, h)) return Fail(why, L"cannot allocate a shader layer");
             t.premultiplied = false;
-            ShaderConstants c;
-            const auto &data = in->data;
-            c.time = (float)p.localTime; c.resolution[0] = (float)w; c.resolution[1] = (float)h; c.day = (float)data.day;
-            c.battery = (float)data.battery; c.progress = (float)data.progress; c.wake = (float)data.wake;
-            c.playing = data.mediaState == L"playing" ? 2.f : data.mediaState == L"paused" ? 1.f : 0.f;
-            for (int i = 0; i < 4; ++i) c.audio[i] = (float)data.audio[i];
-            c.month = (float)data.month;
-            for (const auto &[k, v] : p.values)
-                if (k.rfind(L"param.", 0) == 0) {
-                    const unsigned long n = wcstoul(k.c_str() + 6, nullptr, 10);
-                    if (n < 16) std::copy(v.begin(), v.end(), c.param[n]);
-                }
+            const ShaderConstants c = ShaderInputs(in->data, p.localTime, w, h, p.values, L"param.");
             context->UpdateSubresource(shaderConstants.Get(), 0, nullptr, &c, 0, 0);
             Bind(t);
             const float factor[4]{};
@@ -517,19 +509,36 @@ struct Renderer::State {
         if (p.opacity <= 0) return true;
         const Size box = BoxOf(p, p.width * unit, p.height * unit, parentBox);
         if (box.w <= 0 || box.h <= 0) return true;
+        if (p.node->kind == sg::NodeKind::Particles) return true;
         const Affine m = parent * Place(p, box, parentBox, unit);
+        if (!p.effects.empty()) return DrawEffected(p, m, box, parentBox, depth, target, why);
+        return DrawContent(p, m, box, parentBox, depth, target, {p.opacity, p.blend, &p.mask}, why);
+    }
+
+    // How a node's content lands on what is below it.
+    struct Look {
+        float opacity = 1;
+        sg::Blend blend = sg::Blend::Normal;
+        const std::wstring *mask = nullptr;
+        bool Plain() const { return opacity >= 1 && blend == sg::Blend::Normal && (!mask || mask->empty()); }
+    };
+
+    // Draws what `p` shows, its box (box.w x box.h in its own units) carried onto `target` by `m`.
+    bool DrawContent(const sg::Placed &p, const Affine &m, Size box, Size parentBox, size_t depth, const Texture &target, const Look &look,
+                     std::wstring *why) {
         const Affine q = m * Scale(box.w, box.h);
+        const std::wstring none;
+        const std::wstring &maskId = look.mask ? *look.mask : none;
         if (p.node->kind == sg::NodeKind::Group) {
             const Size content = Natural(p, parentBox);
             const Affine inner = m * Scale(box.w / content.w, box.h / content.h);
-            const bool isolated = p.opacity < 1 || p.blend != sg::Blend::Normal || !p.mask.empty();
-            if (!isolated) {
+            if (look.Plain()) {
                 for (const auto &c : p.children) if (!DrawNode(c, inner, content, 1, depth, target, why)) return false;
                 return true;
             }
             if (depth >= layers.size()) return Fail(why, L"groups are nested too deeply");
-            Texture &layer = layers[depth];
-            if (!Make(&layer, target.width, target.height)) return Fail(why, L"cannot allocate a group layer");
+            if (!layers[depth].Fit(device.Get(), target.width, target.height)) return Fail(why, L"cannot allocate a group layer");
+            const Texture layer = View(layers[depth], target.width, target.height);
             const float clear[4]{};
             context->ClearRenderTargetView(layer.target.Get(), clear);
             for (const auto &c : p.children) if (!DrawNode(c, inner, content, 1, depth + 1, layer, why)) return false;
@@ -538,19 +547,19 @@ struct Renderer::State {
             const Affine from = Inverse(q);
             const float f0[4]{(float)from.a, (float)from.c, (float)from.e, 0}, f1[4]{(float)from.b, (float)from.d, (float)from.f, 0};
             std::copy(f0, f0 + 4, c.fromCanvas0); std::copy(f1, f1 + 4, c.fromCanvas1);
-            c.whole = 1; c.mode = kLayer; c.opacity = p.opacity;
+            c.whole = 1; c.mode = kLayer; c.opacity = look.opacity;
+            c.sourceRect[0] = layer.u; c.sourceRect[1] = layer.v;
             ID3D11ShaderResourceView *mask = nullptr;
-            Mask(&c, p.mask, &mask);
-            Quad(target, c, p.blend, layer.view.Get(), mask);
+            Mask(&c, maskId, &mask);
+            Quad(target, c, look.blend, layer.view.Get(), mask);
             return true;
         }
-        if (p.node->kind == sg::NodeKind::Particles) return true;
         if (!Visible(q, target)) return true;
         DrawConstants c;
         Corners(&c, q, target);
-        c.opacity = p.opacity;
+        c.opacity = look.opacity;
         ID3D11ShaderResourceView *picture = nullptr, *mask = nullptr;
-        Mask(&c, p.mask, &mask);
+        Mask(&c, maskId, &mask);
         if (p.node->kind == sg::NodeKind::Fill) {
             const auto colors = p.text.find(L"colors");
             std::vector<skin::Stop> stops;
@@ -580,8 +589,97 @@ struct Renderer::State {
             c.premultiplied = t->premultiplied ? 1.f : 0.f;
             picture = t->view.Get();
         }
-        Quad(target, c, p.blend, picture, mask);
+        Quad(target, c, look.blend, picture, mask);
         return true;
+    }
+
+    // A node with effects: its content drawn into its own picture at the size its box covers on the
+    // canvas, the effects run over that, and the result composited by the node's transform, opacity,
+    // blend and mask. Effects work in the node's own frame, so a turned node's bend still hangs from
+    // its own top.
+    bool DrawEffected(const sg::Placed &p, const Affine &m, Size box, Size parentBox, size_t depth, const Texture &target, std::wstring *why) {
+        const auto [W, H] = Pixels(m * Scale(box.w, box.h), target);
+        Effected &e = effected[p.node];
+        // A node that fills the screen repeats its edges instead (EffectBox::extend). The margin only
+        // grows while the box keeps its size, so a parameter moving with time does not resize the
+        // picture every frame.
+        if (e.width != W || e.height != H) e.margin = 0;
+        e.margin = std::max(e.margin, p.full ? 0 : EffectChain::Margin(p.effects, W, H));
+        const int M = e.margin, w = W + 2 * M, h = H + 2 * M;
+        const double mx = (double)M / W, my = (double)M / H;
+        const Affine padded = m * Move(-mx * box.w, -my * box.h) * Scale((1 + 2 * mx) * box.w, (1 + 2 * my) * box.h);
+        if (!Visible(padded, target)) return true;
+        std::string key;
+        LocalKey(p, W, H, M, &key);
+        if (key != e.key || !e.picture.texture) {
+            e.key.clear();
+            if (!e.picture.Fit(device.Get(), w, h)) return Fail(why, L"cannot allocate an effect picture");
+            const Texture picture = View(e.picture, w, h);
+            const float clear[4]{};
+            context->ClearRenderTargetView(picture.target.Get(), clear);
+            if (!DrawContent(p, Move(M, M) * Scale(W / box.w, H / box.h), box, parentBox, depth, picture, {}, why)) return false;
+            Surface *result = nullptr;
+            if (!chain.Run(p.effects, {W, H, M, p.full}, &e.picture, &scratch, masks, shaders, in->data, soft, &result, why)) return false;
+            if (result != &e.picture) {
+                const D3D11_BOX all{0, 0, 0, (UINT)w, (UINT)h, 1};
+                context->CopySubresourceRegion(e.picture.texture.Get(), 0, 0, 0, 0, result->texture.Get(), 0, &all);
+            }
+            e.key = std::move(key);
+            e.width = W; e.height = H;
+        }
+        DrawConstants c;
+        Corners(&c, padded, target);
+        c.mode = kTexture; c.opacity = p.opacity;
+        c.sourceRect[0] = (float)w / e.picture.width; c.sourceRect[1] = (float)h / e.picture.height;
+        const float map[4]{(float)(1 + 2 * mx), (float)(1 + 2 * my), (float)-mx, (float)-my};
+        std::copy(map, map + 4, c.maskMap);
+        ID3D11ShaderResourceView *mask = nullptr;
+        Mask(&c, p.mask, &mask);
+        Quad(target, c, p.blend, e.picture.view.Get(), mask);
+        return true;
+    }
+
+    // What a node's effected picture depends on: everything Key() covers except where the node is
+    // placed and how it is composited, which only change the final quad.
+    void LocalKey(const sg::Placed &p, int w, int h, int margin, std::string *key) const {
+        auto put = [&](const void *bytes, size_t n) { key->append((const char *)bytes, n); };
+        const int size[]{w, h, margin};
+        put(size, sizeof(size));
+        put(&p.node, sizeof(p.node));
+        put(&p.frame, sizeof(p.frame));
+        key->append(ToUtf8(p.source)); key->push_back(0);
+        for (const auto &[k, v] : p.values) {
+            if (k == L"x" || k == L"y" || k == L"width" || k == L"height" || k == L"rotation" || k == L"scale" || k == L"scale-x" ||
+                k == L"scale-y" || k == L"opacity")
+                continue;
+            key->append(ToUtf8(k)); put(v.data(), sizeof(float) * 4);
+        }
+        for (const auto &[k, v] : p.text) { key->append(ToUtf8(k)); key->push_back('='); key->append(ToUtf8(v)); key->push_back(0); }
+        if (lotties.count(p.source) || shaders.count(p.source)) put(&p.localTime, sizeof(p.localTime));
+        if (p.source == videoId) put(&in->videoSequence, sizeof(in->videoSequence));
+        EffectsKey(p, key);
+        for (const auto &c : p.children) Key(c, key);
+    }
+    // A node's effects: their parameters and masks, the time when they move by themselves, and the
+    // inputs when an author's shader can read them.
+    void EffectsKey(const sg::Placed &p, std::string *key) const {
+        auto put = [&](const void *bytes, size_t n) { key->append((const char *)bytes, n); };
+        bool moves = false, reads = false;
+        for (const auto &e : p.effects) {
+            put(&e.effect, sizeof(e.effect));
+            key->append(ToUtf8(e.mask)); key->push_back(0);
+            for (const auto &[k, v] : e.values) { key->append(ToUtf8(k)); put(v.data(), sizeof(float) * 4); }
+            moves = moves || sg::EffectMoves(*e.effect);
+            reads = reads || !e.effect->source.empty();
+        }
+        if (moves) put(&in->data.time, sizeof(in->data.time));
+        if (reads) {
+            const auto &data = in->data;
+            const double numbers[]{data.day, data.wake, data.battery, data.progress, (double)data.month, data.audio[0], data.audio[1], data.audio[2], data.audio[3]};
+            put(numbers, sizeof(numbers));
+            key->append(ToUtf8(data.mediaState)); key->push_back(0);
+        }
+        if (!p.effects.empty()) put(&soft, sizeof(soft));
     }
 
     // A short summary of everything a frame depends on: when it is the same as the last frame's,
@@ -598,6 +696,7 @@ struct Renderer::State {
         // Words as well as numbers: a blend, a fit or colour stops chosen by a setting.
         for (const auto &[k, v] : p.text) { key->append(ToUtf8(k)); key->push_back('='); key->append(ToUtf8(v)); key->push_back(0); }
         if (lotties.count(p.source) || shaders.count(p.source) || p.source == videoId) put(&p.localTime, sizeof(p.localTime));
+        EffectsKey(p, key);
         for (const auto &c : p.children) Key(c, key);
         key->push_back(1);
     }
@@ -607,6 +706,7 @@ Renderer::Renderer() = default;
 Renderer::~Renderer() = default;
 uint64_t Renderer::TextureBytes() const { return s_ ? s_->textureBytes : 0; }
 uint32_t Renderer::ReducedLevels() const { return s_ ? s_->reduced : 0; }
+void Renderer::SetQuality(RenderQuality quality) { if (s_) s_->quality = quality; }
 float Renderer::TrialSeconds() const {
     float seconds = 4;
     for (const auto &[id, animation] : s_->lotties) seconds = std::max(seconds, animation->Duration());
@@ -644,6 +744,12 @@ bool Renderer::Open(ID3D11Device *device, const Files &files, int width, int hei
         return true;
     };
     for (const auto &n : s->d.nodes) if (!slots(n)) return false;
+    if (!s->chain.Open(device, why)) return false;
+    for (const auto &a : s->d.assets)
+        if (a.kind == sg::AssetKind::Mask) {
+            const auto &t = s->pictures[a.id];
+            s->masks[a.id] = {t.view.Get(), t.u, t.v};
+        }
     ComPtr<ID3DBlob> v, p, full;
     if (!Compile(std::string(kDrawCommon) + kDrawVertex, "vs_5_0", &v, why) || !Compile(std::string(kDrawCommon) + kDrawPixel, "ps_5_0", &p, why) ||
         !Compile(kFullScreen, "vs_5_0", &full, why) ||
@@ -696,6 +802,7 @@ bool Renderer::Open(ID3D11Device *device, const Files &files, int width, int hei
 }
 
 bool Renderer::Draw(const Inputs &in, ID3D11Texture2D *video, ID3D11Texture2D *output, float scale, float *ms, std::wstring *why) {
+    if (!s_) return Fail(why, L"the scene is not open");
     auto &s = *s_;
     const auto start = std::chrono::steady_clock::now();
     s.in = &in;
@@ -706,7 +813,22 @@ bool Renderer::Draw(const Inputs &in, ID3D11Texture2D *video, ID3D11Texture2D *o
     }
     const int cw = std::max(1, (int)std::lround(s.width * std::clamp(scale, .25f, 1.f)));
     const int ch = std::max(1, (int)std::lround(s.height * std::clamp(scale, .25f, 1.f)));
+    if (s.canvas.width != cw || s.canvas.height != ch) {
+        // Effect pictures were sized for the old canvas.
+        s.effected.clear();
+        s.scratch = Surface{};
+        s.chain.Trim();
+    }
     if (!s.Make(&s.canvas, cw, ch)) return Fail(why, L"cannot allocate the scene canvas");
+    // Blurs, glows and rays are soft enough to work at a lower resolution and look the same: half
+    // of it at the high quality, a quarter at medium and low, and full at the highest. The automatic
+    // quality works at half until it lowers the canvas, then at a quarter.
+    switch (s.quality) {
+    case RenderQuality::Highest: s.soft = 1; break;
+    case RenderQuality::High: s.soft = 2; break;
+    case RenderQuality::Medium: case RenderQuality::Low: s.soft = 4; break;
+    default: s.soft = scale >= 1 ? 2 : 4; break;
+    }
     s.context->Begin(s.disjoint.Get());
     s.context->End(s.begin.Get());
     const sg::Frame frame = sg::Evaluate(s.d, in.values, in.data);

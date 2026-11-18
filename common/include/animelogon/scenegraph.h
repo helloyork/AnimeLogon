@@ -179,6 +179,9 @@ double Local(double t, double length, Repeat repeat, double delay, double gapMin
 
 // Whether any part of the scene changes with time or inputs; a scene that does not can be drawn once.
 bool Moves(const Document &document);
+// Whether an effect changes from frame to frame by itself: a built-in one that animates (bend, grain
+// and the like), or an author's shader, which can read the time and the inputs.
+bool EffectMoves(const Effect &effect);
 
 // Numbers, colors (#RRGGBB[AA]) and two to four space-separated numbers, as floats.
 std::vector<float> Components(const std::wstring &literal);

@@ -89,6 +89,33 @@ struct Stage {
 std::string Scene(const std::string &body, int w = 100, int h = 50) {
     return "<scene format=\"2\" name=\"t\" width=\"" + std::to_string(w) + "\" height=\"" + std::to_string(h) + "\">" + body + "</scene>";
 }
+// A w x h exact texture painted pixel by pixel (0xAARRGGBB).
+template <typename Paint> std::vector<uint8_t> Painted(ID3D11Device *device, uint32_t w, uint32_t h, Paint paint) {
+    std::vector<uint8_t> bgra((size_t)w * h * 4);
+    for (uint32_t y = 0; y < h; ++y)
+        for (uint32_t x = 0; x < w; ++x) {
+            const uint32_t argb = paint(x, y);
+            uint8_t *q = &bgra[((size_t)y * w + x) * 4];
+            q[0] = argb & 255; q[1] = (argb >> 8) & 255; q[2] = (argb >> 16) & 255; q[3] = argb >> 24;
+        }
+    std::vector<uint8_t> out;
+    std::wstring why;
+    scene::EncodeTexture(device, bgra.data(), w, h, (size_t)w * 4, scene::TextureKind::Exact, &out, &why);
+    return out;
+}
+// A 20 x 20 mask, white on its left half.
+std::vector<uint8_t> HalfMask(ID3D11Device *device) {
+    std::vector<uint8_t> bgra(20 * 20 * 4, 0);
+    for (int y = 0; y < 20; ++y)
+        for (int x = 0; x < 20; ++x) {
+            uint8_t *q = &bgra[((size_t)y * 20 + x) * 4];
+            q[0] = q[1] = q[2] = x < 10 ? 255 : 0; q[3] = 255;
+        }
+    std::vector<uint8_t> mask;
+    std::wstring why;
+    scene::EncodeTexture(device, bgra.data(), 20, 20, 80, scene::TextureKind::Mask, &mask, &why);
+    return mask;
+}
 }  // namespace
 
 TEST(SceneRendererDrawsFillsPicturesAndBlends) {
@@ -236,4 +263,131 @@ TEST(SceneImportMakesTexturesAndCompiledShadersUnderDerivedNames) {
     const std::string asMask = Scene("<assets><mask id=\"m\" file=\"m.tex\"/></assets><fill mask=\"m\"/>");
     CHECK(!scene::Import(device.Get(), {{L"scene.xml", Bytes(asMask)}, {L"m.tex", Solid(device.Get(), 4, 4, 0xFFFFFFFF)}}, &library, &why));
     CHECK(!scene::Import(device.Get(), {{L"scene.xml", Bytes(xml)}, {L"art/Sky.png", png}}, &library, &why));
+}
+
+TEST(SceneEffectsRecolourWhereTheirMasksLet) {
+    Stage s;
+    const std::string xml = Scene(
+        "<assets><image id=\"grey\" file=\"grey.tex\" exact=\"true\"/><image id=\"white\" file=\"white.tex\" exact=\"true\"/>"
+        "<mask id=\"half\" file=\"half.tex\"/></assets>"
+        "<fill color=\"#000000\"/>"
+        "<layer source=\"grey\" x=\"10\" y=\"10\" width=\"20\" height=\"20\"><effect type=\"grade\" brightness=\"0.2\"/></layer>"
+        "<layer source=\"white\" x=\"40\" y=\"10\" width=\"20\" height=\"20\"><effect type=\"tint\" color=\"#FF0000\"/></layer>"
+        "<layer source=\"white\" x=\"70\" y=\"10\" width=\"20\" height=\"20\"><effect type=\"grade\" brightness=\"-0.5\" mask=\"half\"/></layer>");
+    CHECK(s.Open({{L"scene.xml", Bytes(xml)}, {L"grey.tex", Solid(s.device.Get(), 20, 20, 0xFF808080)},
+                  {L"white.tex", Solid(s.device.Get(), 20, 20, 0xFFFFFFFF)}, {L"half.tex", HalfMask(s.device.Get())}}, 100, 50));
+    const Picture p = s.Draw(0);
+    if (p.width != 100) { CHECK(false); return; }
+    CHECK(Near(p.At(20, 20), 179, 179, 179));  // 0.5 + 0.2
+    CHECK(Near(p.At(50, 20), 0, 0, 255));      // white in shades of red
+    CHECK(Near(p.At(73, 20), 128, 128, 128) && Near(p.At(87, 20), 255, 255, 255));  // only the masked half
+    CHECK(Near(p.At(5, 5), 0, 0, 0));
+}
+
+TEST(SceneEffectsMoveThePictureAsTimePasses) {
+    Stage s;
+    // A white upright line on nothing, bent from its top; and a picture half red, half blue, panning.
+    const std::string xml = Scene(
+        "<assets><image id=\"line\" file=\"line.tex\" exact=\"true\"/><image id=\"halves\" file=\"halves.tex\" exact=\"true\"/></assets>"
+        "<fill color=\"#000000\"/>"
+        "<layer source=\"line\" x=\"30\" y=\"5\"><effect type=\"bend\" strength=\"1\" period=\"4\" waves=\"0\"/></layer>"
+        "<layer source=\"halves\" x=\"0\" y=\"30\" width=\"20\" height=\"10\"><effect type=\"pan\" speed-x=\"1\"/></layer>");
+    const auto line = Painted(s.device.Get(), 40, 40, [](uint32_t x, uint32_t) { return x >= 18 && x < 22 ? 0xFFFFFFFFu : 0u; });
+    const auto halves = Painted(s.device.Get(), 20, 10, [](uint32_t x, uint32_t) { return x < 10 ? 0xFFFF0000u : 0xFF0000FFu; });
+    CHECK(s.Open({{L"scene.xml", Bytes(xml)}, {L"line.tex", line}, {L"halves.tex", halves}}, 100, 50));
+    const Picture rest = s.Draw(0), right = s.Draw(1), left = s.Draw(3), again = s.Draw(1);
+    if (rest.width != 100 || right.width != 100 || left.width != 100) { CHECK(false); return; }
+    CHECK(right.bgra == again.bgra);
+    // At rest the line stands at x 48..51. A quarter period on, its foot has swung about 4.7 points
+    // right while its top stays; three quarters on, as far left.
+    CHECK(Near(rest.At(49, 44), 255, 255, 255) && Near(rest.At(54, 44), 0, 0, 0));
+    CHECK(Near(right.At(49, 44), 0, 0, 0) && Near(right.At(54, 44), 255, 255, 255) && Near(right.At(49, 6), 255, 255, 255));
+    CHECK(Near(left.At(45, 44), 255, 255, 255) && Near(left.At(49, 44), 0, 0, 0) && Near(left.At(49, 6), 255, 255, 255));
+    // One box height a second across a box twice as wide as tall: half way round after a second.
+    CHECK(Near(rest.At(5, 35), 0, 0, 255) && Near(rest.At(15, 35), 255, 0, 0));
+    CHECK(Near(right.At(5, 35), 255, 0, 0) && Near(right.At(15, 35), 0, 0, 255));
+}
+
+TEST(SceneEffectsGlowBlurAndRaysSpreadPastTheBox) {
+    for (const RenderQuality quality : {RenderQuality::Highest, RenderQuality::Auto, RenderQuality::Low}) {
+        Stage s;
+        const std::string xml = Scene(
+            "<assets><image id=\"white\" file=\"white.tex\" exact=\"true\"/><image id=\"spot\" file=\"spot.tex\" exact=\"true\"/></assets>"
+            "<fill color=\"#000000\"/>"
+            "<layer source=\"white\" x=\"5\" y=\"10\" width=\"30\" height=\"30\"><effect type=\"blur\" radius=\"0.1\"/></layer>"
+            "<layer source=\"white\" x=\"40\" y=\"12\" width=\"25\" height=\"25\"><effect type=\"glow\" radius=\"0.2\" threshold=\"0\"/></layer>"
+            "<layer source=\"spot\" x=\"66\" y=\"5\"><effect type=\"rays\" center=\"0.5 0\" strength=\"2\" length=\"1\"/></layer>");
+        // Black with a white spot near the top middle.
+        const auto spot = Painted(s.device.Get(), 40, 40, [](uint32_t x, uint32_t y) {
+            return x >= 17 && x < 23 && y >= 4 && y < 10 ? 0xFFFFFFFFu : 0xFF000000u;
+        });
+        CHECK(s.Open({{L"scene.xml", Bytes(xml)}, {L"white.tex", Solid(s.device.Get(), 10, 10, 0xFFFFFFFF)}, {L"spot.tex", spot}}, 100, 50));
+        s.renderer.SetQuality(quality);
+        const Picture p = s.Draw(0);
+        if (p.width != 100) { CHECK(false); continue; }
+        // The blurred square (sigma 1.5 pixels): soft at its edge, white in the middle, a little light outside.
+        CHECK(p.At(5, 25)[0] > 60 && p.At(5, 25)[0] < 230 && p.At(20, 25)[0] > 240 && p.At(3, 25)[0] > 10);
+        // The glowing square stays white and lights the black around it.
+        CHECK(Near(p.At(52, 25), 255, 255, 255) && p.At(37, 25)[0] > 20 && p.At(20, 2)[0] < 3);
+        // Below the spot the rays come down; beside the top edge, where nothing bright lies towards
+        // the centre, it stays black.
+        CHECK(p.At(80, 35)[0] > 25 && p.At(67, 6)[0] < 10);
+    }
+}
+
+TEST(SceneEffectsKeepAStillNodeWhileOthersMove) {
+    Stage s;
+    const std::string xml = Scene(
+        "<assets><image id=\"grey\" file=\"grey.tex\" exact=\"true\"/><image id=\"dot\" file=\"dot.tex\" exact=\"true\"/></assets>"
+        "<fill color=\"#000000\"/>"
+        "<layer source=\"grey\" x=\"10\" y=\"10\" width=\"20\" height=\"20\"><effect type=\"grade\" brightness=\"0.2\"/></layer>"
+        "<layer source=\"dot\" y=\"40\"><keys property=\"x\" duration=\"4\"><key at=\"0\" value=\"40\"/><key at=\"4\" value=\"90\"/></keys>"
+        "<effect type=\"sheen\" angle=\"0\" width=\"0.5\" period=\"3\"/></layer>");
+    CHECK(s.Open({{L"scene.xml", Bytes(xml)}, {L"grey.tex", Solid(s.device.Get(), 20, 20, 0xFF808080)},
+                  {L"dot.tex", Solid(s.device.Get(), 10, 10, 0xFF808080)}}, 100, 50));
+    const Picture a = s.Draw(0.5), b = s.Draw(2), c = s.Draw(0.5);
+    if (a.width != 100 || b.width != 100) { CHECK(false); return; }
+    CHECK(a.bgra == c.bgra && a.bgra != b.bgra);
+    CHECK(Near(a.At(20, 20), 179, 179, 179) && Near(b.At(20, 20), 179, 179, 179));
+    // Half way through the sheen's sweep its band crosses the dot's middle (the dot is at x 46..56
+    // then); two seconds in it rests and the dot, at 65..75, is its own grey.
+    CHECK(a.At(51, 45)[0] > 160 && Near(b.At(70, 45), 128, 128, 128));
+}
+
+TEST(SceneEffectShadersReadTheNodesPictureAndMask) {
+    Stage s;
+    const std::string xml = Scene(
+        "<assets><image id=\"white\" file=\"white.tex\" exact=\"true\"/><mask id=\"half\" file=\"half.tex\"/>"
+        "<shader id=\"paint\" kind=\"effect\" file=\"paint.hlsl\"/></assets>"
+        "<fill color=\"#000000\"/>"
+        "<layer source=\"white\" x=\"10\" y=\"10\" width=\"20\" height=\"20\">"
+        "<effect source=\"paint\" mask=\"half\"><param slot=\"0\" value=\"#00FF00\"/></effect></layer>"
+        "<layer source=\"white\" x=\"40\" y=\"10\" width=\"20\" height=\"20\">"
+        "<effect source=\"paint\"><param slot=\"0\" value=\"#0000FF\"/></effect><effect type=\"grade\" brightness=\"-0.5\"/></layer>");
+    const std::string hlsl =
+        "float4 main(float2 uv : TEXCOORD0) : SV_Target {\n"
+        "    float4 c = source.Sample(linearClamp, uv);\n"
+        "    return lerp(c, float4(param[0].rgb * c.a, c.a), mask.Sample(linearClamp, uv).r);\n"
+        "}\n";
+    CHECK(s.Open({{L"scene.xml", Bytes(xml)}, {L"white.tex", Solid(s.device.Get(), 20, 20, 0xFFFFFFFF)},
+                  {L"half.tex", HalfMask(s.device.Get())}, {L"paint.hlsl", Bytes(hlsl)}}, 100, 50));
+    const Picture p = s.Draw(0);
+    if (p.width != 100) { CHECK(false); return; }
+    CHECK(Near(p.At(13, 20), 0, 255, 0) && Near(p.At(27, 20), 255, 255, 255));
+    // Without a mask the shader reads white everywhere; the grade after it halves its blue.
+    CHECK(Near(p.At(50, 20), 128, 0, 0));
+}
+
+TEST(SceneEffectsOnAFullScreenPictureKeepItsEdges) {
+    Stage s;
+    // A picture that covers the stage, blurred and waved: its edges repeat outward instead of
+    // letting the black below show through.
+    const std::string xml = Scene(
+        "<assets><image id=\"white\" file=\"white.tex\" exact=\"true\"/></assets>"
+        "<fill color=\"#000000\"/>"
+        "<layer source=\"white\" full=\"true\"><effect type=\"wave\" amplitude=\"0.05\" period=\"2\"/><effect type=\"blur\" radius=\"0.1\"/></layer>");
+    CHECK(s.Open({{L"scene.xml", Bytes(xml)}, {L"white.tex", Solid(s.device.Get(), 100, 50, 0xFFFFFFFF)}}, 100, 50));
+    const Picture p = s.Draw(0.5);
+    if (p.width != 100) { CHECK(false); return; }
+    CHECK(Near(p.At(0, 0), 255, 255, 255) && Near(p.At(99, 49), 255, 255, 255) && Near(p.At(50, 0), 255, 255, 255));
 }

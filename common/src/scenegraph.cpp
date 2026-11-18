@@ -99,7 +99,7 @@ struct EffectSpec {
 const std::vector<EffectSpec> &Effects() {
     static const std::vector<EffectSpec> specs = {
         {L"bend", {{L"strength", Type::Number, 0, 1, nullptr, true, L"0.5"}, {L"period", Type::Number, 0.1, 60, nullptr, true, L"3"},
-                   {L"root", Type::Enum, 0, 0, kRoots, false, L"top"}, {L"waves", Type::Number, 0, 4, nullptr, true, L"1"}}},
+                   {L"root", Type::Enum, 0, 0, kRoots, false, L"top"}, {L"waves", Type::Number, 0, 4, nullptr, true, L"0.25"}}},
         {L"breathe", {{L"amount", Type::Number, 0, 0.2, nullptr, true, L"0.01"}, {L"period", Type::Number, 0.1, 60, nullptr, true, L"4"},
                       {L"pivot", Type::Pair, 0, 1, nullptr, false, L"0.5 1"}}},
         {L"wave", {{L"amplitude", Type::Number, 0, 0.2, nullptr, true, L"0.01"}, {L"length", Type::Number, 0.01, 2, nullptr, true, L"0.2"},
@@ -110,7 +110,7 @@ const std::vector<EffectSpec> &Effects() {
                    {L"amount", Type::Number, 0, 0.2, nullptr, true, L"0.02"}}},
         {L"pan", {{L"speed-x", Type::Number, -10, 10, nullptr, true, L"0"}, {L"speed-y", Type::Number, -10, 10, nullptr, true, L"0"}}},
         {L"jitter", {{L"amount", Type::Number, 0, 0.1, nullptr, true, L"0.005"}, {L"rate", Type::Number, 0.1, 60, nullptr, true, L"12"}}},
-        {L"glow", {{L"strength", Type::Number, 0, 4, nullptr, true, L"1"}, {L"radius", Type::Number, 0, 0.2, nullptr, true, L"0.02"},
+        {L"glow", {{L"strength", Type::Number, 0, 4, nullptr, true, L"1"}, {L"radius", Type::Number, 0, 1, nullptr, true, L"0.02"},
                    {L"threshold", Type::Number, 0, 1, nullptr, true, L"0.6"}, {L"color", Type::Color, 0, 0, nullptr, true, L"#FFFFFF"}}},
         {L"rays", {{L"center", Type::Pair, 0, 1, nullptr, false, L"0.5 0"}, {L"strength", Type::Number, 0, 4, nullptr, true, L"1"},
                    {L"length", Type::Number, 0, 1, nullptr, true, L"0.5"}, {L"color", Type::Color, 0, 0, nullptr, true, L"#FFFFFF"}}},
@@ -1197,6 +1197,8 @@ Frame Evaluate(const Document &d, const Values &values, const Inputs &in) {
     return f;
 }
 
+bool EffectMoves(const Effect &effect) { return !effect.source.empty() || TimeDriven(effect.type); }
+
 bool Moves(const Document &d) {
     if (!d.camera.empty()) return true;
     std::function<bool(const Node &)> moves = [&](const Node &n) {
@@ -1208,7 +1210,7 @@ bool Moves(const Document &d) {
                       (a->kind == AssetKind::Frames && a->files.size() > 1)))
                 return true;
         }
-        for (const auto &fx : n.effects) if (!fx.source.empty() || TimeDriven(fx.type)) return true;
+        for (const auto &fx : n.effects) if (EffectMoves(fx)) return true;
         for (const auto &c : n.children) if (moves(c)) return true;
         return false;
     };

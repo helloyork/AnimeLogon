@@ -132,6 +132,7 @@ int wmain(int argc, wchar_t **argv) {
     // fixed qualities never change; the highest keeps everything at full resolution and drops frames.
     const RenderQuality quality = command->quality <= (uint32_t)RenderQuality::Low ? (RenderQuality)command->quality : RenderQuality::Auto;
     const bool adapts = quality == RenderQuality::Auto;
+    renderer.SetQuality(quality);
     float cost = 0, scale = 1;
     if (adapts && command->calibrated) scale = std::clamp(command->startScale,.5f,1.f);
     else if (quality == RenderQuality::Medium) scale = .75f;
