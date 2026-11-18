@@ -21,8 +21,10 @@
 #include "animelogon/log.h"
 #include "animelogon/paths.h"
 #include "animelogon/resolve.h"
+#include "animelogon/rotation.h"
 #include "animelogon/settings.h"
 #include "animelogon/text.h"
+#include "lockscreen.h"
 
 namespace app {
 namespace {
@@ -44,7 +46,7 @@ uint64_t NowTicks() {
 
 // Whether any display's theme has a component that shows what is playing.
 bool ThemeShowsMedia() {
-    const Settings settings = LoadSettings(false);
+    const Settings settings = rotation::LoadShown();
     if (!settings.media) return false;
     std::vector<std::wstring> monitors{L""};
     if (settings.monitorMode == MonitorMode::PerMonitor)
@@ -204,12 +206,19 @@ int RunAgent() {
     winrt::init_apartment(winrt::apartment_type::multi_threaded);
 
     GlobalSystemMediaTransportControlsSessionManager manager{nullptr};
+    lockscreen::Keeper keeper;
     Pipe pipe;
     live::Live sent;
     bool connected = false, showing = false;
     ULONGLONG themeAt = 0;
     ALOG(L"agent: started");
     for (;;) {
+        // The sign-in background: the person's lock screen picture follows the theme shown.
+        try {
+            keeper.Tick();
+        } catch (const winrt::hresult_error &e) {
+            ALOG(L"agent: the lock screen picture could not be looked at (0x%08X)", (unsigned)e.code());
+        }
         const ULONGLONG tick = GetTickCount64();
         if (!themeAt || tick - themeAt >= kThemeMs) {
             themeAt = tick;

@@ -97,6 +97,14 @@ void LiveData::EndAgent() {
     CloseHandle(agent_);
     agent_ = nullptr;
     agentSession_ = kNoSession;
+    agentSid_.clear();
+}
+
+void LiveData::Hold() {
+    held_ = true;
+    if (agent_) ALOG(L"live: the agent is ended while AnimeLogon puts things back");
+    EndAgent();
+    Forget(nullptr);
 }
 
 void LiveData::Tick(DWORD consoleSession) {
@@ -124,27 +132,37 @@ void LiveData::Tick(DWORD consoleSession) {
         CloseHandle(agent_);
         agent_ = nullptr;
         agentSession_ = kNoSession;
+        agentSid_.clear();
         // One that ends quickly and again and again is broken: back off.
         backoff_ = lived < 10000 ? (backoff_ ? (backoff_ * 2 > 300000 ? 300000 : backoff_ * 2) : 5000) : 0;
         nextTry_ = now + (backoff_ > kRestartMs ? backoff_ : kRestartMs);
         Forget(L"the agent ended");
     }
-    const bool want = signedIn && media_ && !sid.empty() && logonGuard_.CanStart(logon);
-    bool sameUser = false;
-    {
-        std::lock_guard<std::mutex> hold(lock_);
-        sameUser = sid == userSid_;
-    }
-    if (agent_ && (!want || agentSession_ != consoleSession || agentLogon_ != logon || !sameUser)) {
+    // The agent runs for whoever is signed in at the console; what it sends is taken only while
+    // settings.ini's `media` allows it.
+    const bool want = signedIn && !sid.empty() && logonGuard_.CanStart(logon) && !held_;
+    const bool accept = want && media_;
+    if (agent_ && (!want || agentSession_ != consoleSession || agentLogon_ != logon || sid != agentSid_)) {
         EndAgent();
         backoff_ = 0;
         nextTry_ = 0;
     }
-    if (!want && allowed_ != kNoSession)
+    bool allowed = false;
+    {
+        std::lock_guard<std::mutex> hold(lock_);
+        allowed = allowed_ != kNoSession;
+    }
+    if (!accept && allowed)
         Forget(!signedIn ? L"nobody is signed in at the console" : L"settings.ini says media = false");
+    // Taken again from an agent already running when `media` comes back on.
+    if (accept && agent_ && !allowed) {
+        std::lock_guard<std::mutex> hold(lock_);
+        allowed_ = consoleSession;
+        userSid_ = sid;
+    }
 
     if (want && !agent_ && now >= nextTry_) {
-        {
+        if (accept) {
             std::lock_guard<std::mutex> hold(lock_);
             allowed_ = consoleSession;
             userSid_ = sid;
@@ -163,6 +181,7 @@ void LiveData::Tick(DWORD consoleSession) {
             CloseHandle(pi.hThread);
             agent_ = pi.hProcess;
             agentSession_ = consoleSession;
+            agentSid_ = sid;
             agentLogon_ = logon;
             agentAt_ = now;
         } else {

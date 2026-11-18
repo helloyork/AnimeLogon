@@ -1,7 +1,8 @@
-// The service's side of what the signed-in person's session reports for the logon screen
-// (animelogon/live.h): it keeps that session's agent running, takes the agent's messages down
-// the pipe, and keeps live.ini -- written here, readable by SYSTEM and administrators only, and
-// deleted as soon as it no longer belongs to the person at the console.
+// The service's side of the signed-in person's agent (app/src/agent.h): it keeps the agent of the
+// person at the console running -- which keeps their lock screen picture, the sign-in background, to
+// the theme shown (animelogon/signin.h) -- takes its messages down the pipe while settings.ini's
+// `media` allows them, and keeps live.ini (animelogon/live.h) -- written here, readable by SYSTEM and
+// administrators only, and deleted as soon as it no longer belongs to the person at the console.
 #pragma once
 
 #include <windows.h>
@@ -26,6 +27,9 @@ public:
     // in the console session's signed-in user's session when it should run, ends it when it
     // should not.
     void Tick(DWORD consoleSession);
+    // Ends the agent and starts none again: AnimeLogon is putting back what it changed, and the
+    // agent would set its picture again.
+    void Hold();
 
 private:
     void Serve();
@@ -45,6 +49,8 @@ private:
 
     HANDLE agent_ = nullptr;
     DWORD agentSession_ = 0xFFFFFFFF;
+    std::vector<unsigned char> agentSid_;  // the user the agent runs as
+    bool held_ = false;
     uint64_t agentLogon_ = 0;
     AgentLogonGuard logonGuard_;
     ULONGLONG agentAt_ = 0, nextTry_ = 0, settingsAt_ = 0, tickAt_ = 0;

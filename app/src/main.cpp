@@ -20,6 +20,7 @@
 #include "arguments.h"
 #include "commit.h"
 #include "host.h"
+#include "lockscreen.h"
 #include "tray.h"
 
 using namespace animelogon;
@@ -71,6 +72,10 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, wchar_t *, int show) {
     switch (app::ReadArguments(args, &a)) {
     case app::Role::Agent:
         return app::RunAgent();
+    case app::Role::RestoreLockScreen:
+        // Started by the service in the person's own session, as AnimeLogon is switched off or removed.
+        if (paths::CreateDirectories(paths::UserDataDir())) log::Open(paths::UserDataDir() + L"\\agent.log");
+        return app::lockscreen::Restore() ? 0 : 1;
     case app::Role::Helper:
         return commit::Run(args);
     case app::Role::Unrecognized:

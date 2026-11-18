@@ -18,10 +18,12 @@ add_library(animelogon_common STATIC
     src/package.cpp
     src/paths.cpp
     src/resolve.cpp
+    src/rotation.cpp
     src/scene.cpp
     src/secure.cpp
     src/settings.cpp
     src/sha256.cpp
+    src/signin.cpp
     src/skin.cpp
     src/spectrum.cpp
     src/text.cpp

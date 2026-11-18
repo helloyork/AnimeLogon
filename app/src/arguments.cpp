@@ -12,6 +12,7 @@ bool IsAppArgument(const std::wstring &a) { return a == L"--sandbox" || a == L"-
 
 Role ReadArguments(const std::vector<std::wstring> &args, Arguments *out) {
     if (args.size() == 1 && args[0] == L"--agent") return Role::Agent;
+    if (args.size() == 1 && args[0] == L"--restore-lock-screen") return Role::RestoreLockScreen;
     // The elevated helper's commands all start with '-' (--commit-package, --switch-on...). A file
     // the shell passes is a full path, which never does.
     if (!args.empty() && !args[0].empty() && args[0][0] == L'-' && !IsAppArgument(args[0])) return Role::Helper;

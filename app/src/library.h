@@ -9,6 +9,7 @@
 
 #include "animelogon/components.h"
 #include "animelogon/resolve.h"
+#include "animelogon/rotation.h"
 #include "animelogon/settings.h"
 #include "animelogon/scene.h"
 #include "animelogon/skin.h"
@@ -31,6 +32,8 @@ public:
     virtual animelogon::Settings ReadSettings() const = 0;
     // Rewrites settings.ini, which users may rewrite but not create.
     virtual bool WriteSettings(const std::wstring &text) const = 0;
+    // Where the theme list has got to (rotation.ini), which only the logon screen writes.
+    virtual animelogon::rotation::State ReadRotation() const { return {}; }
 };
 const Stores &DiskStores();
 
@@ -52,8 +55,10 @@ public:
     const Stores &stores() const { return stores_; }
 
     const animelogon::ThemeEntry *Entry(const std::wstring &id) const;
-    // The theme the logon screen shows: `theme`, or the built-in one when that is not installed.
+    // The theme the logon screen shows: the one the theme list has got to while it moves, else
+    // `theme`; the built-in one when that is not installed.
     std::wstring Current() const;
+    const animelogon::rotation::State &rotation() const { return rotation_; }
     // The theme as installed, and as shown: with settings.ini's overrides applied.
     animelogon::theme::Theme Own(const std::wstring &id) const;
     animelogon::theme::Theme Edited(const std::wstring &id) const;
@@ -69,7 +74,8 @@ public:
 
     // --- the library -----------------------------------------------------------------------
     // Puts theme `id` on the logon screen. In per-monitor mode, `monitor` names one display,
-    // or is "all"; otherwise it is ignored. The theme becomes the first of the recent ones.
+    // or is "all"; otherwise it is ignored. The theme becomes the first of the recent ones. A theme
+    // the theme list does not hold stops the list moving; one it holds, it goes on from.
     bool Apply(const std::wstring &id, const std::wstring &monitor);
     // What the icon in the notification area offers: the installed themes among the recent ones,
     // at most `count`, those on the logon screen first and always; otherwise newest first.
@@ -122,7 +128,8 @@ public:
     bool CanRedo() const { return !redo_.empty(); }
 
     // --- what every theme shares ---------------------------------------------------------------
-    // `key` as the page names it (clock.hours, audio.volume, screen.<monitor> ...).
+    // `key` as the page names it (clock.hours, audio.volume, screen.<monitor>, rotation.on ...).
+    // Switching the theme list off leaves the theme it had got to on the logon screen.
     bool SetGlobal(const std::wstring &key, const std::wstring &value);
 
     // --- for the page ----------------------------------------------------------------------
@@ -148,6 +155,7 @@ private:
 
     const Stores &stores_;
     animelogon::Settings set_;
+    animelogon::rotation::State rotation_;
     std::vector<animelogon::ThemeEntry> themes_;
     std::vector<animelogon::WallpaperInfo> wallpapers_;
     std::vector<animelogon::ComponentEntry> components_;

@@ -18,6 +18,7 @@ namespace app {
 enum class Role {
     App,           // the settings app's window, or with `tray` the icon (Arguments)
     Agent,         // --agent, alone: the service's agent in the signed-in person's session (agent.h)
+    RestoreLockScreen,  // --restore-lock-screen, alone: puts back the person's own lock screen picture (lockscreen.h)
     Helper,        // the elevated helper: a first argument that starts with '-' and is none of the app's (commit.h)
     Unrecognized,  // the app's arguments, but not as it takes them
 };

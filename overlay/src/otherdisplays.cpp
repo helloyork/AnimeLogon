@@ -12,6 +12,7 @@
 #include "animelogon/log.h"
 #include "animelogon/monitors.h"
 #include "animelogon/resolve.h"
+#include "animelogon/rotation.h"
 #include "animelogon/text.h"
 #include "bake.h"
 #include "displaylayout.h"
@@ -438,7 +439,7 @@ void OtherDisplays::Check() {
         for (Window &w : windows_) DestroyWindow(w.hwnd);
         windows_.clear();
         std::wstring why;
-        const animelogon::Settings settings = animelogon::LoadSettings(false, &why);
+        const animelogon::Settings settings = animelogon::rotation::LoadShown(&why);
         Start(plan::Build(settings, animelogon::EnumerateMonitors(), animelogon::DiskStore()), settings.otherDisplays);
         reported_ = false;
         return;
@@ -483,7 +484,7 @@ void OtherDisplays::Report() {
 
 bool OtherDisplays::Preview(const std::wstring &dir) {
     std::wstring why;
-    const animelogon::Settings settings = animelogon::LoadSettings(false, &why);
+    const animelogon::Settings settings = animelogon::rotation::LoadShown(&why);
     const plan::Plan plan = plan::Build(settings, animelogon::EnumerateMonitors(), animelogon::DiskStore());
     const std::vector<stills::Still> chosen = stills::Choose(plan, settings.otherDisplays);
     std::wstring report = animelogon::Format(L"other_displays = %s\r\n", animelogon::ToString(settings.otherDisplays));

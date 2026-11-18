@@ -26,6 +26,11 @@ public:
     std::vector<WallpaperInfo> Wallpapers() const override { return ListWallpapers(); }
     std::vector<ComponentEntry> Components() const override { return ListComponents(); }
     Settings ReadSettings() const override { return LoadSettings(false); }
+    rotation::State ReadRotation() const override {
+        rotation::State state;
+        rotation::Load(&state);
+        return state;
+    }
 
     // Rewritten in place, held exclusively so that the overlay never reads half of it.
     bool WriteSettings(const std::wstring &text) const override {
@@ -220,6 +225,7 @@ Library::Library(const Stores &stores) : stores_(stores) { Reload(); }
 
 void Library::Reload() {
     set_ = stores_.ReadSettings();
+    rotation_ = stores_.ReadRotation();
     themes_ = stores_.Themes();
     wallpapers_ = stores_.Wallpapers();
     components_ = stores_.Components();
@@ -235,7 +241,10 @@ const ThemeEntry *Library::Entry(const std::wstring &id) const {
     return nullptr;
 }
 
-std::wstring Library::Current() const { return Entry(set_.theme) ? set_.theme : std::wstring(kDefaultTheme); }
+std::wstring Library::Current() const {
+    const std::wstring shown = rotation::Shown(set_, rotation_);
+    return Entry(shown) ? shown : std::wstring(kDefaultTheme);
+}
 
 theme::Theme Library::Own(const std::wstring &id) const {
     const auto it = owns_.find(id);
@@ -293,6 +302,9 @@ bool Library::Apply(const std::wstring &id, const std::wstring &monitor) {
     if (all) {
         set_.theme = id;
         if (monitor == L"all") set_.screens.clear();
+        // Chosen by hand: the theme list goes on from it, or stops when it does not hold it.
+        if (set_.rotation && std::find(set_.rotationThemes.begin(), set_.rotationThemes.end(), id) == set_.rotationThemes.end())
+            set_.rotation = false;
     } else {
         set_.screens[monitor] = id;
     }
@@ -337,6 +349,7 @@ std::vector<std::wstring> Library::Recent(size_t count) const {
 
 void Library::Forget(const std::wstring &id) {
     set_.recent.erase(std::remove(set_.recent.begin(), set_.recent.end(), id), set_.recent.end());
+    set_.rotationThemes.erase(std::remove(set_.rotationThemes.begin(), set_.rotationThemes.end(), id), set_.rotationThemes.end());
     set_.themeOverrides.erase(id);
     if (set_.theme == id) set_.theme = kDefaultTheme;
     for (auto it = set_.screens.begin(); it != set_.screens.end();) it = it->second == id ? set_.screens.erase(it) : std::next(it);
@@ -353,6 +366,8 @@ void Library::Move(const std::wstring &from, const std::wstring &to) {
     for (auto &[monitor, theme] : set_.screens)
         if (theme == from) theme = to;
     for (std::wstring &id : set_.recent)
+        if (id == from) id = to;
+    for (std::wstring &id : set_.rotationThemes)
         if (id == from) id = to;
     if (open_ == from) open_ = to;
     Touched(to);
@@ -804,6 +819,33 @@ bool Library::SetGlobal(const std::wstring &key, const std::wstring &value) {
         ok = percent(&set_.audio.videoTrack.volume);
     } else if (key == L"audio.videoYield") {
         ok = flag(&set_.audio.videoYields);
+    } else if (key == L"rotation.on") {
+        // Off: what the list had got to stays on the logon screen.
+        const std::wstring shown = rotation::Shown(set_, rotation_);
+        if ((ok = flag(&set_.rotation)) && !set_.rotation && Entry(shown)) set_.theme = shown;
+    } else if (key == L"rotation.themes") {
+        // Installed themes, comma-separated, each once.
+        std::vector<std::wstring> ids;
+        ok = true;
+        for (size_t at = 0; at <= value.size() && !value.empty() && ok;) {
+            size_t comma = value.find(L',', at);
+            if (comma == std::wstring::npos) comma = value.size();
+            const std::wstring id = value.substr(at, comma - at);
+            at = comma + 1;
+            ok = Entry(id) && std::find(ids.begin(), ids.end(), id) == ids.end() && ids.size() < kRotationMax;
+            if (ok) ids.push_back(id);
+        }
+        if (ok) set_.rotationThemes = ids;
+    } else if (key == L"rotation.trigger") {
+        RotationTrigger t;
+        if ((ok = Parse(value, &t))) set_.rotationTrigger = t;
+    } else if (key == L"rotation.minutes") {
+        double v = 0;
+        if ((ok = Number(value, &v) && v == std::floor(v) && v >= kRotationMinutesMin && v <= kRotationMinutesMax))
+            set_.rotationMinutes = (int)v;
+    } else if (key == L"rotation.order") {
+        RotationOrder o;
+        if ((ok = Parse(value, &o))) set_.rotationOrder = o;
     }
     if (ok && pictures) sharedVersion_ = ++version_;
     return ok;
@@ -879,6 +921,18 @@ void Library::WriteLibrary(json::Writer &w) const {
     w.Member(L"otherDisplays", ToString(set_.otherDisplays));
     w.Member(L"media", set_.media);
     w.Member(L"tray", set_.tray).Member(L"trayRecent", set_.trayRecent);
+    w.Key(L"rotation").BeginObject();
+    w.Member(L"on", set_.rotation).Member(L"trigger", ToString(set_.rotationTrigger));
+    w.Member(L"minutes", set_.rotationMinutes).Member(L"order", ToString(set_.rotationOrder));
+    w.Key(L"themes").BeginArray();
+    for (const std::wstring &id : set_.rotationThemes)
+        if (Entry(id)) w.String(id);
+    w.EndArray();
+    // When it moves on next, in milliseconds since 1970 (UTC), or 0 when it is not counting time.
+    const uint64_t next = rotation::NextAt(set_, rotation_);
+    constexpr uint64_t kEpoch = 116444736000000000ull;
+    w.Key(L"next").Number(next > kEpoch ? (double)((next - kEpoch) / 10000) : 0.0);
+    w.EndObject();
     w.Key(L"clock").BeginObject();
     w.Member(L"hours", ToString(set_.clock.hours)).Member(L"ampm", set_.clock.ampm);
     w.Member(L"date", ToString(set_.clock.date)).Member(L"language", set_.clock.locale);

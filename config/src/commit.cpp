@@ -54,7 +54,7 @@ int SwitchOn() {
     const std::wstring dir = machine::InstallDir();
     if (dir.empty()) return kFailed;
     if (others::TurnOff(paths::BackgroundPath()) != ERROR_SUCCESS) return kFailed;
-    return machine::TurnOn(dir + L"\\launcher.exe", paths::BackgroundPath()) == ERROR_SUCCESS ? kOk : kFailed;
+    return machine::TurnOn(dir + L"\\launcher.exe") == ERROR_SUCCESS ? kOk : kFailed;
 }
 
 int SwitchOff() { return machine::TurnOff() == ERROR_SUCCESS ? kOk : kFailed; }

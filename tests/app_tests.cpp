@@ -60,8 +60,10 @@ public:
     std::wstring settings = L"theme = " + kThemeT + L"\r\n";
     mutable std::wstring written;
     mutable int writes = 0;
+    rotation::State rotationState;
 
     const ThemeStore &Store() const override { return store; }
+    rotation::State ReadRotation() const override { return rotationState; }
     std::vector<ThemeEntry> Themes() const override {
         std::vector<ThemeEntry> list{{kDefaultTheme, L"默认", L"AnimeLogon", true}};
         for (const auto &[id, text] : store.themes) {
@@ -767,6 +769,46 @@ TEST(AppLibraryRemembersTheRecentThemes) {
     CHECK(l.SetGlobal(L"trayRecent", L"3") && l.settings().trayRecent == 3);
     CHECK(!l.SetGlobal(L"trayRecent", L"0") && !l.SetGlobal(L"trayRecent", L"11") && !l.SetGlobal(L"trayRecent", L"2.5"));
     CHECK(l.SetGlobal(L"tray", L"false") && !l.settings().tray);
+}
+
+TEST(AppLibraryKeepsTheThemeList) {
+    FakeStores s = Stores();
+    using List = std::vector<std::wstring>;
+    s.settings = L"theme = " + kThemeT + L"\r\nrotation = true\r\nrotation_themes = " + kThemeT + L"," + kThemeU + L"\r\n";
+    // The logon screen has moved on to U: that is the theme in use.
+    s.rotationState.themes = {kThemeT, kThemeU};
+    s.rotationState.current = kThemeU;
+    s.rotationState.chosen = kThemeT;
+    app::Library l(s);
+    CHECK(l.Current() == kThemeU && l.Recent(5).front() == kThemeU);
+    // The list as the page sets it: installed themes only, each once.
+    CHECK(!l.SetGlobal(L"rotation.themes", kThemeT + L",cccccccccccccccc"));
+    CHECK(!l.SetGlobal(L"rotation.themes", kThemeT + L"," + kThemeT));
+    CHECK(l.SetGlobal(L"rotation.themes", kThemeU + L",default," + kThemeT) && l.settings().rotationThemes == (List{kThemeU, L"default", kThemeT}));
+    CHECK(l.SetGlobal(L"rotation.minutes", L"15") && !l.SetGlobal(L"rotation.minutes", L"4") && !l.SetGlobal(L"rotation.minutes", L"7.5"));
+    CHECK(l.SetGlobal(L"rotation.trigger", L"lock") && l.SetGlobal(L"rotation.order", L"shuffle") && !l.SetGlobal(L"rotation.order", L"random"));
+    // A listed theme chosen by hand: the list goes on from it.
+    CHECK(l.Apply(kDefaultTheme, L"") && l.settings().rotation && l.Current() == kDefaultTheme);
+    // Switched off: the theme it had got to stays.
+    app::Library m(s);
+    CHECK(m.SetGlobal(L"rotation.on", L"false") && !m.settings().rotation && m.settings().theme == kThemeU && m.Current() == kThemeU);
+    // A theme the list does not hold, chosen by hand: the list stops.
+    app::Library n(s);
+    CHECK(n.SetGlobal(L"rotation.themes", kThemeU) && n.Apply(kThemeT, L"") && !n.settings().rotation && n.Current() == kThemeT);
+    // Renamed and removed themes follow.
+    app::Library o(s);
+    o.Move(kThemeU, L"dddddddddddddddd");
+    CHECK(o.settings().rotationThemes == (List{kThemeT, L"dddddddddddddddd"}));
+    o.Forget(kThemeT);
+    CHECK(o.settings().rotationThemes == (List{L"dddddddddddddddd"}));
+    // What the page is told.
+    json::Writer w;
+    w.BeginObject();
+    l.WriteLibrary(w);
+    w.EndObject();
+    const std::wstring text = w.text();
+    CHECK(text.find(L"\"current\":\"default\"") != std::wstring::npos);
+    CHECK(text.find(L"\"rotation\":{\"on\":true,\"trigger\":\"lock\",\"minutes\":15,\"order\":\"shuffle\"") != std::wstring::npos);
 }
 
 TEST(AppTrayMenuMarksWhatTheLogonScreenShows) {

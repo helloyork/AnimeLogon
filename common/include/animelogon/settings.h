@@ -70,6 +70,22 @@ enum class OtherDisplays {
 constexpr int kTrayRecent = 5, kTrayRecentMin = 1, kTrayRecentMax = 10;
 constexpr size_t kRecentMax = kTrayRecentMax;
 
+// The logon screen can move through a list of themes (rotation.h). When it moves on:
+enum class RotationTrigger {
+    Interval,  // every `rotation_minutes`, counted while somebody is signed in
+    Lock,      // after each logon screen: the next lock or boot shows the next theme
+};
+// In which order it moves through them.
+enum class RotationOrder {
+    Sequential,  // as listed, starting again after the last
+    Shuffle,     // every theme once in a random order, then a new order
+};
+// `rotation_minutes`, between kRotationMinutesMin and Max. Every move to a theme not shown lately
+// has Windows prepare its sign-in picture again, so the shortest interval is a few minutes.
+constexpr int kRotationMinutes = 30, kRotationMinutesMin = 5, kRotationMinutesMax = 1440;
+// The most themes `rotation_themes` may list.
+constexpr size_t kRotationMax = 64;
+
 struct AudioSource {
     bool enabled = true;
     int volume = 100;  // 0..100
@@ -131,6 +147,15 @@ struct Settings {
     // `recent`: the themes most recently put on the logon screen, newest first and comma-separated,
     // at most kRecentMax. Nothing on the logon screen reads it.
     std::vector<std::wstring> recent;
+    // `rotation`: whether the logon screen moves through `rotation_themes` (comma-separated theme
+    // ids, at most kRotationMax) instead of always showing `theme`; `rotation_trigger` (interval or
+    // lock), `rotation_minutes` and `rotation_order` (sequential or shuffle) say how. `theme` is then
+    // the theme last chosen by hand: choosing one that is in the list moves the rotation to it.
+    bool rotation = false;
+    std::vector<std::wstring> rotationThemes;
+    RotationTrigger rotationTrigger = RotationTrigger::Interval;
+    int rotationMinutes = kRotationMinutes;
+    RotationOrder rotationOrder = RotationOrder::Sequential;
 
     // --- Themes --------------------------------------------------------------------------
     std::map<std::wstring, ThemeOverrides> themeOverrides;  // by theme id
@@ -179,5 +204,9 @@ const wchar_t *ToString(ComponentDisplays displays);
 bool Parse(std::wstring_view text, ComponentDisplays *out);  // auto, primary or all
 const wchar_t *ToString(OtherDisplays displays);
 bool Parse(std::wstring_view text, OtherDisplays *out);  // blur, picture or black
+const wchar_t *ToString(RotationTrigger trigger);
+bool Parse(std::wstring_view text, RotationTrigger *out);  // interval or lock
+const wchar_t *ToString(RotationOrder order);
+bool Parse(std::wstring_view text, RotationOrder *out);  // sequential or shuffle
 
 }  // namespace animelogon
