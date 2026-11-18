@@ -289,21 +289,26 @@ int main(int argc, char **argv) {
 TEST(SettingsKeepHowScenesAreDrawn) {
     const Settings d = ParseSettings(L"theme = default\r\n");
     CHECK(d.render.quality == RenderQuality::Auto && d.render.fps == kRenderFps && d.render.videoMemory == 0);
-    CHECK(d.render.particles == 100 && d.render.onBattery == BatteryRender::Half && d.render.stillOnSaver);
+    CHECK(d.render.fpsOnBattery == kRenderFpsBattery && d.render.fpsOnSaver == kFpsStill && d.render.particles == 100);
     Settings s;
-    s.render = {RenderQuality::Highest, 0, 2048, 40, BatteryRender::Same, false};
+    s.render = {RenderQuality::Highest, kFpsDisplay, 144, 24, 2048, 40};
     std::vector<std::wstring> problems;
     const Settings t = ParseSettings(SerializeSettings(s), &problems);
     CHECK(problems.empty());
-    CHECK(t.render.quality == RenderQuality::Highest && t.render.fps == 0 && t.render.videoMemory == 2048);
-    CHECK(t.render.particles == 40 && t.render.onBattery == BatteryRender::Same && !t.render.stillOnSaver);
+    CHECK(t.render.quality == RenderQuality::Highest && t.render.fps == kFpsDisplay && t.render.videoMemory == 2048);
+    CHECK(t.render.fpsOnBattery == 144 && t.render.fpsOnSaver == 24 && t.render.particles == 40);
     CHECK(SerializeSettings(s).find(L"render_fps = display\r\n") != std::wstring::npos);
+    CHECK(SerializeSettings(Settings{}).find(L"render_fps_saver = still\r\n") != std::wstring::npos);
+    // Each power state has its own cap; energy saver wins, then the battery.
+    CHECK(FrameRateNow(s.render, false, false) == kFpsDisplay && FrameRateNow(s.render, true, false) == 144);
+    CHECK(FrameRateNow(s.render, true, true) == 24 && FrameRateNow(s.render, false, true) == 24);
     // Values out of range or unknown keep the defaults and are reported.
     const Settings bad = ParseSettings(L"theme = default\r\nrender_quality = ultra\r\nrender_fps = 10\r\n"
-                                       L"render_video_memory = 64\r\nrender_particles = 0\r\nrender_on_battery = off\r\n"
-                                       L"render_battery_saver = maybe\r\n", &problems);
+                                       L"render_video_memory = 64\r\nrender_particles = 0\r\nrender_fps_battery = half\r\n"
+                                       L"render_fps_saver = 241\r\n", &problems);
     CHECK(problems.size() == 6 && bad.render.quality == RenderQuality::Auto && bad.render.fps == kRenderFps);
-    CHECK(bad.render.videoMemory == 0 && bad.render.particles == 100 && bad.render.stillOnSaver);
+    CHECK(bad.render.videoMemory == 0 && bad.render.particles == 100);
+    CHECK(bad.render.fpsOnBattery == kRenderFpsBattery && bad.render.fpsOnSaver == kFpsStill);
 }
 
 TEST(SettingsKeepTheTrayAndTheRecentThemes) {

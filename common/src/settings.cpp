@@ -28,7 +28,21 @@ const wchar_t *const kOtherDisplays[] = {L"blur", L"picture", L"black"};
 const wchar_t *const kRotationTriggers[] = {L"interval", L"lock"};
 const wchar_t *const kRotationOrders[] = {L"sequential", L"shuffle"};
 const wchar_t *const kRenderQualities[] = {L"auto", L"highest", L"high", L"medium", L"low"};
-const wchar_t *const kBatteryRenders[] = {L"same", L"half", L"still"};
+
+// A frame rate cap: a number of frames a second, `display` or `still`.
+bool ParseFrameRate(std::wstring_view v, int *out) {
+    if (EqualsNoCase(v, L"display")) return *out = kFpsDisplay, true;
+    if (EqualsNoCase(v, L"still")) return *out = kFpsStill, true;
+    long long n = 0;
+    if (!ParseInt(v, &n) || n < kRenderFpsMin || n > kRenderFpsMax) return false;
+    return *out = (int)n, true;
+}
+
+std::wstring FrameRateText(int fps) {
+    if (fps == kFpsDisplay) return L"display";
+    if (fps == kFpsStill) return L"still";
+    return std::to_wstring(fps);
+}
 
 bool ParseBool(std::wstring_view v, bool *out) {
     if (EqualsNoCase(v, L"true") || v == L"1") return *out = true, true;
@@ -236,12 +250,9 @@ bool Parse(std::wstring_view text, RenderQuality *out) {
     return false;
 }
 
-const wchar_t *ToString(BatteryRender render) { return kBatteryRenders[(int)render]; }
-
-bool Parse(std::wstring_view text, BatteryRender *out) {
-    for (size_t i = 0; i < ARRAYSIZE(kBatteryRenders); ++i)
-        if (EqualsNoCase(text, kBatteryRenders[i])) return *out = (BatteryRender)i, true;
-    return false;
+int FrameRateNow(const RenderSettings &render, bool onBattery, bool energySaver) {
+    if (energySaver) return render.fpsOnSaver;
+    return onBattery ? render.fpsOnBattery : render.fps;
 }
 
 const wchar_t *ToString(RotationOrder order) { return kRotationOrders[(int)order]; }
@@ -372,12 +383,11 @@ void Read(const std::wstring &text, Settings *out, bool *namesTheme, std::vector
         } else if (key == L"render_quality") {
             ok = Parse(value, &s.render.quality);
         } else if (key == L"render_fps") {
-            long long n = 0;
-            if (EqualsNoCase(value, L"display")) s.render.fps = 0, ok = true;
-            else {
-                ok = ParseInt(value, &n) && n >= kRenderFpsMin && n <= kRenderFpsMax;
-                if (ok) s.render.fps = (int)n;
-            }
+            ok = ParseFrameRate(value, &s.render.fps);
+        } else if (key == L"render_fps_battery") {
+            ok = ParseFrameRate(value, &s.render.fpsOnBattery);
+        } else if (key == L"render_fps_saver") {
+            ok = ParseFrameRate(value, &s.render.fpsOnSaver);
         } else if (key == L"render_video_memory") {
             long long n = 0;
             if (EqualsNoCase(value, L"auto")) s.render.videoMemory = 0, ok = true;
@@ -389,11 +399,6 @@ void Read(const std::wstring &text, Settings *out, bool *namesTheme, std::vector
             long long n = 0;
             ok = ParseInt(value, &n) && n >= kParticlesMin && n <= kParticlesMax;
             if (ok) s.render.particles = (int)n;
-        } else if (key == L"render_on_battery") {
-            ok = Parse(value, &s.render.onBattery);
-        } else if (key == L"render_battery_saver") {
-            ok = EqualsNoCase(value, L"still") || EqualsNoCase(value, L"same");
-            if (ok) s.render.stillOnSaver = EqualsNoCase(value, L"still");
         } else if (key == L"clock_hours") {
             ok = Parse(std::wstring(value), &s.clock.hours);
         } else if (key == L"clock_ampm") {
@@ -479,11 +484,11 @@ std::wstring SerializeSettings(const Settings &s) {
     out += L"rotation_order = " + std::wstring(ToString(s.rotationOrder)) + L"\r\n";
     const RenderSettings &r = s.render;
     out += L"render_quality = " + std::wstring(ToString(r.quality)) + L"\r\n";
-    out += L"render_fps = " + (r.fps ? std::to_wstring(r.fps) : std::wstring(L"display")) + L"\r\n";
+    out += L"render_fps = " + FrameRateText(r.fps) + L"\r\n";
+    out += L"render_fps_battery = " + FrameRateText(r.fpsOnBattery) + L"\r\n";
+    out += L"render_fps_saver = " + FrameRateText(r.fpsOnSaver) + L"\r\n";
     out += L"render_video_memory = " + (r.videoMemory ? std::to_wstring(r.videoMemory) : std::wstring(L"auto")) + L"\r\n";
     out += L"render_particles = " + std::to_wstring(r.particles) + L"\r\n";
-    out += L"render_on_battery = " + std::wstring(ToString(r.onBattery)) + L"\r\n";
-    out += L"render_battery_saver = " + std::wstring(r.stillOnSaver ? L"still" : L"same") + L"\r\n";
     AppendOverrides(s, &out);
     return out;
 }
