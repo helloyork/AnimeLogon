@@ -251,6 +251,10 @@ Includes the headers and loader of the Microsoft Edge WebView2 SDK (BSD 3-Clause
 `vendor/thorvg` contains ThorVG 1.1.2 (MIT) and the licence for its embedded RapidJSON.
 Only the sandboxed scene renderer links ThorVG. See [SOURCE.md](vendor/thorvg/SOURCE.md).
 
+`vendor/directxtex` contains the parts of DirectXTex (MIT) that compress pictures to BC7 and BC4,
+used when a scene is imported to turn its pictures into textures for the graphics card. See
+[SOURCE.md](vendor/directxtex/SOURCE.md).
+
 The settings app's page bundles npm packages, among them React and Fluent UI (MIT). The build
 writes the name, version and licence text of each.
 

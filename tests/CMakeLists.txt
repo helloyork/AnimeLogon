@@ -18,6 +18,10 @@ foreach(entry IN ITEMS VS Box Gauss Up)
 endforeach()
 target_sources(animelogon_tests PRIVATE scene_tests.cpp scenegraph_tests.cpp)
 target_sources(animelogon_tests PRIVATE scene_runtime_tests.cpp)
+# Scene textures: the file format, and the encoder the sandboxed renderer runs at import, on WARP.
+target_sources(animelogon_tests PRIVATE texture_tests.cpp ${PROJECT_SOURCE_DIR}/scene/src/texencode.cpp)
+target_include_directories(animelogon_tests PRIVATE ${PROJECT_SOURCE_DIR}/scene/src)
+target_link_libraries(animelogon_tests PRIVATE directxtex)
 add_dependencies(animelogon_tests scene)
 # The overlay's plan and its reading of still wallpapers need nothing but animelogon_common.
 target_sources(animelogon_tests PRIVATE overlay_tests.cpp ${PROJECT_SOURCE_DIR}/overlay/src/plan.cpp
