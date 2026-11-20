@@ -296,6 +296,7 @@
   "inspector.reset_component": "還原此元件",
   "inspector.reset_part": "還原「{name}」",
   "inspector.reset_place": "還原位置",
+  "inspector.scene_picture.own": "場景內建的圖片",
   "inspector.scene_static": "此場景在本裝置上以靜態畫面顯示。調整會保留在匯出的主題中。",
   "inspector.show": "顯示",
   "inspector.show_named": "在鎖定畫面上顯示「{name}」",

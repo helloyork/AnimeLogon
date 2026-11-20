@@ -858,7 +858,9 @@ std::wstring Resolve(const Document &d, const Values &values, const std::wstring
     const Setting *s = d.FindSetting(v.substr(1));
     if (!s) return {};
     const std::wstring chosen = ValueOf(d, values, s->base.id);
-    if (s->image) return chosen == s->base.fallback ? chosen : L"wallpaper:" + chosen;
+    // The picture the user chose comes to the renderer as its own file (ChosenName); the node keeps
+    // the default's box.
+    if (s->image) return s->base.fallback;
     if (s->base.kind == skin::SettingKind::Toggle) return chosen == L"on" ? s->base.options[0].value : s->base.options[1].value;
     return chosen;
 }
@@ -1442,6 +1444,7 @@ int FormatOf(std::string_view utf8) {
     return 0;
 }
 
+std::wstring ChosenName(const std::wstring &settingId) { return L"chosen/" + settingId + L".bmp"; }
 std::wstring CompiledName(const Asset &a) { return L"shaders/" + a.id + L".dxbc"; }
 std::wstring PosterName(const Asset &video) { return L"textures/" + video.id + L".tex"; }
 

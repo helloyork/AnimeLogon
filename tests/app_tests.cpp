@@ -201,6 +201,31 @@ TEST(AppSceneEditsSaveUndoResetAndDescribeControls) {
     CHECK(library.SetWallpaper(kWallpaperY) && library.settings().OverridesFor(kThemeT).wallpaperValues.empty());
 }
 
+TEST(AppScenePictureSettingsTakeLibraryPictures) {
+    wchar_t temp[MAX_PATH]{}; GetTempPathW(MAX_PATH,temp);
+    const std::wstring path=std::wstring(temp)+L"scene-picture-"+RandomHex(6)+L".xml";
+    const std::string xml="<scene format=\"2\" name=\"T\"><settings><image id=\"hero\" label=\"Hero\" default=\"pic\"/></settings>"
+        "<assets><image id=\"pic\" file=\"textures/pic.tex\"/></assets><layer source=\"$hero\"/></scene>";
+    HANDLE file=CreateFileW(path.c_str(),GENERIC_WRITE,0,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);
+    CHECK(file != INVALID_HANDLE_VALUE); if (file == INVALID_HANDLE_VALUE) return;
+    DWORD n=0; CHECK(WriteFile(file,xml.data(),(DWORD)xml.size(),&n,nullptr) && n == xml.size()); CloseHandle(file);
+    struct Remove { std::wstring path; ~Remove() { DeleteFileW(path.c_str()); } } remove{path};
+    auto stores=Stores(); auto &wp=stores.store.wallpapers[kWallpaperX]; wp.kind=WallpaperKind::Scene; wp.scenePath=path;
+    app::Library library(stores); CHECK(library.Open(kThemeT));
+    // A picture wallpaper from the library, or the scene's own picture; not a scene, nor what is not there.
+    CHECK(library.SetValue(L"wallpaper",L"hero",kWallpaperY));
+    CHECK(!library.SetValue(L"wallpaper",L"hero",kWallpaperX) && !library.SetValue(L"wallpaper",L"hero",L"3333333333333333"));
+    json::Writer writer; library.WriteOpen(writer); json::Value opened;
+    CHECK(json::Parse(writer.text(),&opened));
+    const auto &hero=opened[L"wallpaper"][L"scene"][L"settings"][0];
+    CHECK(hero[L"kind"].Str() == L"image" && hero[L"value"].Str() == kWallpaperY && hero[L"modified"].Bool());
+    CHECK(hero[L"options"][0][L"value"].Str() == L"pic");
+    bool offered = false;
+    for (size_t i = 0; i < hero[L"options"].size(); ++i) offered = offered || hero[L"options"][i][L"value"].Str() == kWallpaperY;
+    CHECK(offered);
+    CHECK(library.SetValue(L"wallpaper",L"hero",L"pic") && library.settings().OverridesFor(kThemeT).wallpaperValues.empty());
+}
+
 TEST(AppJsonReadsMessages) {
     json::Value v;
     CHECK(json::Parse(L" {\"op\":\"setMany\",\"values\":{\"p1.anchor\":\"top\",\"n\":-1.5e2},\"live\":true,"

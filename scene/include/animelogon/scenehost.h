@@ -66,6 +66,10 @@ private:
 // Reads an installed (or imported) scene's library files: scene.xml and what LibraryFiles names,
 // but not the video, which the parent decodes and hands over frame by frame.
 bool LoadFiles(const std::wstring &directory, bool trusted, Files *files, scenegraph::Document *document, std::wstring *why);
+// Adds the pictures the user chose for the scene's <image> settings (scenegraph::ChosenName), read
+// from the library's picture wallpapers. A choice that is no picture wallpaper there is left out, so
+// the scene shows its default.
+void AddChosenPictures(const scenegraph::Document &document, const scenegraph::Values &values, Files *files);
 bool Device(Microsoft::WRL::ComPtr<ID3D11Device> *device, std::wstring *why);
 }  // namespace animelogon::scene
 namespace animelogon::data { struct Snapshot; }

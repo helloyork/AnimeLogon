@@ -296,6 +296,7 @@
   "inspector.reset_component": "Reset this component",
   "inspector.reset_part": "Reset “{name}”",
   "inspector.reset_place": "Reset position",
+  "inspector.scene_picture.own": "The scene's own picture",
   "inspector.scene_static": "On this PC the scene shows as a still picture. Your adjustments are kept in exported themes.",
   "inspector.show": "Show",
   "inspector.show_named": "Show “{name}” on the lock screen",

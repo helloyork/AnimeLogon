@@ -232,6 +232,11 @@ bool IsPackagePath(std::wstring_view path);
 // The `format` a scene.xml declares: 2 for this one, 1 for the first scene format, 0 when the text
 // is not a scene at all.
 int FormatOf(std::string_view utf8);
+// The picture the user chose for an <image> setting, as the renderer is handed it beside the scene's
+// files: a canonical bitmap of one of the library's picture wallpapers. Nodes bound to the setting
+// keep the default picture's box and show the chosen one over it, cropped to cover it; without the
+// file they show the default.
+std::wstring ChosenName(const std::wstring &settingId);
 // Where a shader's compiled form is kept in the library, beside its source.
 std::wstring CompiledName(const Asset &asset);
 // Every file a stored scene keeps in the library besides scene.xml and still.bmp, in a stable

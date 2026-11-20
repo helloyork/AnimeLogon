@@ -16,6 +16,7 @@
 #include "animelogon/paths.h"
 #include "animelogon/secure.h"
 #include "animelogon/text.h"
+#include "animelogon/wallpaper.h"
 using Microsoft::WRL::ComPtr;
 namespace animelogon::scene {
 namespace {
@@ -363,6 +364,22 @@ bool LoadFiles(const std::wstring &dir, bool trusted, Files *files, scenegraph::
     }
     *files = std::move(out); return true;
 }
+void AddChosenPictures(const scenegraph::Document &doc, const scenegraph::Values &values, Files *files) {
+    for (const auto &setting : doc.settings) {
+        if (!setting.image) continue;
+        const auto it = values.find(setting.base.id);
+        if (it == values.end() || it->second == setting.base.fallback || !scenegraph::Accepts(doc, setting.base.id, it->second)) continue;
+        std::vector<uint8_t> bytes;
+        int w = 0, h = 0;
+        if (!secure::ReadFileBytes(WallpaperImagePath(it->second), &bytes, (size_t)bitmap::kHeaderBytes + 8192ull * 8192 * 4) ||
+            bytes.size() < bitmap::kHeaderBytes || !bitmap::ReadSize(bytes.data(), bytes.size(), bytes.size(), &w, &h)) {
+            ALOG(L"scene: the picture chosen for %s is not in the library; the scene's own shows", setting.base.id.c_str());
+            continue;
+        }
+        files->push_back({scenegraph::ChosenName(setting.base.id), std::move(bytes)});
+    }
+}
+
 void SetData(scenegraph::Inputs *in, const data::Snapshot &snapshot, uint64_t now) {
     SYSTEMTIME local{}; GetLocalTime(&local);
     in->day = (local.wHour*3600.0 + local.wMinute*60.0 + local.wSecond + local.wMilliseconds/1000.0) / 86400.0;

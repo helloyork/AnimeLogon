@@ -5,6 +5,7 @@
 #include <wrl/client.h>
 #include <cmath>
 #include <cstdio>
+#include "animelogon/bitmap.h"
 #include "animelogon/image.h"
 #include "animelogon/scenegraph.h"
 #include "animelogon/texture.h"
@@ -53,9 +54,11 @@ struct Stage {
     ComPtr<ID3D11Texture2D> output, staging;
     int width = 0, height = 0;
     std::wstring why;
-    bool Open(const scene::Files &package, int w, int h, int videoMemory = 0) {
+    // `extra` goes to the renderer beside the imported files, as a picture the user chose does.
+    bool Open(const scene::Files &package, int w, int h, int videoMemory = 0, const scene::Files &extra = {}) {
         scene::Files library;
-        if (!device || !scene::Import(device.Get(), package, &library, &why) || !renderer.Open(device.Get(), library, w, h, videoMemory, &why)) {
+        if (device && scene::Import(device.Get(), package, &library, &why)) library.insert(library.end(), extra.begin(), extra.end());
+        if (!device || library.empty() || !renderer.Open(device.Get(), library, w, h, videoMemory, &why)) {
             std::wprintf(L"    %s\n", why.c_str());
             return false;
         }
@@ -471,4 +474,33 @@ TEST(SceneParticlesWearPicturesAndTakeEffects) {
     // at the centre, and red light just beyond the largest of them.
     CHECK(Near(p.At(50, 25), 0, 0, 255, 8));
     CHECK(p.At(50, 36)[2] > 15 && p.At(50, 36)[2] < 250 && p.At(50, 36)[1] < 10);
+}
+
+TEST(SceneRendererShowsThePictureTheUserChose) {
+    // A picture setting whose default is red. The user's picture is four times as wide as tall, green
+    // at both ends and blue in its middle half; the box is twice as wide as tall, so the picture is
+    // cut to its middle and only blue shows.
+    const std::string xml = Scene(
+        "<settings><image id=\"hero\" label=\"Hero\" default=\"red\"/></settings>"
+        "<assets><image id=\"red\" file=\"red.tex\" exact=\"true\"/></assets>"
+        "<fill color=\"#000000\"/><layer source=\"$hero\" x=\"10\" y=\"10\" width=\"40\" height=\"20\"/>");
+    std::vector<uint8_t> bgra(80 * 20 * 4);
+    for (int y = 0; y < 20; ++y)
+        for (int x = 0; x < 80; ++x) {
+            uint8_t *q = &bgra[((size_t)y * 80 + x) * 4];
+            const bool middle = x >= 20 && x < 60;
+            q[0] = middle ? 255 : 0; q[1] = middle ? 0 : 255; q[2] = 0; q[3] = 255;
+        }
+    const std::vector<uint8_t> chosen = bitmap::Build(80, 20, bgra.data(), bgra.size());
+    Stage s;
+    const scene::Files package{{L"scene.xml", Bytes(xml)}, {L"red.tex", Solid(s.device.Get(), 20, 10, 0xFFFF0000)}};
+    CHECK(s.Open(package, 100, 50, 0, {{sg::ChosenName(L"hero"), chosen}}));
+    const Picture p = s.Draw(0);
+    if (p.width != 100) { CHECK(false); return; }
+    CHECK(Near(p.At(12, 20), 255, 0, 0, 8) && Near(p.At(48, 20), 255, 0, 0, 8) && Near(p.At(30, 28), 255, 0, 0, 8));
+    // Without it, the scene's own picture.
+    Stage plain;
+    CHECK(plain.Open({{L"scene.xml", Bytes(xml)}, {L"red.tex", Solid(plain.device.Get(), 20, 10, 0xFFFF0000)}}, 100, 50));
+    const Picture q = plain.Draw(0);
+    CHECK(q.width == 100 && Near(q.At(30, 20), 0, 0, 255));
 }

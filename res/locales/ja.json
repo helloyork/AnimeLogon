@@ -296,6 +296,7 @@
   "inspector.reset_component": "このコンポーネントをリセット",
   "inspector.reset_part": "「{name}」をリセット",
   "inspector.reset_place": "位置をリセット",
+  "inspector.scene_picture.own": "シーン付属の画像",
   "inspector.scene_static": "この PC では、このシーンは静止画として表示されます。調整内容はエクスポートしたテーマに保持されます。",
   "inspector.show": "表示",
   "inspector.show_named": "ロック画面に「{name}」を表示",

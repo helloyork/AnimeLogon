@@ -2,6 +2,7 @@
 #include "effects.h"
 #include "lottie.h"
 #include "particles.h"
+#include "texencode.h"
 #include <d3d11shader.h>
 #include <dxgi.h>
 #include <wrl/client.h>
@@ -11,7 +12,9 @@
 #include <cmath>
 #include <cstring>
 #include <functional>
+#include <list>
 #include <map>
+#include "animelogon/bitmap.h"
 #include "animelogon/skin.h"
 #include "animelogon/text.h"
 #include "animelogon/texture.h"
@@ -89,6 +92,7 @@ struct Renderer::State {
         float u = 1, v = 1;          // the used part, as a fraction of the texture
         double usedW = 0, usedH = 0;  // the picture's own size in points
         bool premultiplied = true;
+        bool cover = false;  // a picture the user chose: cropped to cover the box it is drawn in
     };
     struct Source {
         const File *file = nullptr;
@@ -112,6 +116,8 @@ struct Renderer::State {
     ComPtr<ID3D11RasterizerState> raster;
     std::map<std::wstring, Texture> pictures;               // images, masks and video first frames by asset id
     std::map<std::wstring, std::vector<Texture>> sequences;  // frame sequences
+    std::map<std::wstring, Texture> chosen;                  // pictures the user chose, by <image> setting id
+    std::list<std::pair<std::wstring, File>> chosenFiles;    // their textures as texture files, by setting id
     std::map<std::wstring, std::unique_ptr<Lottie>> lotties;
     std::map<std::wstring, ComPtr<ID3D11PixelShader>> shaders;
     std::map<const sg::Node *, Texture> drawn;  // Lottie and shader layers, drawn for this frame
@@ -203,6 +209,27 @@ struct Renderer::State {
             sources.push_back(std::move(s));
             return true;
         };
+        // A picture the user chose for an <image> setting comes as a bitmap: made a texture here, in
+        // the sandbox, and counted with the rest. It is kept uncompressed: compressing a 4K picture
+        // takes half a second on a fast card and more on integrated graphics, time a lock screen
+        // waiting for the scene's first frame does not have.
+        for (const auto &setting : d.settings) {
+            const File *f = setting.image ? sg::Find(files, sg::ChosenName(setting.base.id)) : nullptr;
+            int w = 0, h = 0;
+            if (!f || !bitmap::ReadSize(f->bytes.data(), f->bytes.size(), f->bytes.size(), &w, &h)) continue;
+            std::vector<uint8_t> tex;
+            std::wstring encodeWhy;
+            if (!EncodeTexture(device.Get(), f->bytes.data() + bitmap::kHeaderBytes, (uint32_t)w, (uint32_t)h, (size_t)w * 4,
+                               TextureKind::Exact, &tex, &encodeWhy)) continue;
+            chosenFiles.push_back({setting.base.id, File{sg::ChosenName(setting.base.id), std::move(tex)}});
+        }
+        for (const auto &[id, cf] : chosenFiles) {
+            Source s;
+            s.file = &cf;
+            s.into = &chosen[id];
+            if (!texture::Read(cf.bytes.data(), cf.bytes.size(), &s.info, &s.levels, why)) return false;
+            sources.push_back(std::move(s));
+        }
         for (const auto &a : d.assets) {
             if (a.kind == sg::AssetKind::Image || a.kind == sg::AssetKind::Mask) {
                 if (!add(L"textures/" + a.id + L".tex", &pictures[a.id])) return false;
@@ -241,6 +268,7 @@ struct Renderer::State {
         }
         textureBytes = total;
         for (const auto &s : sources) if (!Create(s, why)) return false;
+        for (auto &[id, t] : chosen) t.cover = true;
         return true;
     }
 
@@ -351,6 +379,9 @@ struct Renderer::State {
 
     // What a layer shows: a texture view and its used part, drawing a Lottie or shader layer first.
     bool LayerPicture(const sg::Placed &p, const Affine &q, const Texture &target, const Texture **out, std::wstring *why) {
+        // Bound to an <image> setting the user chose a picture for: that picture.
+        if (const auto *raw = p.node->Find(L"source"); raw && raw->size() > 1 && (*raw)[0] == L'$')
+            if (const auto it = chosen.find(raw->substr(1)); it != chosen.end() && it->second.view) { *out = &it->second; return true; }
         if (p.source == videoId && videoView) {
             videoPicture.view = videoView; videoPicture.u = videoPicture.v = 1; videoPicture.premultiplied = true;
             *out = &videoPicture;
@@ -506,6 +537,17 @@ struct Renderer::State {
             if (!t || !t->view) return true;
             c.mode = kTexture;
             c.sourceRect[0] = t->u; c.sourceRect[1] = t->v;
+            if (t->cover && t->usedW > 0 && t->usedH > 0) {
+                // The middle of the picture, as much of it as covers the box's shape.
+                const double boxAspect = std::hypot(q.a, q.b) / std::max(1e-9, std::hypot(q.c, q.d)), own = t->usedW / t->usedH;
+                if (own > boxAspect) {
+                    const double k = boxAspect / own;
+                    c.sourceRect[2] = (float)((1 - k) / 2 * t->u); c.sourceRect[0] = (float)(t->u * k);
+                } else {
+                    const double k = own / boxAspect;
+                    c.sourceRect[3] = (float)((1 - k) / 2 * t->v); c.sourceRect[1] = (float)(t->v * k);
+                }
+            }
             c.premultiplied = t->premultiplied ? 1.f : 0.f;
             picture = t->view.Get();
         }

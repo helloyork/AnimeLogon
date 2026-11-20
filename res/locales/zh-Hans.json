@@ -296,6 +296,7 @@
   "inspector.reset_component": "恢复此组件",
   "inspector.reset_part": "恢复「{name}」",
   "inspector.reset_place": "恢复位置",
+  "inspector.scene_picture.own": "场景自带的图片",
   "inspector.scene_static": "此场景在本设备上以静态画面显示。调整会保留在导出的主题中。",
   "inspector.show": "显示",
   "inspector.show_named": "在锁屏上显示「{name}」",

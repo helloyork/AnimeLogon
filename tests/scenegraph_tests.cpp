@@ -108,7 +108,8 @@ TEST(SceneGraphReadsTheProposalSample) {
     values = {{L"hero", L"0123456789abcdef"}};
     const sg::Frame f = sg::Evaluate(d, values, in);
     CHECK(Find(f.nodes, L"night") == nullptr && Find(f.nodes, L"petals") != nullptr);
-    CHECK(Find(f.nodes, L"body")->source == L"wallpaper:0123456789abcdef");
+    // The chosen picture comes to the renderer as a file of its own; the node keeps the default's box.
+    CHECK(Find(f.nodes, L"body")->source == L"hero" && sg::ChosenName(L"hero") == L"chosen/hero.bmp");
     CHECK(Near(Find(f.nodes, L"lantern-glow")->effects[0].values.at(L"strength")[0], 0.6));
     in.day = 0.9; in.audio[1] = 1;
     const sg::Frame g = sg::Evaluate(d, {}, in);

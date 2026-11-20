@@ -287,8 +287,10 @@ A toggle's value is `true` or `false` unless it gives `on` and `off`. On top of 
 - `when="$id"`, `when="$id=value"` or `when="!$id"` on a setting shows it only while another
   setting says so. It changes only what the app shows, never the scene.
 - A choice's option values can be asset ids, so `source="$outfit"` changes a layer's picture.
-- `<image id label default>` names an image asset the user could replace with a picture of their
-  own; the AnimeLogon app does not offer the choice yet, and the default shows.
+- `<image id label default>` names an image asset the user can replace with one of the picture
+  wallpapers in their library. A node whose `source` is `$id` keeps the box the default picture
+  gives it and shows the chosen picture there, its middle cut to cover the box. An exported theme
+  carries the default, not the user's picture.
 
 A theme keeps the user's values; the same scene can appear in several themes with different values.
 

@@ -127,7 +127,8 @@ export interface Option {
 // A setting of a component (or of a scene wallpaper), changed for the whole of it.
 export interface Setting {
   id: string;
-  kind: 'toggle' | 'number' | 'color' | 'colors' | 'font' | 'date' | 'choice';  // colors: "#RRGGBB[AA] P%, ..."
+  // colors: "#RRGGBB[AA] P%, ..."; image (a scene's): the scene's own picture, its default, or a picture wallpaper's id
+  kind: 'toggle' | 'number' | 'color' | 'colors' | 'font' | 'date' | 'choice' | 'image';
   label: string;
   detail: string;
   value: string;

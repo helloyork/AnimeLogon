@@ -96,6 +96,7 @@ void Scenes::Prepare(Presenter &presenter, const plan::Plan &plan) {
             scenegraph::Bake(document,e.values,&baked,&why) &&
             ([&] { const auto xml = scenegraph::Write(baked);
                 for (auto &f : files) if (f.name == L"scene.xml") f.bytes.assign(xml.begin(),xml.end());
+                scene::AddChosenPictures(document,e.values,&files);
                 return true; })() &&
             host->Start(presenter.device(),files,e.width,e.height,options,&why)) {
             e.host = std::move(host); e.last = GetTickCount64(); e.everReady = false;

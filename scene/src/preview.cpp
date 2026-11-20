@@ -79,6 +79,7 @@ bool Preview::Open(const WallpaperInfo &w, int width, int height, const skin::Va
     s->document=doc;
     s->author=author;
     for (const auto &[key,value] : values) if (scenegraph::Accepts(doc,key,value)) s->values[key]=value;
+    AddChosenPictures(doc,s->values,&files);
     s->device->GetImmediateContext(&s->context);
     ComPtr<ID3D10Multithread> multithread;
     if (SUCCEEDED(s->device.As(&multithread))) multithread->SetMultithreadProtected(TRUE);

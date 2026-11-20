@@ -444,6 +444,11 @@ bool Library::SetValue(const std::wstring &instance, const std::wstring &key, co
     if (open_.empty() || !IsTypedValueText(value)) return false;
     if (instance == L"wallpaper") {
         scenegraph::Document doc; if (!LoadScene(open_,&doc) || !scenegraph::Accepts(doc,key,value)) return false;
+        // A picture setting takes the scene's own picture or one of the library's picture wallpapers.
+        if (const scenegraph::Setting *s = doc.FindSetting(key); s && s->image && value != s->base.fallback) {
+            const WallpaperInfo *chosen = Wallpaper(value);
+            if (!chosen || chosen->kind != WallpaperKind::Image) return false;
+        }
         auto without = set_.OverridesFor(open_).wallpaperValues; without.erase(key);
         const auto was = scenegraph::ValueOf(doc,without,key);
         Step(gesture); auto &values = Overrides().wallpaperValues;
@@ -1037,14 +1042,23 @@ void Library::WriteOpen(json::Writer &w) const {
         w.Member(L"panels",0);
         w.Key(L"settings").BeginArray();
         for (const auto &setting : doc.settings) {
-            // Choosing a picture from the library comes with its own picker; until then it keeps its default.
-            if (setting.image) continue;
+            // A picture setting's value is the scene's own picture (its default) or a picture wallpaper's id.
             const skin::Setting &s = setting.base;
-            w.BeginObject().Member(L"id",s.id).Member(L"kind",KindName(s.kind)).Member(L"label",i18n::Label(s.label));
+            w.BeginObject().Member(L"id",s.id).Member(L"kind",setting.image ? L"image" : KindName(s.kind)).Member(L"label",i18n::Label(s.label));
             w.Member(L"detail",i18n::Label(s.detail)).Member(L"value",scenegraph::ValueOf(doc,o.wallpaperValues,s.id));
             w.Member(L"modified",o.wallpaperValues.count(s.id)>0).Member(L"min",s.min).Member(L"max",s.max).Member(L"step",s.step);
             w.Member(L"group",i18n::Label(setting.group)).Member(L"shown",scenegraph::Shown(doc,o.wallpaperValues,setting));
-            WriteOptions(w,s.options); w.EndObject();
+            if (!setting.image) {
+                WriteOptions(w,s.options);
+            } else {
+                // The scene's own picture, then the library's picture wallpapers.
+                w.Key(L"options").BeginArray();
+                w.BeginObject().Member(L"value",s.fallback).Member(L"label",i18n::Tr("inspector.scene_picture.own")).EndObject();
+                for (const WallpaperInfo &info : wallpapers_)
+                    if (info.kind == WallpaperKind::Image) w.BeginObject().Member(L"value",info.id).Member(L"label",WallpaperName(info.id)).EndObject();
+                w.EndArray();
+            }
+            w.EndObject();
         }
         // Format 2 has no per-layer adjustments: everything a user changes is a setting.
         w.EndArray().Key(L"parts").BeginArray();
