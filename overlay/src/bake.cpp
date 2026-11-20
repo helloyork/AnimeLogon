@@ -297,10 +297,15 @@ bool Refresh(const std::wstring &preview) {
     const bool blurred = wallpaper.blur > 0.0f;
     if (blurred) dimmed += animelogon::Format(L"|blur %g", wallpaper.blur);
     const bool plain = !darker && !blurred;
+    // A scene drawn with its theme's values is another picture than its own still.bmp; a scene that
+    // is not keeps the key it always had.
+    const bool own = wallpaper.source == plan::Source::Scene && !wallpaper.ownStill.empty() &&
+                     wallpaper.path == wallpaper.ownStill;
+    const std::wstring drawn = own ? L" " + wallpaper.path.substr(wallpaper.path.find_last_of(L'\\') + 1) : std::wstring();
     // A video's key is what it was before themes, so the same video keeps the same background.
     const std::wstring key =
         (video ? animelogon::Format(L"%s|%s|%s", kVersion, wallpaper.id.c_str(), placed.c_str())
-         : image ? animelogon::Format(L"%s|image %s|%s", kVersion, wallpaper.id.c_str(), placed.c_str())
+         : image ? animelogon::Format(L"%s|image %s%s|%s", kVersion, wallpaper.id.c_str(), drawn.c_str(), placed.c_str())
                  : std::wstring(L"default")) +
         dimmed;
     if (preview.empty() && key == ReadKey()) {

@@ -15,6 +15,7 @@
 #pragma once
 
 #include <cstdint>
+#include <map>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -73,6 +74,15 @@ std::wstring WallpaperInfoPath(const std::wstring &id);   // wallpaper.ini
 std::wstring WallpaperVideoPath(const std::wstring &id);  // video.mp4
 std::wstring WallpaperAudioPath(const std::wstring &id);  // audio.wav
 std::wstring WallpaperImagePath(const std::wstring &id);  // image.bmp
+
+// A scene drawn with the values a theme gives its settings, which the scene's own still.bmp does not
+// show (it has the defaults): the library's stills\<theme id>-<16 hex digits>.bmp, the digits from a
+// hash of the wallpaper and the values, so that other values name another file. A theme keeps one
+// there at a time. The overlay draws them, administrators-only (overlay/src/scenestills.h). Empty
+// when there are no values -- still.bmp is the picture then -- or an id is not one.
+std::wstring StillsDir();
+std::wstring SceneStillPath(const std::wstring &themeId, const std::wstring &wallpaperId,
+                            const std::map<std::wstring, std::wstring> &values);
 
 // wallpaper.ini: one `key = value` per line, unknown keys ignored. `type`, `width` and `height`
 // are required, and for a video also `frame_rate` and `duration_ms`. `why` says what was wrong.

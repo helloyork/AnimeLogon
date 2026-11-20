@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -20,6 +21,7 @@
 #include "layout.h"
 #include "picture.h"
 #include "plan.h"
+#include "scenestills.h"
 #include "soundloop.h"
 
 using namespace animelogon;
@@ -501,4 +503,75 @@ TEST(SoundTrackLoopsAtTheVideosLength) {
     // own length stands.
     CHECK(soundloop::LoopFrames(577536, 0.0, 48000) == 577536);
     CHECK(soundloop::LoopFrames(577536, 30.0, 48000) == 577536);
+}
+
+// A scene's still with its theme's values: where it is kept, one name per theme and values.
+TEST(SceneStillPathNamesOnePicturePerThemeAndValues) {
+    const std::wstring scene = L"4444444444444444";
+    const skin::Values tinted{{L"tint", L"#00ff00"}}, other{{L"tint", L"#0000ff"}};
+    const std::wstring path = SceneStillPath(kThemeT, scene, tinted);
+    const size_t at = path.rfind(L"\\stills\\" + kThemeT + L"-");
+    CHECK(at != std::wstring::npos && path.size() == at + 8 + kThemeT.size() + 1 + 16 + 4 && path.substr(path.size() - 4) == L".bmp");
+    CHECK(path == SceneStillPath(kThemeT, scene, tinted));
+    CHECK(path != SceneStillPath(kThemeT, scene, other) && path != SceneStillPath(kThemeT, L"5555555555555555", tinted));
+    const std::wstring u = SceneStillPath(kThemeU, scene, tinted);
+    CHECK(u.find(L"\\stills\\" + kThemeU + L"-") != std::wstring::npos && u.substr(u.size() - 21) == path.substr(path.size() - 21));
+    // The scene's own still.bmp has its defaults; nothing else is wanted then.
+    CHECK(SceneStillPath(kThemeT, scene, {}).empty());
+    CHECK(!SceneStillPath(kDefaultTheme, scene, tinted).empty());
+    CHECK(SceneStillPath(L"..\\x", scene, tinted).empty() && SceneStillPath(kThemeT, L"default", tinted).empty());
+}
+
+// A theme that gives its scene's settings values shows the scene's still drawn with them once the
+// overlay has drawn it, and still.bmp until then; the stills module draws the one not yet drawn.
+TEST(PlanTakesTheSceneStillDrawnWithTheThemesValues) {
+    wchar_t temp[MAX_PATH]{};
+    GetTempPathW(MAX_PATH, temp);
+    const std::wstring path = std::wstring(temp) + L"plan-scene-" + RandomHex(6) + L".xml";
+    const std::string xml = "<scene format=\"2\" name=\"S\"><settings><color id=\"tint\" label=\"Tint\" default=\"#ff0000\"/></settings>"
+        "<assets><shader id=\"sky\" kind=\"layer\" file=\"shaders/sky.hlsl\"/></assets><layer source=\"sky\" full=\"true\"/></scene>";
+    HANDLE file = CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+    CHECK(file != INVALID_HANDLE_VALUE);
+    if (file == INVALID_HANDLE_VALUE) return;
+    DWORD n = 0;
+    CHECK(WriteFile(file, xml.data(), (DWORD)xml.size(), &n, nullptr) && n == xml.size());
+    CloseHandle(file);
+    struct Remove { std::wstring path; ~Remove() { DeleteFileW(path.c_str()); } } remove{path};
+
+    struct Pictures : FakeStore {
+        std::set<std::wstring> drawn;
+        bool HasPicture(const std::wstring &p) const override { return drawn.count(p) != 0; }
+    } store;
+    static_cast<FakeStore &>(store) = Store();
+    const std::wstring scene = L"4444444444444444";
+    WallpaperInfo w;
+    w.id = scene;
+    w.kind = WallpaperKind::Scene;
+    w.width = 2560;
+    w.height = 1440;
+    w.scenePath = path;
+    w.imagePath = L"C:\\ProgramData\\AnimeLogon\\wallpapers\\" + scene + L"\\still.bmp";
+    store.wallpapers[scene] = w;
+    store.themes[kThemeT] = "<theme format=\"1\" name=\"T\"><wallpaper ref=\"4444444444444444\" fit=\"fill\"/></theme>";
+
+    // Without values: still.bmp, and nothing to draw.
+    Settings plain = ParseSettings(L"theme = " + kThemeT + L"\n");
+    plan::Plan p = plan::Build(plain, Monitors(1), store);
+    CHECK(p.displays[0].wallpaper.source == plan::Source::Scene && p.displays[0].wallpaper.ownStill.empty());
+    CHECK(p.displays[0].wallpaper.path == w.imagePath && StillToDraw(p, {}) == nullptr);
+    // The scene's own default is no value: nothing to draw either.
+    p = plan::Build(ParseSettings(L"theme = " + kThemeT + L"\ntheme." + kThemeT + L".wallpaper.tint = #ff0000\n"), Monitors(1),
+                    store);
+    CHECK(p.displays[0].wallpaper.ownStill.empty() && p.displays[0].wallpaper.values.empty());
+
+    // With values: still.bmp until the still with them is drawn, then that.
+    Settings tinted = ParseSettings(L"theme = " + kThemeT + L"\ntheme." + kThemeT + L".wallpaper.tint = #00ff00\n");
+    p = plan::Build(tinted, Monitors(1), store);
+    const plan::Wallpaper &wanted = p.displays[0].wallpaper;
+    CHECK(wanted.ownStill == SceneStillPath(kThemeT, scene, {{L"tint", L"#00ff00"}}));
+    CHECK(wanted.path == w.imagePath && wanted.sceneWidth == 2560 && wanted.sceneHeight == 1440);
+    CHECK(StillToDraw(p, {}) == &wanted && StillToDraw(p, {wanted.ownStill}) == nullptr);
+    store.drawn.insert(wanted.ownStill);
+    p = plan::Build(tinted, Monitors(1), store);
+    CHECK(p.displays[0].wallpaper.path == p.displays[0].wallpaper.ownStill && StillToDraw(p, {}) == nullptr);
 }

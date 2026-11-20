@@ -53,7 +53,7 @@ void Scenes::Prepare(Presenter &presenter, const plan::Plan &plan) {
         const int w = d.canvas.right-d.canvas.left, h = d.canvas.bottom-d.canvas.top;
         if ((int64_t)w*h > (int64_t)size.first*size.second) size = {w,h};
         wallpapers[Key(d.wallpaper)] = &d.wallpaper;
-        presenter.RequestImage(d.wallpaper.id,d.wallpaper.path);
+        presenter.RequestImage(d.wallpaper.path,d.wallpaper.path);
     }
     for (auto it = saved_.begin(); it != saved_.end();) {
         if (std::none_of(wallpapers.begin(),wallpapers.end(),[&](const auto &w) { return w.second->id == it->first; })) { savedBlocked_.erase(it->first); it = saved_.erase(it); } else ++it;
@@ -91,13 +91,7 @@ void Scenes::Prepare(Presenter &presenter, const plan::Plan &plan) {
         }
         options.quality = render_.quality; options.videoMemory = render_.videoMemory; options.particles = render_.particles;
         // The user's values become the scene's defaults, so the renderer needs nothing else.
-        scenegraph::Document baked;
-        if (scene::LoadFiles(wallpapers[id]->sceneDir,true,&files,&document,&why) &&
-            scenegraph::Bake(document,e.values,&baked,&why) &&
-            ([&] { const auto xml = scenegraph::Write(baked);
-                for (auto &f : files) if (f.name == L"scene.xml") f.bytes.assign(xml.begin(),xml.end());
-                scene::AddChosenPictures(document,e.values,&files);
-                return true; })() &&
+        if (scene::LoadWithValues(wallpapers[id]->sceneDir,e.values,&files,&document,&why) &&
             host->Start(presenter.device(),files,e.width,e.height,options,&why)) {
             e.host = std::move(host); e.last = GetTickCount64(); e.everReady = false;
             e.hears = scenegraph::ReadsSound(document);

@@ -16,6 +16,7 @@ animelogon_add_executable(overlay
         src/clocktext.cpp
         src/datafeed.cpp
         src/scenes.cpp
+        src/scenestills.cpp
         src/staticcover.cpp
         src/stills.cpp
         src/otherdisplays.cpp

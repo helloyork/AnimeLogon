@@ -52,6 +52,7 @@
 #include "player.h"
 #include "presenter.h"
 #include "scenes.h"
+#include "scenestills.h"
 #include "staticcover.h"
 #include "screen.h"
 #include "wake.h"
@@ -128,6 +129,8 @@ Overlay g_overlay;
 // The displays other than the primary, from a wake until sign-in. It outlives an appearance:
 // the stills stay up through the parked wait that follows a wake.
 OtherDisplays g_otherDisplays;
+// Scenes' stills with their themes' settings, drawn while parked at the desktop.
+SceneStills g_sceneStills;
 const GUID kConsoleDisplayState = {0x6fe69556, 0x704a, 0x47a0, {0x8f, 0x24, 0xc2, 0x8d, 0x93, 0x6f, 0xda, 0x47}};
 
 // The watchdog's view of the main thread (watchdog.h): whether it is timing it -- from the moment
@@ -431,14 +434,19 @@ bool WaitForLogonScreen(Presenter &presenter, Scenes &scenes, bool *dismissed) {
         }
 
         // The theme list moves, and the sign-in background is baked, only while somebody is using
-        // the session at the console.
-        if (!secure && s.console && s.signedIn && !s.locked && !g_overlay.lockNotified &&
-            GetTickCount64() - bakedAt > kBakeCheckMs) {
+        // the session at the console. A scene whose theme gives its settings values has its still
+        // drawn with them first (scenestills.h), and the background waits for it.
+        if (atDesktop && GetTickCount64() - bakedAt > kBakeCheckMs) {
             TurnRotation();
-            bake::Refresh();
-            LoadStill(presenter);
+            const plan::Plan shown = plan::Build(animelogon::rotation::LoadShown(), animelogon::EnumerateMonitors(),
+                                                 animelogon::DiskStore());
+            if (!g_sceneStills.Want(shown, presenter.device())) {
+                bake::Refresh();
+                LoadStill(presenter);
+            }
             bakedAt = GetTickCount64();
         }
+        if (g_sceneStills.Tick(atDesktop)) bakedAt = 0;  // drawn: the background follows it now
 
         // A dismissed appearance stays dismissed until the screen is used again.
         if (*dismissed) {
@@ -646,8 +654,8 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
     auto requestImages = [&] {
         std::set<std::wstring> images;
         for (const Presenter::Target &t : targets)
-            if ((t.wallpaper.source == plan::Source::Image || t.wallpaper.source == plan::Source::Scene) && images.insert(t.wallpaper.id).second)
-                presenter.RequestImage(t.wallpaper.id, t.wallpaper.path);
+            if ((t.wallpaper.source == plan::Source::Image || t.wallpaper.source == plan::Source::Scene) && images.insert(t.wallpaper.path).second)
+                presenter.RequestImage(t.wallpaper.path, t.wallpaper.path);
         presenter.KeepImages(images);
     };
     requestImages();
@@ -659,12 +667,12 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
     // there is a wallpaper to show.
     bool allReady = !targets.empty();
     for (const auto &target : targets) if (target.wallpaper.source == plan::Source::Scene)
-        presenter.LoadImageNow(target.wallpaper.id,target.wallpaper.path);
+        presenter.LoadImageNow(target.wallpaper.path,target.wallpaper.path);
     for (const Presenter::Target &t : targets) {
         const plan::Source s = t.wallpaper.source;
         allReady = allReady && s != plan::Source::Video &&
                    (s != plan::Source::Image ||
-                    presenter.ImageStatus(t.wallpaper.id) == Presenter::ImageState::Ready);
+                    presenter.ImageStatus(t.wallpaper.path) == Presenter::ImageState::Ready);
     }
     const bool still = !opt.windowed && !targets.empty() && !allReady && LoadStill(presenter);
     const bool cover = !opt.windowed && !targets.empty() && (allReady || still);
@@ -727,7 +735,7 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
             }
             case plan::Source::Image: {
                 std::wstring failure;
-                const Presenter::ImageState state = presenter.ImageStatus(w.id, &failure);
+                const Presenter::ImageState state = presenter.ImageStatus(w.path, &failure);
                 if (state == Presenter::ImageState::Reading) {
                     *ready = false;
                 } else {

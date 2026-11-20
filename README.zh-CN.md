@@ -127,6 +127,7 @@ AnimeLogon 在系统托盘中显示一个图标。单击图标打开设置；右
 | `C:\Program Files\AnimeLogon\`，装在其他磁盘时为 `<盘符>:\AnimeLogon\` | 程序、`uninstall.exe` 和第三方许可证（`licenses\`）。装在其他磁盘时，这个文件夹由安装程序建在磁盘根目录下，只有管理员可以修改，主题也放在里面（`Library\`）。 |
 | `%ProgramData%\AnimeLogon\settings.ini` | 全机设置：当前主题、多显示器、时钟、声音，以及对各主题的修改。每行一个 `键 = 值`，只含 id、枚举和带类型的值，不含路径或自由文本。键的说明见 [settings.h](common/include/animelogon/settings.h)。 |
 | `%ProgramData%\AnimeLogon\themes\`、`components\`、`wallpapers\`（装在其他磁盘时为 `<盘符>:\AnimeLogon\Library\…`） | 已导入的主题、组件和壁纸，以及安装程序写入的默认主题壁纸。只有管理员可以写入，内容由 AnimeLogon 规范化后写入。 |
+| `%ProgramData%\AnimeLogon\stills\`（装在其他磁盘时为 `<盘符>:\AnimeLogon\Library\stills\`） | 改过场景设置的主题各有一张按这些设置渲染的场景静止画面，`<主题 id>-<哈希>.bmp`，锁屏和登录背景在场景开始播放前显示它。由锁屏程序自己渲染，只有管理员可以写入。 |
 | `%ProgramData%\AnimeLogon\logs\` | 日志。 |
 
 ## 从源码构建

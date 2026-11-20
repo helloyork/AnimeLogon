@@ -281,7 +281,7 @@ const Presenter::Texture *Presenter::WallpaperTexture(const Target &target, anim
     switch (target.wallpaper.source) {
     case plan::Source::Scene:
     case plan::Source::Image: {
-        const auto it = images_.find(target.wallpaper.id);
+        const auto it = images_.find(target.wallpaper.path);
         if (it == images_.end() || !it->second.texture.view) return nullptr;
         *fit = target.wallpaper.fit;
         return &it->second.texture;

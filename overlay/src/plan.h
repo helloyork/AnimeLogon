@@ -30,18 +30,24 @@ enum class Source {
     None,      // nothing: the display is black
     Video,     // video.mp4, decoded as it plays
     Image,     // image.bmp, read once
-    Scene,     // still.bmp, then isolated scene frames
+    Scene,     // its still (still.bmp, or the theme's own), then isolated scene frames
     Gradient,  // the built-in wallpaper, drawn by AnimeLogon itself
 };
 
 struct Wallpaper {
     Source source = Source::None;
     std::wstring id;         // the wallpaper's id; "default" for the gradient
-    std::wstring path;       // video.mp4 or image.bmp, found administrators-only by LoadWallpaper
+    // video.mp4 or image.bmp, found administrators-only by LoadWallpaper; a scene's still: still.bmp,
+    // or `ownStill` once the overlay has drawn it. Images are held on the device by it.
+    std::wstring path;
     std::wstring audioPath;  // a video's audio.wav, when it has sound
     std::wstring sceneDir, videoPath;
     animelogon::skin::Values values;
     int sceneTrialWidth = 0, sceneTrialHeight = 0, sceneFps = 60, sceneScale = 100;
+    int sceneWidth = 0, sceneHeight = 0;  // the scene's own size, still.bmp's
+    // A scene whose theme gives its settings values: its still drawn with them (wallpaper.h
+    // SceneStillPath), which scenestills.h draws. Empty while the scene is shown as it comes.
+    std::wstring ownStill;
     animelogon::Scaling fit = animelogon::Scaling::Fill;
     // How bright it is drawn (settings.h kBrightness): the theme's, whatever stands in for it.
     float brightness = animelogon::kBrightness;

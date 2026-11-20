@@ -8,7 +8,9 @@
 #include "animelogon/library.h"
 #include "animelogon/paths.h"
 #include "animelogon/secure.h"
+#include "animelogon/sha256.h"
 #include "animelogon/text.h"
+#include "animelogon/theme.h"
 #include "animelogon/scenegraph.h"
 
 namespace animelogon {
@@ -134,6 +136,19 @@ std::wstring WallpaperInfoPath(const std::wstring &id) { return WallpaperDir(id)
 std::wstring WallpaperVideoPath(const std::wstring &id) { return WallpaperDir(id) + L"\\video.mp4"; }
 std::wstring WallpaperAudioPath(const std::wstring &id) { return WallpaperDir(id) + L"\\audio.wav"; }
 std::wstring WallpaperImagePath(const std::wstring &id) { return WallpaperDir(id) + L"\\image.bmp"; }
+
+std::wstring StillsDir() { return library::Dir() + L"\\stills"; }
+
+std::wstring SceneStillPath(const std::wstring &themeId, const std::wstring &wallpaperId,
+                            const std::map<std::wstring, std::wstring> &values) {
+    if (values.empty() || !IsThemeId(themeId) || !IsWallpaperId(wallpaperId)) return {};
+    // The first line is bumped when the same values would draw a different picture.
+    std::string key = "1\n" + ToUtf8(wallpaperId);
+    for (const auto &[name, value] : values) key += "\n" + ToUtf8(name) + "=" + ToUtf8(value);
+    const std::wstring hash = Sha256Of(key.data(), key.size());
+    if (hash.size() < 16) return {};
+    return StillsDir() + L"\\" + themeId + L"-" + hash.substr(0, 16) + L".bmp";
+}
 
 std::wstring SerializeWallpaperInfo(const WallpaperInfo &w) {
     const bool video = w.kind == WallpaperKind::Video || (w.kind == WallpaperKind::Scene && w.sceneVideo);

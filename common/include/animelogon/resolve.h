@@ -59,6 +59,12 @@ public:
     virtual bool LoadTheme(const std::wstring &id, theme::Theme *theme, std::wstring *why) const = 0;
     virtual bool LoadWallpaper(const std::wstring &id, WallpaperInfo *info, std::wstring *why) const = 0;
     virtual bool LoadComponent(const std::wstring &id, skin::Skin *component, std::wstring *why) const = 0;
+    // Whether a picture the overlay draws into the library (wallpaper.h SceneStillPath) is there,
+    // administrators-only.
+    virtual bool HasPicture(const std::wstring &path) const {
+        (void)path;
+        return false;
+    }
 };
 const ThemeStore &DiskStore();
 

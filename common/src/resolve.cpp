@@ -1,5 +1,7 @@
 #include "animelogon/resolve.h"
 
+#include <algorithm>
+
 #include "animelogon/components.h"
 #include "animelogon/scenegraph.h"
 #include "animelogon/secure.h"
@@ -17,6 +19,10 @@ public:
     }
     bool LoadComponent(const std::wstring &id, skin::Skin *component, std::wstring *why) const override {
         return ::animelogon::LoadComponent(id, component, why);
+    }
+    bool HasPicture(const std::wstring &path) const override {
+        std::wstring why;
+        return secure::IsTrusted(path, &why);
     }
 };
 
@@ -69,8 +75,15 @@ ResolvedTheme Themed(const Settings &s, std::wstring id, const ThemeStore &store
         if (secure::ReadFileBytes(r.wallpaper->scenePath,&bytes,scenegraph::kMaxTextBytes) &&
             scenegraph::Parse(std::string_view((const char *)bytes.data(),bytes.size()),scenegraph::Mode::Stored,&doc,&why)) {
             for (const auto &[key,value] : overrides.wallpaperValues) {
-                if (scenegraph::Accepts(doc,key,value)) r.wallpaperValues[key] = value;
-                else Report(problems,L"theme."+id+L".wallpaper."+key+L": invalid scene value -- dropped");
+                if (!scenegraph::Accepts(doc,key,value)) {
+                    Report(problems,L"theme."+id+L".wallpaper."+key+L": invalid scene value -- dropped");
+                    continue;
+                }
+                // The scene's own default changes nothing: left out, the scene is shown as it comes,
+                // with its still.bmp, rather than drawn again for a still that repeats it.
+                const auto setting = std::find_if(doc.settings.begin(),doc.settings.end(),
+                                                  [&](const scenegraph::Setting &s) { return s.base.id == key; });
+                if (setting == doc.settings.end() || setting->base.fallback != value) r.wallpaperValues[key] = value;
             }
         }
     }

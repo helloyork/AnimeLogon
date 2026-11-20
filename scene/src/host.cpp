@@ -364,6 +364,18 @@ bool LoadFiles(const std::wstring &dir, bool trusted, Files *files, scenegraph::
     }
     *files = std::move(out); return true;
 }
+bool LoadWithValues(const std::wstring &dir, const scenegraph::Values &values, Files *files, scenegraph::Document *document,
+                    std::wstring *why) {
+    Files out;
+    scenegraph::Document stored, baked;
+    if (!LoadFiles(dir, true, &out, &stored, why) || !scenegraph::Bake(stored, values, &baked, why)) return false;
+    const std::string xml = scenegraph::Write(baked);
+    for (auto &f : out) if (f.name == L"scene.xml") f.bytes.assign(xml.begin(), xml.end());
+    AddChosenPictures(stored, values, &out);
+    *files = std::move(out);
+    if (document) *document = std::move(stored);
+    return true;
+}
 void AddChosenPictures(const scenegraph::Document &doc, const scenegraph::Values &values, Files *files) {
     for (const auto &setting : doc.settings) {
         if (!setting.image) continue;

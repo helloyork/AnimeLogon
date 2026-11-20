@@ -93,9 +93,10 @@ public:
     bool LoadStill(const std::wstring &path);
     bool HasStill() const { return stillView_ != nullptr; }
 
-    // Image wallpapers, kept on the device by wallpaper id between appearances. Asking for one
-    // starts reading its image.bmp on another thread, unless the device already holds it and
-    // the file has not changed since; ImageStatus says when it is ready, and if it failed, why.
+    // Image wallpapers and scenes' stills, kept on the device between appearances by their file
+    // (plan::Wallpaper::path), which `id` names. Asking for one starts reading it on another thread,
+    // unless the device already holds it and the file has not changed since; ImageStatus says when
+    // it is ready, and if it failed, why.
     enum class ImageState { Reading, Ready, Failed };
     void RequestImage(const std::wstring &id, const std::wstring &path);
     bool LoadImageNow(const std::wstring &id, const std::wstring &path);

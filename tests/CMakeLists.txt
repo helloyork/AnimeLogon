@@ -153,3 +153,5 @@ target_sources(animelogon_tests PRIVATE spectrum_tests.cpp)
 # memory, and the settings app's reading of its command line.
 target_sources(animelogon_tests PRIVATE assoc_tests.cpp ${PROJECT_SOURCE_DIR}/installer/src/assoc.cpp
                                         ${PROJECT_SOURCE_DIR}/app/src/arguments.cpp)
+# Which scene still the overlay draws with a theme's values next.
+target_sources(animelogon_tests PRIVATE ${PROJECT_SOURCE_DIR}/overlay/src/scenestills.cpp)

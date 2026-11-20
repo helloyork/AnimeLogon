@@ -70,6 +70,11 @@ bool LoadFiles(const std::wstring &directory, bool trusted, Files *files, sceneg
 // from the library's picture wallpapers. A choice that is no picture wallpaper there is left out, so
 // the scene shows its default.
 void AddChosenPictures(const scenegraph::Document &document, const scenegraph::Values &values, Files *files);
+// An installed scene as a theme sets it: LoadFiles (trusted), with `values` made the scene's defaults
+// (scenegraph::Bake) and the pictures chosen for its <image> settings added, so that a renderer needs
+// nothing else to draw it so. `document` is the scene as stored, without the values.
+bool LoadWithValues(const std::wstring &directory, const scenegraph::Values &values, Files *files,
+                    scenegraph::Document *document, std::wstring *why);
 bool Device(Microsoft::WRL::ComPtr<ID3D11Device> *device, std::wstring *why);
 }  // namespace animelogon::scene
 namespace animelogon::data { struct Snapshot; }

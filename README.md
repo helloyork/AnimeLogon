@@ -163,6 +163,7 @@ the Steam edition (planned), `animelogon-steam.exe`, speaks the protocol in
 | `C:\Program Files\AnimeLogon\`, or `<drive>:\AnimeLogon\` when installed on another drive | The programs, `uninstall.exe` and the third-party licences (`licenses\`). On another drive the installer makes this folder at the drive's root, only administrators can change it, and it holds the themes too (`Library\`). |
 | `%ProgramData%\AnimeLogon\settings.ini` | Machine-wide settings: the theme in use, multiple displays, the clock, sound, and the changes made to each theme. One `key = value` per line, holding only ids, choices and typed values, never a path or free text. The keys are described in [settings.h](common/include/animelogon/settings.h). |
 | `%ProgramData%\AnimeLogon\themes\`, `components\`, `wallpapers\` (`<drive>:\AnimeLogon\Library\…` when installed on another drive) | Imported themes, components and wallpapers, and the default theme's wallpaper, which the installer writes. Only administrators can write there, and AnimeLogon writes them in normalized form. |
+| `%ProgramData%\AnimeLogon\stills\` (`<drive>:\AnimeLogon\Library\stills\` when installed on another drive) | For each theme that changes its scene's settings, a still of the scene drawn with them, `<theme id>-<hash>.bmp`, which the lock screen and the sign-in background show before the scene starts. The lock screen draws them itself; only administrators can write there. |
 | `%ProgramData%\AnimeLogon\logs\` | Logs. |
 
 ## Building from source

@@ -9,7 +9,7 @@ namespace {
 
 using animelogon::ResolvedTheme;
 
-Wallpaper WallpaperOf(const ResolvedTheme &theme) {
+Wallpaper WallpaperOf(const ResolvedTheme &theme, const animelogon::ThemeStore &store) {
     Wallpaper w;
     w.fit = theme.fit;
     w.brightness = theme.brightness;
@@ -27,6 +27,10 @@ Wallpaper WallpaperOf(const ResolvedTheme &theme) {
         w.source = Source::Scene;
         w.values = theme.wallpaperValues;
         w.path = info.imagePath;
+        w.sceneWidth = info.width; w.sceneHeight = info.height;
+        // still.bmp has the scene's defaults; with the theme's values it is another picture.
+        w.ownStill = animelogon::SceneStillPath(theme.themeId, info.id, w.values);
+        if (!w.ownStill.empty() && store.HasPicture(w.ownStill)) w.path = w.ownStill;
         w.sceneDir = info.scenePath.substr(0, info.scenePath.find_last_of(L'\\'));
         w.videoPath = info.videoPath;
         w.audioPath = info.audioPath;
@@ -99,7 +103,7 @@ Plan Build(const animelogon::Settings &settings, const std::vector<animelogon::M
         d.themeId = r.theme.themeId;
         // Spanning shows one wallpaper across the wall: the primary display's.
         d.canvas = span ? bounds : m.rect;
-        d.wallpaper = WallpaperOf(span ? first.theme : r.theme);
+        d.wallpaper = WallpaperOf(span ? first.theme : r.theme, store);
         if (span && monitors.size() > 1) d.wallpaper.blurHeight = mainHeight;
         d.components = r.components;
         switch (plan.componentDisplays) {
