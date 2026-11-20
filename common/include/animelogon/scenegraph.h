@@ -115,6 +115,10 @@ bool Stored(const Document &package, Document *out, std::wstring *why);
 // The user's values; missing or unacceptable ones fall back to the defaults.
 using Values = std::map<std::wstring, std::wstring>;
 bool Accepts(const Document &document, const std::wstring &id, const std::wstring &value);
+// The values among `values` that the scene takes and that differ from its own defaults: what the
+// logon screen draws the scene with, and names a theme's still of it by (wallpaper.h
+// SceneStillPath). `rejected` receives the ids of those it does not take.
+Values Changed(const Document &document, const Values &values, std::vector<std::wstring> *rejected = nullptr);
 std::wstring ValueOf(const Document &document, const Values &values, const std::wstring &id);
 // Whether the settings window shows this setting, given the other values.
 bool Shown(const Document &document, const Values &values, const Setting &setting);

@@ -14,6 +14,7 @@
 #include "animelogon/blur.h"
 #include "animelogon/background.h"
 #include "animelogon/components.h"
+#include "animelogon/scenegraph.h"
 #include "animelogon/wallpaper.h"
 
 #include "library.h"
@@ -221,28 +222,68 @@ const Picture *Pictures::Still(const std::wstring &id) {
     return still.width ? &still : nullptr;
 }
 
-bool Pictures::Wallpaper(const std::wstring &ref, Scaling fit, UINT width, UINT height, Picture *out) {
+const Picture *Pictures::OwnStill(const std::wstring &themeId, const std::wstring &ref) {
+    const skin::Values &given = library_.settings().OverridesFor(themeId).wallpaperValues;
+    if (given.empty() || !IsWallpaperId(ref) || library_.Edited(themeId).wallpaper != ref) return nullptr;
+    scenegraph::Document scene;
+    if (!library_.LoadScene(themeId, &scene)) return nullptr;
+    // Named as the lock screen names it, from the same values (resolve.cpp).
+    const std::wstring path = SceneStillPath(themeId, ref, scenegraph::Changed(scene, given));
+    if (path.empty()) return nullptr;
+    const auto cached = stills_.find(path);
+    if (cached != stills_.end()) return &cached->second;
+    if (GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES) {
+        awaited_.emplace(path, std::make_pair(themeId, GetTickCount64()));
+        return nullptr;
+    }
+    Picture still;
+    if (!LoadPicture(path, kStillWidth, &still) || !still.width) return nullptr;
+    return &(stills_[path] = std::move(still));
+}
+
+std::vector<std::wstring> Pictures::Drawn() {
+    // The lock screen draws a still within seconds of the values changing while somebody is at the
+    // desktop; one that has not come by then is not coming (a lock screen that cannot draw it).
+    constexpr ULONGLONG kGiveUpMs = 120000;
+    std::vector<std::wstring> themes;
+    const ULONGLONG now = GetTickCount64();
+    for (auto it = awaited_.begin(); it != awaited_.end();) {
+        if (GetFileAttributesW(it->first.c_str()) != INVALID_FILE_ATTRIBUTES) {
+            if (std::find(themes.begin(), themes.end(), it->second.first) == themes.end()) themes.push_back(it->second.first);
+            it = awaited_.erase(it);
+        } else if (now - it->second.second > kGiveUpMs) {
+            it = awaited_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    return themes;
+}
+
+bool Pictures::Wallpaper(const std::wstring &ref, Scaling fit, UINT width, UINT height, Picture *out,
+                         const std::wstring &themeId) {
     if (!width || !height) return false;
     if (ref == kNoWallpaper) {
         *out = Black(width, height);
         return true;
     }
     // The built-in wallpaper, and what the logon screen shows in place of one it cannot read.
-    const Picture *still = ref == kDefaultWallpaper ? nullptr : Still(ref);
+    const Picture *still = ref == kDefaultWallpaper ? nullptr : themeId.empty() ? nullptr : OwnStill(themeId, ref);
+    if (!still && ref != kDefaultWallpaper) still = Still(ref);
     if (!still || !Place(*still, fit, width, height, out)) *out = Gradient(width, height);
     return true;
 }
 
 bool Pictures::Theme(const theme::Theme &theme, UINT width, UINT height, Draw draw, Picture *out,
                      std::vector<Bound> *bounds, const std::vector<Screen> *screens, const std::wstring &only,
-                     const data::Snapshot *data) {
+                     const data::Snapshot *data, const std::wstring &themeId) {
     const size_t dot = only.find(L'.');
     const std::wstring onlyInstance = only.substr(0, dot);
     const size_t onlyPanel = dot == std::wstring::npos ? 0 : (size_t)_wtoi(only.c_str() + dot + 2);
     if (!width || !height) return false;
     Picture drawn;
     if (draw == Draw::ComponentsOnly) drawn = Clear(width, height);
-    else if (!Wallpaper(theme.wallpaper, theme.fit, width, height, &drawn)) return false;
+    else if (!Wallpaper(theme.wallpaper, theme.fit, width, height, &drawn, themeId)) return false;
     else {
         // At the theme's brightness and blur, as the logon screen draws it; the components over it
         // are neither darkened nor blurred.

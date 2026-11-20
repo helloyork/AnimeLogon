@@ -94,6 +94,9 @@ public:
     bool Open(const std::wstring &id);
     void Close();
     const std::wstring &open() const { return open_; }
+    // A theme's pictures changed without the theme changing (the lock screen drew its still,
+    // pictures.h Drawn): its revision moves on, so that the page fetches them again.
+    void Redraw(const std::wstring &id) { Touched(id); }
 
     // Each edit changes the open theme's overrides, or returns false and changes nothing.
     // Edits passing the same nonzero `gesture` one after another are one step to undo.

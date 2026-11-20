@@ -520,6 +520,12 @@ LRESULT Host::Handle(UINT msg, WPARAM wp, LPARAM lp) {
         for (auto it=scenePreviews_.begin();it!=scenePreviews_.end();) {
             if (GetTickCount64()-it->second.used > 1500) it=scenePreviews_.erase(it); else ++it;
         }
+        // A scene theme's still with its values, drawn by the lock screen after the theme's pictures
+        // were drawn from still.bmp: those pictures are fetched again.
+        if (const std::vector<std::wstring> drawn = pictures_.Drawn(); !drawn.empty()) {
+            for (const std::wstring &id : drawn) library_.Redraw(id);
+            SendState();
+        }
         return 0;
     case WM_DISPLAYCHANGE:
         // A display plugged in or taken away, moved, made the main one or set to another resolution.
@@ -1023,7 +1029,7 @@ bool Host::SceneFrame(const std::wstring &id, UINT width, UINT height, double ti
     const auto &wallpaper=entry.wallpaper;
     const bool tooSlow = wallpaper.sceneFps == 0 && library_.settings().render.quality == RenderQuality::Auto;
     if (entry.failed || tooSlow || wallpaper.sceneLegacy) {
-        Picture still; if (pictures_.Wallpaper(wallpaper.id,library_.Edited(id).fit,width,height,&still)) *bytes=Bmp(still);
+        Picture still; if (pictures_.Wallpaper(wallpaper.id,library_.Edited(id).fit,width,height,&still,id)) *bytes=Bmp(still);
         return !bytes->empty();
     }
     scene::Inputs input;
@@ -1136,7 +1142,7 @@ void Host::OnResource(ICoreWebView2WebResourceRequestedEventArgs *args) {
             const std::vector<Screen> wall = Wall(w, h);
             if (pictures_.Theme(library_.Edited(id), w, h,
                                 library_.settings().components ? Draw::Everything : Draw::WallpaperOnly, &p, nullptr,
-                                &wall))
+                                &wall, L"", nullptr, id))
                 body = Bmp(p);
         }
         type = L"image/bmp";
@@ -1280,7 +1286,7 @@ void Host::OnResource(ICoreWebView2WebResourceRequestedEventArgs *args) {
             const theme::Theme t = library_.Edited(id);
             const data::Snapshot now = LockData(nullptr);
             if (pictures_.Theme(t, w, h, full && library_.settings().components ? Draw::Everything : Draw::WallpaperOnly, &p,
-                                nullptr, &wall, L"", &now))
+                                nullptr, &wall, L"", &now, id))
                 body = Bmp(p);
         }
         type = L"image/bmp";

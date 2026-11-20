@@ -18,13 +18,17 @@
 #include <string>
 #include <vector>
 
+#include "animelogon/bitmap.h"
 #include "animelogon/blur.h"
 #include "animelogon/clock.h"
 #include "animelogon/components.h"
 #include "animelogon/monitors.h"
+#include "animelogon/paths.h"
+#include "animelogon/secure.h"
 #include "animelogon/settings.h"
 #include "animelogon/skin.h"
 #include "animelogon/skinpreview.h"
+#include "animelogon/text.h"
 #include "animelogon/theme.h"
 #include "animelogon/wallpaper.h"
 
@@ -598,4 +602,99 @@ TEST(AppPicturesBlurTheWallpaperAloneAtTheThemesBlur) {
                     brightest = std::max(brightest, everything.bgra[((size_t)y * everything.width + x) * 4 + 2]);
     CHECK(brightest > 200);
     if (SUCCEEDED(co)) CoUninitialize();
+}
+
+// A scene theme that gives the scene's settings values is pictured as the logon screen shows it: from
+// still.bmp until the lock screen has drawn the still with those values, then from that still; and
+// the window hears when it comes, to fetch the theme's pictures again.
+TEST(AppPicturesASceneThemeFromTheStillDrawnWithItsValues) {
+    const HRESULT co = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    wchar_t temp[MAX_PATH]{};
+    GetTempPathW(MAX_PATH, temp);
+    const std::wstring box = std::wstring(temp) + L"own-still-" + RandomHex(6);
+    paths::UseSandbox(box + L"\\");
+    struct Leave {
+        std::wstring box;
+        HRESULT co;
+        ~Leave() {
+            paths::UseSandbox(L"");
+            secure::RemoveTree(box);
+            if (SUCCEEDED(co)) CoUninitialize();
+        }
+    } leave{box, co};
+
+    const std::wstring scene = L"4444444444444444";
+    auto write = [](const std::wstring &path, const std::vector<uint8_t> &bytes) {
+        paths::CreateDirectories(path.substr(0, path.find_last_of(L'\\')));
+        HANDLE h = CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        DWORD n = 0;
+        const bool ok = h != INVALID_HANDLE_VALUE && WriteFile(h, bytes.data(), (DWORD)bytes.size(), &n, nullptr) && n == bytes.size();
+        if (h != INVALID_HANDLE_VALUE) CloseHandle(h);
+        return ok;
+    };
+    auto solid = [](uint8_t b, uint8_t g, uint8_t r) {
+        std::vector<uint8_t> bgra((size_t)64 * 36 * 4);
+        for (size_t i = 0; i < bgra.size(); i += 4) { bgra[i] = b; bgra[i + 1] = g; bgra[i + 2] = r; bgra[i + 3] = 255; }
+        return bitmap::Build(64, 36, bgra.data(), bgra.size());
+    };
+    const std::string xml = "<scene format=\"2\" name=\"S\"><settings><color id=\"tint\" label=\"Tint\" default=\"#ff0000\"/></settings>"
+        "<assets><shader id=\"sky\" kind=\"layer\" file=\"shaders/sky.hlsl\"/></assets><layer source=\"sky\" full=\"true\"/></scene>";
+    WallpaperInfo w;
+    w.id = scene;
+    w.kind = WallpaperKind::Scene;
+    w.width = 64;
+    w.height = 36;
+    w.scenePath = WallpaperDir(scene) + L"\\scene.xml";
+    w.imagePath = WallpaperDir(scene) + L"\\still.bmp";
+    CHECK(write(w.scenePath, std::vector<uint8_t>(xml.begin(), xml.end())));
+    CHECK(write(w.imagePath, solid(0, 0, 255)));  // red: the scene's defaults
+
+    struct SceneStore : ThemeStore {
+        WallpaperInfo wallpaper;
+        bool LoadTheme(const std::wstring &id, theme::Theme *t, std::wstring *why) const override {
+            if (id == kDefaultTheme) return *t = theme::Default(), true;
+            if (id != kTheme) return false;
+            return theme::Parse("<theme format=\"1\" name=\"S\"><wallpaper ref=\"4444444444444444\" fit=\"fill\"/></theme>",
+                                theme::Form::Installed, t, why);
+        }
+        bool LoadWallpaper(const std::wstring &id, WallpaperInfo *info, std::wstring *) const override {
+            if (id != wallpaper.id) return false;
+            *info = wallpaper;
+            return true;
+        }
+        bool LoadComponent(const std::wstring &, skin::Skin *, std::wstring *) const override { return false; }
+    };
+    struct SceneStores : app::Stores {
+        SceneStore store;
+        std::wstring settings;
+        const ThemeStore &Store() const override { return store; }
+        std::vector<ThemeEntry> Themes() const override { return {{kDefaultTheme, L"D", L"", true}, {kTheme, L"S", L"", false}}; }
+        std::vector<WallpaperInfo> Wallpapers() const override { return {store.wallpaper}; }
+        std::vector<ComponentEntry> Components() const override { return {}; }
+        Settings ReadSettings() const override { return ParseSettings(settings); }
+        bool WriteSettings(const std::wstring &) const override { return true; }
+    } stores;
+    stores.store.wallpaper = w;
+    stores.settings = L"theme = " + kTheme + L"\r\ntheme." + kTheme + L".wallpaper.tint = #00ff00\r\n";
+    app::Library library(stores);
+    app::Pictures pictures(library);
+    auto red = [](const Picture &p) { return p.width == 64 && p.bgra.size() >= 4 && p.bgra[2] > 200 && p.bgra[0] < 50; };
+    auto blue = [](const Picture &p) { return p.width == 64 && p.bgra.size() >= 4 && p.bgra[0] > 200 && p.bgra[2] < 50; };
+
+    Picture p;
+    CHECK(pictures.Wallpaper(scene, Scaling::Fill, 64, 36, &p, kTheme) && red(p));
+    CHECK(pictures.Drawn().empty());
+    // The lock screen draws it.
+    const std::wstring own = SceneStillPath(kTheme, scene, {{L"tint", L"#00ff00"}});
+    CHECK(!own.empty() && write(own, solid(255, 0, 0)));
+    CHECK(pictures.Drawn() == std::vector<std::wstring>{kTheme} && pictures.Drawn().empty());
+    CHECK(pictures.Wallpaper(scene, Scaling::Fill, 64, 36, &p, kTheme) && blue(p));
+    CHECK(pictures.Theme(library.Edited(kTheme), 64, 36, app::Draw::WallpaperOnly, &p, nullptr, nullptr, L"", nullptr, kTheme) && blue(p));
+    // A picture of the wallpaper alone, not of the theme, is the scene as it comes.
+    CHECK(pictures.Wallpaper(scene, Scaling::Fill, 64, 36, &p) && red(p));
+
+    // The scene's own default is no value: still.bmp, and nothing to wait for.
+    stores.settings = L"theme = " + kTheme + L"\r\ntheme." + kTheme + L".wallpaper.tint = #ff0000\r\n";
+    library.Reload();
+    CHECK(pictures.Wallpaper(scene, Scaling::Fill, 64, 36, &p, kTheme) && red(p) && pictures.Drawn().empty());
 }

@@ -44,8 +44,11 @@ class Pictures {
 public:
     explicit Pictures(const Library &library) : library_(library) {}
 
-    // The wallpaper alone, filling a display of `width` x `height` as `fit` says.
-    bool Wallpaper(const std::wstring &ref, animelogon::Scaling fit, UINT width, UINT height, animelogon::Picture *out);
+    // The wallpaper alone, filling a display of `width` x `height` as `fit` says. With `themeId`, a
+    // scene that theme gives values is shown as the logon screen shows it: from the still the lock
+    // screen drew with them (wallpaper.h SceneStillPath), once it has, and from still.bmp until then.
+    bool Wallpaper(const std::wstring &ref, animelogon::Scaling fit, UINT width, UINT height, animelogon::Picture *out,
+                   const std::wstring &themeId = L"");
     // The theme as a display of that size shows it. With `screens`, the picture is a wall of
     // displays, as spanning shows it: the wallpaper fitted to all of it, the components drawn on
     // each screen that shows them as on a display of that screen's size. `only`, as
@@ -54,7 +57,13 @@ public:
     // part used, a song partway through), so that they can be seen and placed on any machine.
     bool Theme(const animelogon::theme::Theme &theme, UINT width, UINT height, Draw draw, animelogon::Picture *out,
                std::vector<Bound> *bounds = nullptr, const std::vector<Screen> *screens = nullptr,
-               const std::wstring &only = L"", const animelogon::data::Snapshot *data = nullptr);
+               const std::wstring &only = L"", const animelogon::data::Snapshot *data = nullptr,
+               const std::wstring &themeId = L"");
+
+    // The themes whose still with their values the lock screen has drawn since a picture of them
+    // was drawn from still.bmp in its place: their pictures are worth fetching again. One that does
+    // not come within two minutes is no longer looked for.
+    std::vector<std::wstring> Drawn();
 
     // Drops what was read from the stores, after they changed.
     void Forget() { stills_.clear(); }
@@ -63,9 +72,14 @@ private:
     // The wallpaper's own picture at no more than 1920 pixels wide: an image wallpaper's
     // pixels, a video's first frame. False for the built-in ones and for one that cannot be read.
     const animelogon::Picture *Still(const std::wstring &id);
+    // The still the lock screen drew of scene `ref` with the values theme `themeId` gives it, at no
+    // more than 1920 pixels wide; null when the theme gives none, or it is not drawn yet.
+    const animelogon::Picture *OwnStill(const std::wstring &themeId, const std::wstring &ref);
 
     const Library &library_;
-    std::map<std::wstring, animelogon::Picture> stills_;  // by wallpaper id; empty when unreadable
+    std::map<std::wstring, animelogon::Picture> stills_;  // by wallpaper id, or by path for OwnStill
+    // The stills OwnStill found missing, by path: the theme, and since when.
+    std::map<std::wstring, std::pair<std::wstring, ULONGLONG>> awaited_;
     animelogon::SkinPreview preview_;
 };
 

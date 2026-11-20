@@ -1,7 +1,5 @@
 #include "animelogon/resolve.h"
 
-#include <algorithm>
-
 #include "animelogon/components.h"
 #include "animelogon/scenegraph.h"
 #include "animelogon/secure.h"
@@ -74,17 +72,12 @@ ResolvedTheme Themed(const Settings &s, std::wstring id, const ThemeStore &store
         std::vector<uint8_t> bytes; scenegraph::Document doc;
         if (secure::ReadFileBytes(r.wallpaper->scenePath,&bytes,scenegraph::kMaxTextBytes) &&
             scenegraph::Parse(std::string_view((const char *)bytes.data(),bytes.size()),scenegraph::Mode::Stored,&doc,&why)) {
-            for (const auto &[key,value] : overrides.wallpaperValues) {
-                if (!scenegraph::Accepts(doc,key,value)) {
-                    Report(problems,L"theme."+id+L".wallpaper."+key+L": invalid scene value -- dropped");
-                    continue;
-                }
-                // The scene's own default changes nothing: left out, the scene is shown as it comes,
-                // with its still.bmp, rather than drawn again for a still that repeats it.
-                const auto setting = std::find_if(doc.settings.begin(),doc.settings.end(),
-                                                  [&](const scenegraph::Setting &s) { return s.base.id == key; });
-                if (setting == doc.settings.end() || setting->base.fallback != value) r.wallpaperValues[key] = value;
-            }
+            // A value that is the scene's own default is left out: the scene is shown as it comes,
+            // with its still.bmp, rather than drawn again for a still that repeats it.
+            std::vector<std::wstring> rejected;
+            r.wallpaperValues = scenegraph::Changed(doc,overrides.wallpaperValues,&rejected);
+            for (const auto &key : rejected)
+                Report(problems,L"theme."+id+L".wallpaper."+key+L": invalid scene value -- dropped");
         }
     }
 

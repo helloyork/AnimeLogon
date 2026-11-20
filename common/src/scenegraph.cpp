@@ -1181,6 +1181,18 @@ bool Accepts(const Document &d, const std::wstring &id, const std::wstring &valu
     }
     return skin::IsValue(s->base, value);
 }
+Values Changed(const Document &d, const Values &values, std::vector<std::wstring> *rejected) {
+    Values out;
+    for (const auto &[id, value] : values) {
+        if (!Accepts(d, id, value)) {
+            if (rejected) rejected->push_back(id);
+            continue;
+        }
+        // The scene's own default changes nothing.
+        if (d.FindSetting(id)->base.fallback != value) out[id] = value;
+    }
+    return out;
+}
 std::wstring ValueOf(const Document &d, const Values &values, const std::wstring &id) {
     const Setting *s = d.FindSetting(id);
     if (!s) return {};
