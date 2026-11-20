@@ -115,7 +115,7 @@ void Scenes::Power(bool onBattery, bool saver) {
 void Scenes::Begin() {
     live_ = true;
     for (auto &[id,e] : entries_) {
-        e.active = e.failures < 3 && !e.blocked && !e.staticOnly && !stillThisLock_; e.fade = 0; e.last = GetTickCount64();
+        e.active = e.failures < 3 && !e.blocked && !e.staticOnly && !stillThisLock_; e.fade = 0; e.last = GetTickCount64(); e.frames = 0;
         if (e.active && e.failed) { e.failed = false; Fail(e.id,L"renderer could not be prepared"); }
     }
 }
@@ -150,7 +150,7 @@ bool Scenes::Tick(const scene::Inputs &inputs, bool draw, float refresh, int fps
         if (!e.host || e.failed) continue;
         // The values are already the scene's defaults (Bake), so none go with the inputs.
         e.host->SetRunning(live_ && e.active && moving,inputs,rate > 0 ? rate : 1.f);
-        if (e.host->Poll()) { e.last = now; changed = live_ || changed; }
+        if (e.host->Poll()) { e.last = now; changed = live_ || changed; if (live_) ++e.frames; }
         if (e.host->Ready()) {
             if (!e.everReady) ALOG(L"scene: %s ready, trial p95 %.2f ms",e.id.c_str(),e.host->Milliseconds());
             e.everReady = true;
@@ -171,6 +171,7 @@ void Scenes::Pause() {
     for (auto &[id,e] : entries_) if (e.host) e.host->SetRunning(false,{});
 }
 void Scenes::End() {
+    for (const auto &[key,e] : entries_) if (e.active && e.everReady) ALOG(L"scene: %s drew %u frames this lock",e.id.c_str(),e.frames);
     Pause();
     for (auto &[key,e] : entries_) if (e.active && e.everReady && !e.failed && !savedBlocked_.count(e.id)) {
         saved_[e.id] = 0; e.failures = 0;

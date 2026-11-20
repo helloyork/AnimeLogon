@@ -37,6 +37,7 @@ private:
         bool blocked = false;
         bool staticOnly = false;
         bool hears = false;  // the scene reads audio.* (scenegraph::ReadsSound)
+        unsigned frames = 0; // new frames this lock, for the log
         // The quality, video memory and particle settings the renderer was started with.
         int quality = -1, videoMemory = -1, particles = -1;
         // The video goes over whole: the renderer fits it into its node.

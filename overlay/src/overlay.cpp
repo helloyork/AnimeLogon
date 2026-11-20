@@ -885,6 +885,7 @@ LiveEnd GoLiveOnce(Presenter &presenter, Scenes &scenes, const Options &opt, HIN
     // A scene that follows the sound (audio.*) hears the same, as four smoothed measures.
     const bool componentsListen = withComponents && layer.Listens(), scenesListen = scenes.Listens();
     const bool listening = componentsListen || scenesListen;
+    if (scenesListen) ALOG(L"scene: a scene follows the sound, so the output device is listened to");
     animelogon::AudioCapture capture;
     animelogon::spectrum::Analyzer analyzer;
     animelogon::spectrum::Frame heard;
