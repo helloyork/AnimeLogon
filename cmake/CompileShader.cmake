@@ -1,8 +1,9 @@
-# animelogon_compile_shader(<target> <hlsl> <entry> <profile> <symbol> <header>)
+# animelogon_compile_shader(<target> <hlsl> <entry> <profile> <symbol> <header> [<included file>...])
 #
 # Compiles one HLSL entry point to a C header holding a byte array named <symbol>, using the
 # fxc that ships with the Windows SDK. The header lands in the build directory; the target
-# gets it as a source and its directory on the include path.
+# gets it as a source and its directory on the include path. Files the HLSL includes are listed
+# after the header, so that changing one compiles it again.
 function(animelogon_compile_shader target hlsl entry profile symbol header)
     if(NOT ANIMELOGON_FXC)
         # Prefer the fxc from the SDK this build targets; fall back to the newest installed.
@@ -32,7 +33,7 @@ function(animelogon_compile_shader target hlsl entry profile symbol header)
         OUTPUT "${out}"
         COMMAND "${ANIMELOGON_FXC}" /nologo /T ${profile} /E ${entry} /O3 /Vn ${symbol}
                 /Fh "${out}" "${hlsl}"
-        DEPENDS "${hlsl}"
+        DEPENDS "${hlsl}" ${ARGN}
         COMMENT "fxc ${entry} -> ${header}"
         VERBATIM)
     target_sources(${target} PRIVATE "${out}")

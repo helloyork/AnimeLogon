@@ -10,6 +10,8 @@ animelogon_compile_shader(animelogon_scene_preview ${PROJECT_SOURCE_DIR}/overlay
 animelogon_add_executable(scene SOURCES src/main.cpp src/renderer.cpp src/contract.cpp src/effects.cpp src/particles.cpp src/import.cpp src/texencode.cpp src/lottie.cpp
     DESCRIPTION "AnimeLogon Scene Renderer"
     LIBS d3d11 dxgi dxguid d3dcompiler winmm thorvg directxtex windowscodecs ole32)
+include(shaders/shaders.cmake)
+animelogon_scene_shaders(scene)
 configure_file(src/licenses.rc.in ${CMAKE_CURRENT_BINARY_DIR}/licenses.rc @ONLY)
 target_sources(scene PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/licenses.rc)
 target_include_directories(scene PRIVATE include src

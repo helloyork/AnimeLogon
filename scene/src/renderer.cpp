@@ -2,7 +2,6 @@
 #include "effects.h"
 #include "lottie.h"
 #include "particles.h"
-#include <d3dcompiler.h>
 #include <d3d11shader.h>
 #include <dxgi.h>
 #include <wrl/client.h>
@@ -16,66 +15,16 @@
 #include "animelogon/skin.h"
 #include "animelogon/text.h"
 #include "animelogon/texture.h"
+// The renderer's own shaders (shaders/*.hlsl), compiled when the program is built.
+#include "scene_draw_ps.h"
+#include "scene_draw_vs.h"
+#include "scene_fullscreen_vs.h"
 using Microsoft::WRL::ComPtr;
 namespace animelogon::scene {
 namespace sg = scenegraph;
 namespace {
 constexpr double kPi = 3.14159265358979323846;
 
-// A full-screen triangle for authors' layer shaders; TEXCOORD0 is in the register the contract says.
-constexpr char kFullScreen[] = R"(
-struct V { float2 uv : TEXCOORD0; float4 position : SV_Position; };
-V main(uint id : SV_VertexID) {
-    V v; v.uv = float2((id << 1) & 2, id & 2);
-    v.position = float4(v.uv * float2(2,-2) + float2(-1,1),0,1); return v;
-})";
-
-// Every node is one quad: a unit square carried onto the canvas by an affine transform. The pixel
-// shader takes a texture over the quad, a colour, a gradient, or an offscreen layer pixel for pixel,
-// and a mask over the node's box. Colours leave it premultiplied; the blend state does the rest.
-constexpr char kDrawCommon[] = R"(
-cbuffer Draw : register(b0) {
-    float4 toCanvas0, toCanvas1;      // canvas pixel = (dot(toCanvas0.xyz, (u, v, 1)), dot(toCanvas1.xyz, ...))
-    float4 fromCanvas0, fromCanvas1;  // the box's unit square from a canvas pixel, for a whole-canvas quad
-    float4 canvas;                    // xy: the target's size in pixels
-    float4 sourceRect, maskRect;      // xy: the used part of the texture, as a fraction of it
-    float4 maskMap;                   // the box's unit square from the quad's: xy scale, zw offset
-    float4 color;
-    float4 stops[8];
-    float4 stopAt0, stopAt1;
-    float opacity, mode, useMask, stopCount;
-    float gradient, premultiplied, whole, unused;
-};
-)";
-constexpr char kDrawVertex[] = R"(
-struct V { float2 box : TEXCOORD0; float4 position : SV_Position; };
-V main(uint id : SV_VertexID) {
-    float2 q = float2(id & 1, id >> 1);
-    V v; v.box = q;
-    float2 p = whole > .5 ? q * canvas.xy : float2(dot(toCanvas0.xyz, float3(q, 1)), dot(toCanvas1.xyz, float3(q, 1)));
-    v.position = float4(p / canvas.xy * float2(2, -2) + float2(-1, 1), 0, 1);
-    return v;
-})";
-constexpr char kDrawPixel[] = R"(
-Texture2D<float4> picture : register(t0);
-Texture2D<float4> maskPicture : register(t1);
-SamplerState linearClamp : register(s0);
-float4 main(float2 box : TEXCOORD0, float4 position : SV_Position) : SV_Target {
-    float2 uv = whole > .5 ? float2(dot(fromCanvas0.xyz, float3(position.xy, 1)), dot(fromCanvas1.xyz, float3(position.xy, 1))) : box * maskMap.xy + maskMap.zw;
-    float4 c;
-    if (mode < .5) c = picture.Sample(linearClamp, box * sourceRect.xy);
-    else if (mode < 1.5) c = color;
-    else if (mode < 2.5) {
-        float at[8] = {stopAt0.x, stopAt0.y, stopAt0.z, stopAt0.w, stopAt1.x, stopAt1.y, stopAt1.z, stopAt1.w};
-        float t = gradient < .5 ? box.y : box.x;
-        c = stops[0];
-        for (int i = 1; i < 8; ++i)
-            if (i < stopCount && t > at[i - 1]) c = lerp(stops[i - 1], stops[i], saturate((t - at[i - 1]) / max(1e-5, at[i] - at[i - 1])));
-    } else c = picture.Sample(linearClamp, position.xy / canvas.xy * sourceRect.xy);
-    if (premultiplied < .5) c.rgb *= c.a;
-    if (useMask > .5) c *= any(uv < 0) || any(uv > 1) ? 0 : maskPicture.Sample(linearClamp, uv * maskRect.xy).r;
-    return c * opacity;
-})";
 struct DrawConstants {
     float toCanvas0[4]{}, toCanvas1[4]{}, fromCanvas0[4]{}, fromCanvas1[4]{};
     float canvas[4]{};
@@ -115,13 +64,6 @@ struct Size {
 };
 
 bool Fail(std::wstring *why, const std::wstring &s) { if (why) *why = s; return false; }
-bool Compile(std::string_view source, const char *profile, ComPtr<ID3DBlob> *blob, std::wstring *why) {
-    ComPtr<ID3DBlob> error;
-    const HRESULT hr = D3DCompile(source.data(), source.size(), "scene", nullptr, nullptr, "main", profile,
-                                  D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, blob->ReleaseAndGetAddressOf(), &error);
-    if (FAILED(hr)) return Fail(why, error ? FromUtf8(std::string_view((const char *)error->GetBufferPointer(), std::min<size_t>(error->GetBufferSize(), 1024))) : L"shader compilation failed");
-    return true;
-}
 std::array<float, 4> At(const std::map<std::wstring, std::array<float, 4>> &values, const wchar_t *key) {
     const auto it = values.find(key);
     return it == values.end() ? std::array<float, 4>{} : it->second;
@@ -737,12 +679,10 @@ bool Renderer::Open(ID3D11Device *device, const Files &files, int width, int hei
             const auto &t = s->pictures[a.id];
             s->masks[a.id] = {t.view.Get(), t.u, t.v};
         }
-    ComPtr<ID3DBlob> v, p, full;
-    if (!Compile(std::string(kDrawCommon) + kDrawVertex, "vs_5_0", &v, why) || !Compile(std::string(kDrawCommon) + kDrawPixel, "ps_5_0", &p, why) ||
-        !Compile(kFullScreen, "vs_5_0", &full, why) ||
-        FAILED(device->CreateVertexShader(v->GetBufferPointer(), v->GetBufferSize(), nullptr, &s->drawVs)) ||
-        FAILED(device->CreatePixelShader(p->GetBufferPointer(), p->GetBufferSize(), nullptr, &s->drawPs)) ||
-        FAILED(device->CreateVertexShader(full->GetBufferPointer(), full->GetBufferSize(), nullptr, &s->fullScreenVs)))
+    // Already compiled, so a scene's first frame never waits for the shader compiler.
+    if (FAILED(device->CreateVertexShader(g_scene_draw_vs, sizeof(g_scene_draw_vs), nullptr, &s->drawVs)) ||
+        FAILED(device->CreatePixelShader(g_scene_draw_ps, sizeof(g_scene_draw_ps), nullptr, &s->drawPs)) ||
+        FAILED(device->CreateVertexShader(g_scene_fullscreen_vs, sizeof(g_scene_fullscreen_vs), nullptr, &s->fullScreenVs)))
         return Fail(why, L"cannot create the scene renderer's shaders");
     D3D11_BUFFER_DESC cb{};
     cb.Usage = D3D11_USAGE_DEFAULT; cb.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
